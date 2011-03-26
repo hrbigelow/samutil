@@ -1,0 +1,192 @@
+Module: 
+
+a locus on DNA consisting of a single occurrence of a motif or a
+cluster of motifs fulfilling a clustering criterion.  a module should
+be considered to be a single functional regulatory unit.
+
+
+Module::Functionality
+
+The probability that a given module is functional, in the absense of
+any other information, is P(F|S), where F is a boolean, "is
+functional".  S is the sequence of the candidate locus.  Currently,
+this should just be as follows:
+
+prod_m(P(S_m|F)) / prod_m(P(S_m))
+
+P(S_m|F) := PWM score
+
+or, possibly:
+P(S_m|F) / P(S_m) := PWM score
+
+If the latter, then we need only to combine all PWM scores.
+
+
+P(S|F) = prod_m(P(S_m|F))
+P(S) =   prod_m(P(S_m))
+P(F) = unknown, but fixed across the run.
+
+where S_m denote the sequences of the motifs in the module, S_b denote
+the sequences of all other intercalating sequence.
+
+P(F|S) = P(S|F) * P(F) / P(S)
+
+Note that prod_b(P(S_b)) cancels.
+
+
+
+
+ModuleConservation::Similarity
+
+a score measuring the similarity of two modules.  This will be a
+measure of the sequence similarities of the individual motifs and, if
+the module is a cluster of motifs, some measure of the similarity in
+the relative order and orientation.
+
+How could one interpret the idea that two very different modules could
+have the same probability of being functional?  If we assume that
+"probability of being functional" is the only conserved quantity (what
+seems to be an unreasonable assumption), we would ignore the
+transitional properties of the evolutionary process.  For example,
+even in the face of perfect conservation of function, and thus perfect
+maintainance of overall probability and abundance of modules, the
+evolutionary time elapsed between orthologous regions will give rise
+to different similarities in the module sequences themselves.  This
+measure of similarity is an independent metric from the measure of
+probability of function.
+
+But, is there any reason to suspect that maintainance of function
+should correlate well with similarity?  Yes, in general an argument
+can be made that there is a transition cost to mutations; that even a
+mutation that preserves function risks altering function.  Therefore,
+the more preserved regulatory regions are more likely to be real than
+those not preserved.
+
+So, we need yet another score for the similarity of modules.  It
+should be hierarchical to the similarity of sites and the similarity
+in orientation and relative order.
+
+
+
+
+The evolutionary path from one regulatory sequence to another.
+
+Evolution is capable of introducting point mutations, insertions and
+deletions, to change one DNA sequence to another.  In comparing two
+DNA sequences with a presumed common ancestor, which is a common
+presumption, we take the symmetry argument that A->B/B->A point
+mutation and insertion/deletion are time symmetric phenomena.  Without
+loss of generality, evolution of two such sequences from a common
+ancestor may be viewed as evolution of one to the other; assessment of
+a shortest or most likely path from one to the other should be the
+same regardless of direction taken.
+
+Aside from evolutionary distance, the continuous preservation of
+regulatory functionality is also presumed.  Every snapshot sequence in
+the path from one sequence to the other is presumed to contain a
+functional regulatory sequence; the measure of functionality is the
+probability model we have, and a good evolutionary path should allow
+every snapshot to have "good" probability, at least above a certain
+threshold.
+
+So, a second measure in selecting a best evolutionary path, and thus
+an evolutionary distance between two sequences should take account of
+the probabilities of these snapshots.  Is there a simple way to approximate this?
+
+
+Issues in Module Similarity: 
+
+1.  Since two modules will have 'extra' sites, the relevant comparison
+might better involve just the 'core' sites.  On the other hand, maybe
+the similarity score should scale with the number of sites.  After
+all, the user is just setting a minimum number of each kind of site,
+and this seems to imply the more sites the better.  
+
+2.  Find the best 1-to-1 mapping (bijection) of sites in one module with sites in
+the other.  This will in general leave certain sites out of each
+module, but it is guaranteed to get at least the core sites, since
+both modules are guaranteed to contain the core sites.  
+
+2a.  What is the 'best' bijection?  It is a sum of terms reflecting
+evolutionary changes.  The changes include point mutation, site
+flipping, and site movement.  Relative rearrangement is subsumed as
+site movement and given no special consideration.
+
+2b.  There is the complication that this approach doesn't seem to be
+normalized in a proper sense.  That is, take a set of orthologous
+pairs of modules among two species and plot the Module Similarities
+between them.  Now, take a set of more tightly arranged orthologously
+paired modules that in general have the same evolutionary distance.
+Their similarity scores will in general have a different distribution.
+You must normalize them based on the overall distribution.
+
+This principle holds also for several other types of scores as well.
+
+
+
+
+Calculating a similarity score for a given site-to-site mapping of two modules
+
+Four components to the score:
+1.  permutation score(mapping){
+    
+
+    
+For the motif similarity score, we want to measure the similarity of a pair
+of same-typed motifs, such that the similarities between two pairs may be
+used together in consistent fashion.  To be more precise, if we've specified that 
+a module consist of at least 1 A site and at least 1 B site, then we want the
+following condition to hold:
+
+module X :  A A A B
+module X':  A A A B
+
+module Y :  A A B B
+module Y':  A A B B
+
+Suppose site type A is a 10-mer, while B is a 6-mer.  Suppose further
+that the same level of conservation exists between the ortholog pair
+X,X', and the pair Y,Y', i.e. that the A sites and B sites have had
+the same opportunity and rate of mutation per base is subject to the
+same evolutionary time, and same magnitude of opposing forces of
+conservation and mutation.
+
+Then, we need a similarity score whose distribution will not vary with
+length of site.  Now the question is, will it vary with overall
+conservation of the site?  Suppose we take the case of measuring
+conservation between ttx-3 12-mer site and 14-mer site?  The 14-mer
+site really is just the 12-mer with two very poorly conserved bases
+tacked on to the end.
+
+If we take the percentage of conserved bases as the measure of
+similarity, then the 14-mer will overall be less conserved than the
+12-mer, even though the 'real' quantity of interest, functional
+conservation, is equivalent between the two comparisons.
+
+Why not just use the percent difference in score as the indicator?
+Score does indeed measure conservation in the 'fitness' of the sites,
+but it would be blind to any change in nucleotide that was considered
+equivalent in its contribution to fitness of the site.  This at least
+eliminates the systematic effect of non-conserved bases in the sites.
+But, it results in a loss of information about how many functionally
+important, yet iso-fit nucleotides were conserved or not.
+
+We need a scoring procedure that is in between.  How about the
+per-base absolute value of the score difference, and averaged over the
+whole length of the site?  
+
+
+So, the simplest way to achieve this would be to calculate the
+sequence of scores involving the series of point mutations from the
+query to target sequence.  This is the shortest evolutionary path from
+one to the other, and so has the nice property of being opportunistic.
+
+Another benefit to this approach is it can be performed using existing functions
+of the motifs, or nuc_trie<> class, namely the score() function.
+
+True, the consensus and collection scores will all return the same
+value, and so there will be a similarity value of zero for these, but
+that is consistent with the concept of 'don't care' for consensus
+bases.  Not only do you not care which of 2 (or 3, or 4) bases is
+used, but you don't care whether they are preserved accross putatively
+orthologous sites either.

@@ -1,0 +1,503 @@
+K 25
+svn:wc:ra_dav:version-url
+V 39
+/svn/samutil/!svn/ver/26/trunk/cisortho
+END
+misc.cc
+K 25
+svn:wc:ra_dav:version-url
+V 46
+/svn/samutil/!svn/ver/2/trunk/cisortho/misc.cc
+END
+misc.h
+K 25
+svn:wc:ra_dav:version-url
+V 45
+/svn/samutil/!svn/ver/2/trunk/cisortho/misc.h
+END
+index_trie_scan.cc
+K 25
+svn:wc:ra_dav:version-url
+V 57
+/svn/samutil/!svn/ver/2/trunk/cisortho/index_trie_scan.cc
+END
+genome_index.cc
+K 25
+svn:wc:ra_dav:version-url
+V 54
+/svn/samutil/!svn/ver/2/trunk/cisortho/genome_index.cc
+END
+dnacol.h
+K 25
+svn:wc:ra_dav:version-url
+V 47
+/svn/samutil/!svn/ver/2/trunk/cisortho/dnacol.h
+END
+pwm.cc
+K 25
+svn:wc:ra_dav:version-url
+V 45
+/svn/samutil/!svn/ver/2/trunk/cisortho/pwm.cc
+END
+dna.h
+K 25
+svn:wc:ra_dav:version-url
+V 44
+/svn/samutil/!svn/ver/2/trunk/cisortho/dna.h
+END
+pwm.h
+K 25
+svn:wc:ra_dav:version-url
+V 44
+/svn/samutil/!svn/ver/2/trunk/cisortho/pwm.h
+END
+litestream.cc
+K 25
+svn:wc:ra_dav:version-url
+V 52
+/svn/samutil/!svn/ver/2/trunk/cisortho/litestream.cc
+END
+nuctrie.h
+K 25
+svn:wc:ra_dav:version-url
+V 48
+/svn/samutil/!svn/ver/2/trunk/cisortho/nuctrie.h
+END
+conservation.h
+K 25
+svn:wc:ra_dav:version-url
+V 53
+/svn/samutil/!svn/ver/2/trunk/cisortho/conservation.h
+END
+cluster.cc
+K 25
+svn:wc:ra_dav:version-url
+V 49
+/svn/samutil/!svn/ver/2/trunk/cisortho/cluster.cc
+END
+consensus.h
+K 25
+svn:wc:ra_dav:version-url
+V 50
+/svn/samutil/!svn/ver/2/trunk/cisortho/consensus.h
+END
+diversity_cluster.cc
+K 25
+svn:wc:ra_dav:version-url
+V 59
+/svn/samutil/!svn/ver/2/trunk/cisortho/diversity_cluster.cc
+END
+dnastats.h
+K 25
+svn:wc:ra_dav:version-url
+V 49
+/svn/samutil/!svn/ver/2/trunk/cisortho/dnastats.h
+END
+nested.h
+K 25
+svn:wc:ra_dav:version-url
+V 47
+/svn/samutil/!svn/ver/5/trunk/cisortho/nested.h
+END
+hit.cc
+K 25
+svn:wc:ra_dav:version-url
+V 46
+/svn/samutil/!svn/ver/20/trunk/cisortho/hit.cc
+END
+permutation_collection.h
+K 25
+svn:wc:ra_dav:version-url
+V 63
+/svn/samutil/!svn/ver/2/trunk/cisortho/permutation_collection.h
+END
+diversity_cluster.h
+K 25
+svn:wc:ra_dav:version-url
+V 58
+/svn/samutil/!svn/ver/2/trunk/cisortho/diversity_cluster.h
+END
+specific_cluster.h
+K 25
+svn:wc:ra_dav:version-url
+V 57
+/svn/samutil/!svn/ver/2/trunk/cisortho/specific_cluster.h
+END
+index_trie.cc
+K 25
+svn:wc:ra_dav:version-url
+V 52
+/svn/samutil/!svn/ver/2/trunk/cisortho/index_trie.cc
+END
+qseq2fastq.cc
+K 25
+svn:wc:ra_dav:version-url
+V 52
+/svn/samutil/!svn/ver/2/trunk/cisortho/qseq2fastq.cc
+END
+collection.cc
+K 25
+svn:wc:ra_dav:version-url
+V 52
+/svn/samutil/!svn/ver/2/trunk/cisortho/collection.cc
+END
+mapping.h
+K 25
+svn:wc:ra_dav:version-url
+V 48
+/svn/samutil/!svn/ver/2/trunk/cisortho/mapping.h
+END
+interspersed_regions.cc
+K 25
+svn:wc:ra_dav:version-url
+V 62
+/svn/samutil/!svn/ver/2/trunk/cisortho/interspersed_regions.cc
+END
+collection.h
+K 25
+svn:wc:ra_dav:version-url
+V 51
+/svn/samutil/!svn/ver/2/trunk/cisortho/collection.h
+END
+index_trie_scan.h
+K 25
+svn:wc:ra_dav:version-url
+V 56
+/svn/samutil/!svn/ver/2/trunk/cisortho/index_trie_scan.h
+END
+dnacol.cc
+K 25
+svn:wc:ra_dav:version-url
+V 48
+/svn/samutil/!svn/ver/2/trunk/cisortho/dnacol.cc
+END
+associate_regions.cc
+K 25
+svn:wc:ra_dav:version-url
+V 59
+/svn/samutil/!svn/ver/2/trunk/cisortho/associate_regions.cc
+END
+filter_maq_pileup.cc
+K 25
+svn:wc:ra_dav:version-url
+V 59
+/svn/samutil/!svn/ver/2/trunk/cisortho/filter_maq_pileup.cc
+END
+regulon.txt
+K 25
+svn:wc:ra_dav:version-url
+V 50
+/svn/samutil/!svn/ver/2/trunk/cisortho/regulon.txt
+END
+search.cc
+K 25
+svn:wc:ra_dav:version-url
+V 48
+/svn/samutil/!svn/ver/2/trunk/cisortho/search.cc
+END
+memory.h
+K 25
+svn:wc:ra_dav:version-url
+V 47
+/svn/samutil/!svn/ver/2/trunk/cisortho/memory.h
+END
+regulon.cc
+K 25
+svn:wc:ra_dav:version-url
+V 49
+/svn/samutil/!svn/ver/2/trunk/cisortho/regulon.cc
+END
+pattern.cc
+K 25
+svn:wc:ra_dav:version-url
+V 49
+/svn/samutil/!svn/ver/2/trunk/cisortho/pattern.cc
+END
+regulon.h
+K 25
+svn:wc:ra_dav:version-url
+V 48
+/svn/samutil/!svn/ver/2/trunk/cisortho/regulon.h
+END
+module.txt
+K 25
+svn:wc:ra_dav:version-url
+V 49
+/svn/samutil/!svn/ver/2/trunk/cisortho/module.txt
+END
+region_association.cc
+K 25
+svn:wc:ra_dav:version-url
+V 60
+/svn/samutil/!svn/ver/2/trunk/cisortho/region_association.cc
+END
+region_association.h
+K 25
+svn:wc:ra_dav:version-url
+V 59
+/svn/samutil/!svn/ver/2/trunk/cisortho/region_association.h
+END
+dna_scanning.cc
+K 25
+svn:wc:ra_dav:version-url
+V 54
+/svn/samutil/!svn/ver/2/trunk/cisortho/dna_scanning.cc
+END
+min_score_diversity_cluster.h
+K 25
+svn:wc:ra_dav:version-url
+V 68
+/svn/samutil/!svn/ver/2/trunk/cisortho/min_score_diversity_cluster.h
+END
+fold.h
+K 25
+svn:wc:ra_dav:version-url
+V 45
+/svn/samutil/!svn/ver/2/trunk/cisortho/fold.h
+END
+string_tools.cc
+K 25
+svn:wc:ra_dav:version-url
+V 54
+/svn/samutil/!svn/ver/3/trunk/cisortho/string_tools.cc
+END
+parse_example.h
+K 25
+svn:wc:ra_dav:version-url
+V 54
+/svn/samutil/!svn/ver/2/trunk/cisortho/parse_example.h
+END
+module.h
+K 25
+svn:wc:ra_dav:version-url
+V 47
+/svn/samutil/!svn/ver/2/trunk/cisortho/module.h
+END
+dna_types.h
+K 25
+svn:wc:ra_dav:version-url
+V 50
+/svn/samutil/!svn/ver/2/trunk/cisortho/dna_types.h
+END
+index_trie.h
+K 25
+svn:wc:ra_dav:version-url
+V 51
+/svn/samutil/!svn/ver/2/trunk/cisortho/index_trie.h
+END
+conservation.txt
+K 25
+svn:wc:ra_dav:version-url
+V 55
+/svn/samutil/!svn/ver/2/trunk/cisortho/conservation.txt
+END
+enum.h
+K 25
+svn:wc:ra_dav:version-url
+V 45
+/svn/samutil/!svn/ver/2/trunk/cisortho/enum.h
+END
+region_types.h
+K 25
+svn:wc:ra_dav:version-url
+V 53
+/svn/samutil/!svn/ver/2/trunk/cisortho/region_types.h
+END
+litestream.h
+K 25
+svn:wc:ra_dav:version-url
+V 51
+/svn/samutil/!svn/ver/2/trunk/cisortho/litestream.h
+END
+get_uncovered_regions.cc
+K 25
+svn:wc:ra_dav:version-url
+V 63
+/svn/samutil/!svn/ver/2/trunk/cisortho/get_uncovered_regions.cc
+END
+dnastats.cc
+K 25
+svn:wc:ra_dav:version-url
+V 50
+/svn/samutil/!svn/ver/2/trunk/cisortho/dnastats.cc
+END
+cluster.h
+K 25
+svn:wc:ra_dav:version-url
+V 48
+/svn/samutil/!svn/ver/2/trunk/cisortho/cluster.h
+END
+region.cc
+K 25
+svn:wc:ra_dav:version-url
+V 49
+/svn/samutil/!svn/ver/17/trunk/cisortho/region.cc
+END
+dna_scanning.h
+K 25
+svn:wc:ra_dav:version-url
+V 53
+/svn/samutil/!svn/ver/2/trunk/cisortho/dna_scanning.h
+END
+region.h
+K 25
+svn:wc:ra_dav:version-url
+V 48
+/svn/samutil/!svn/ver/17/trunk/cisortho/region.h
+END
+display_trie.cc
+K 25
+svn:wc:ra_dav:version-url
+V 54
+/svn/samutil/!svn/ver/2/trunk/cisortho/display_trie.cc
+END
+string_tools.h
+K 25
+svn:wc:ra_dav:version-url
+V 53
+/svn/samutil/!svn/ver/2/trunk/cisortho/string_tools.h
+END
+cisortho_funcs.h
+K 25
+svn:wc:ra_dav:version-url
+V 55
+/svn/samutil/!svn/ver/2/trunk/cisortho/cisortho_funcs.h
+END
+cisortho.cc
+K 25
+svn:wc:ra_dav:version-url
+V 50
+/svn/samutil/!svn/ver/2/trunk/cisortho/cisortho.cc
+END
+fasta2cisfasta.cc
+K 25
+svn:wc:ra_dav:version-url
+V 56
+/svn/samutil/!svn/ver/2/trunk/cisortho/fasta2cisfasta.cc
+END
+icisj.cc
+K 25
+svn:wc:ra_dav:version-url
+V 47
+/svn/samutil/!svn/ver/2/trunk/cisortho/icisj.cc
+END
+dna.cc
+K 25
+svn:wc:ra_dav:version-url
+V 45
+/svn/samutil/!svn/ver/9/trunk/cisortho/dna.cc
+END
+enum.cc
+K 25
+svn:wc:ra_dav:version-url
+V 46
+/svn/samutil/!svn/ver/2/trunk/cisortho/enum.cc
+END
+scoring.h
+K 25
+svn:wc:ra_dav:version-url
+V 48
+/svn/samutil/!svn/ver/2/trunk/cisortho/scoring.h
+END
+input_grammar.hpp
+K 25
+svn:wc:ra_dav:version-url
+V 56
+/svn/samutil/!svn/ver/2/trunk/cisortho/input_grammar.hpp
+END
+search.h
+K 25
+svn:wc:ra_dav:version-url
+V 47
+/svn/samutil/!svn/ver/2/trunk/cisortho/search.h
+END
+parse_funcs.hpp
+K 25
+svn:wc:ra_dav:version-url
+V 54
+/svn/samutil/!svn/ver/2/trunk/cisortho/parse_funcs.hpp
+END
+conservation.cc
+K 25
+svn:wc:ra_dav:version-url
+V 54
+/svn/samutil/!svn/ver/2/trunk/cisortho/conservation.cc
+END
+json.h
+K 25
+svn:wc:ra_dav:version-url
+V 45
+/svn/samutil/!svn/ver/2/trunk/cisortho/json.h
+END
+getdna_simple.cc
+K 25
+svn:wc:ra_dav:version-url
+V 55
+/svn/samutil/!svn/ver/2/trunk/cisortho/getdna_simple.cc
+END
+cluster_base.cc
+K 25
+svn:wc:ra_dav:version-url
+V 54
+/svn/samutil/!svn/ver/2/trunk/cisortho/cluster_base.cc
+END
+pileup_histogram.cc
+K 25
+svn:wc:ra_dav:version-url
+V 58
+/svn/samutil/!svn/ver/2/trunk/cisortho/pileup_histogram.cc
+END
+cluster_base.h
+K 25
+svn:wc:ra_dav:version-url
+V 53
+/svn/samutil/!svn/ver/2/trunk/cisortho/cluster_base.h
+END
+pattern.h
+K 25
+svn:wc:ra_dav:version-url
+V 48
+/svn/samutil/!svn/ver/2/trunk/cisortho/pattern.h
+END
+match_trie.h
+K 25
+svn:wc:ra_dav:version-url
+V 51
+/svn/samutil/!svn/ver/2/trunk/cisortho/match_trie.h
+END
+make_dnas_file.cc
+K 25
+svn:wc:ra_dav:version-url
+V 56
+/svn/samutil/!svn/ver/2/trunk/cisortho/make_dnas_file.cc
+END
+permutation_collection.cc
+K 25
+svn:wc:ra_dav:version-url
+V 64
+/svn/samutil/!svn/ver/2/trunk/cisortho/permutation_collection.cc
+END
+nested.cc
+K 25
+svn:wc:ra_dav:version-url
+V 48
+/svn/samutil/!svn/ver/5/trunk/cisortho/nested.cc
+END
+module.cc
+K 25
+svn:wc:ra_dav:version-url
+V 48
+/svn/samutil/!svn/ver/2/trunk/cisortho/module.cc
+END
+hit.h
+K 25
+svn:wc:ra_dav:version-url
+V 44
+/svn/samutil/!svn/ver/2/trunk/cisortho/hit.h
+END
+cisortho_funcs.cc
+K 25
+svn:wc:ra_dav:version-url
+V 56
+/svn/samutil/!svn/ver/2/trunk/cisortho/cisortho_funcs.cc
+END

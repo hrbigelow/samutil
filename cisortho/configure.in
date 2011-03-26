@@ -1,0 +1,65 @@
+dnl Process this file with autoconf to produce a configure script.
+AC_INIT(icisj.cc)
+
+dnl My insertion
+AM_INIT_AUTOMAKE(cisortho, 0.9.1)
+
+dnl Checks for programs.
+AC_PROG_CPP
+AC_PROG_CXX
+AC_PROG_INSTALL
+AC_PROG_LN_S
+AC_PROG_MAKE_SET
+
+
+dnl New Macro to allow user to define a separate build path(s)
+dnl USR="/razor/5/users/bigelow/gaia/usr"
+
+dnl LDFLAGS="$LDFLAGS -L$USR/lib64 -L$USR/local/lib64"
+
+dnl AC_MSG_RESULT(Using CPPFLAGS = $CPPFLAGS)
+
+dnl smr_WITH_BUILD_PATH
+dnl hrb_WITH_LIB_PATH
+dnl hrb_WITH_INC_PATH
+
+AC_MSG_CHECKING([for --enable-debug])
+AC_ARG_ENABLE(debug, [  --enable-debug        pass -ggdb option to compiler instead of -O2],
+					 [ DEBUG="yes" ], [ DEBUG="no" ])
+AC_MSG_RESULT($DEBUG)
+
+AC_MSG_CHECKING([for --enable-profile])
+AC_ARG_ENABLE(profile, [  --enable-profile        pass -pg -p option to compiler instead of -O2],
+					 [ PROFILE="yes" ], [ PROFILE="no" ])
+AC_MSG_RESULT($PROFILE)
+
+AC_MSG_CHECKING([for --enable-stldebug])
+AC_ARG_ENABLE(stldebug, [  --enable-stldebug        uses stlportstlg instead of stlport],
+					 [ STLPDEBUG="yes" ], [ STLPDEBUG="no" ])
+AC_MSG_RESULT($STLPDEBUG)
+
+
+CXXFLAGS=" -Wall"
+
+if test "$DEBUG" = "yes"; then
+   CXXFLAGS=$CXXFLAGS" -g -ggdb -fno-inline"
+else
+   CXXFLAGS=$CXXFLAGS" -O3 -DNDEBUG"
+fi
+
+if test "$PROFILE" = "yes"; then
+   CXXFLAGS=$CXXFLAGS" -pg -g"
+fi
+
+if test "$STLPDEBUG" = "yes"; then
+   CPPFLAGS=$CPPFLAGS" -D_STLP_DEBUG"
+fi
+
+AC_C_CONST
+
+AC_SUBST(LIBS)
+AC_SUBST(INCLUDES)
+
+dnl Checks for library functions.
+
+AC_OUTPUT(Makefile)

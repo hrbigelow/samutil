@@ -1,0 +1,105 @@
+#include <iostream>
+#include <vector>
+#include <getopt.h>
+#include <cstring>
+
+#include "dnacol.h"
+#include "dna_scanning.h"
+#include "dnastats.h"
+#include "dna.h"
+#include "string_tools.h"
+
+#include <unistd.h>
+
+std::string OutfilePrefix;
+std::string DataDirectory;
+std::vector<std::string> Species;
+std::vector<std::string> DNA;
+
+static struct option long_options[] = {
+    {"species-names", required_argument, 0, 'n'},
+    {"sequence-files", required_argument, 0, 's'},
+    {"data-directory", required_argument, 0, 't'},
+    {"outfile-prefix", required_argument, 0, 'o'},
+    {0,0,0,0}
+};
+
+int main(int argc, char ** argv)
+{
+
+    int c;
+    while(1)
+    {
+        int option_index = 0;
+        c = getopt_long(argc, argv, "n:s:t:o:", long_options, &option_index);
+
+        if (c == -1) break;
+
+        switch(c)
+        {
+        case 'n': 
+            Species = split_token(optarg, strlen(optarg), ","); 
+            break;
+        case 's': 
+            DNA = split_token(optarg, strlen(optarg), ","); 
+            break;
+        case 't': 
+            DataDirectory = std::string(optarg); 
+            break;
+        case 'o': 
+            OutfilePrefix = std::string(optarg); 
+            break;
+        default:
+            printf("Usage: make_dnas_file -n <species_names> -s <sequence_files> -t <data_directory>"
+                   "-o <outfile_prefix>\n"
+                   "<species_names>: comma separated list of species names (no spaces)\n"
+                   "<sequence_files>: comma separated list of sequence files (no spaces)\n"
+                   "<data_directory>: directory containing all sequence files\n"
+                   "<outfile_prefix>: prefix on output files\n");
+            exit(1); break;
+      
+        }
+    }
+
+    if (OutfilePrefix.empty())
+    {
+        fprintf(stderr, "Please provide an output file prefix (option -o)\n");
+        exit(53);
+    }
+
+	
+    //parse dna from SequenceFile, build a dna_collection from it
+    if (Species.size() != DNA.size()) 
+    {
+        fprintf(stderr, "You must have the same number of species names as ");
+        fprintf(stderr, "genomic sequence files.\n");
+        exit(53);
+    }
+
+    cis::dna_collection dnac;
+    for (size_t g=0; g < DNA.size(); g++)
+    {
+        try 
+        {
+            printf("Parsing %s genomic sequence file...\n", DNA[g].c_str());
+            dnac.add(Species[g], DataDirectory, DNA[g]);
+        }
+        catch (string &msg)
+        { 
+            fprintf(stderr, "%s", msg.c_str()); return 2; 
+        }
+    }
+
+    dnac.calc_offsets();
+    dnac.open_dnas();
+
+    string dnasrc(OutfilePrefix); 
+    std::ofstream dnafile;
+    dnafile.open(dnasrc.c_str());
+
+    for (cis::DNAS::iterator dnac_it = dnac.begin(); dnac_it != dnac.end(); ++dnac_it) 
+    dnafile<<*(*dnac_it)<<endl;
+    dnafile.close();
+
+    return 0;
+}

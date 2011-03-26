@@ -1,0 +1,110 @@
+This text describes the score assigned to the entire corpus of
+regulatory information associated with two genes: the guide-species
+gene and one of its orthologs.  This score, called the
+ConservedRegulationScore, will be generated for every potential
+ortholog of a guide gene in every species.  Then, the supporting gene
+in each non-guide species with the highest ConservedRegulationScore
+among orthologs in that species will be selected.  Finally, the set of
+selected orthologs will be sorted by ConservedRegulationScore and used
+in best-rank fashion to rank all guide-species genes.
+
+
+ConservedRegulationScore
+
+Properties: 
+
+1.  Expresses the expected # of pairs of conserved functional modules
+as the sum of module-pair probabilities 
+   P(M1 functional)P(M2 functional)P(M1 and M2 are orthologous)
+
+2.  Assumes the approximation that the unique module-to-module mapping
+(which may not involve all modules of each gene) that produces the
+spatial arrangement of sequences with maximal conditional probability
+of conservation is the actual mapping.
+
+3.  Each module-pair probability of functionality and conservation is
+in (a) log space, and (b) in fixed proportion to P(ortho|score)
+
+4.  More-is-better.  All else being equal, a gene-pair with more conserved
+functional modules will score higher.
+
+5.  Only conserved functionality is honored.  All three factors in the
+module-pair probability must be good in order for the overall score to
+be good.  The approach is that, while any one module could look like
+it likely regulates the gene in question, whether it is conserved is
+an independent question.  Similarly, even in the face of high
+conservation, one or both modules need not be viable in terms of
+regulation.  The scoring procedures for both of these are independent.
+
+
+
+
+
+GeneRegulonSimilarity
+
+Seeing as how each gene may have multiple associated modules, there
+are many ways in which the modules associated with two orthologous
+genes can be matched up and pairwise compared.  The
+GeneRegulonSimilirity, or weighted regulatory similarity score is a
+measure of the overall similarity in how two different orthologous
+genes are regulated.  The GeneRegulonSimilirity assumes that a subset
+of modules belonging to each ortholog map one-to-one to each other.
+Given this mapping, there are a set of pairs of regulatory relations,
+which can be compared each by an RegulonSimilarity.  The weighted sum
+of RegulonSimilarities is taken, with the weights being the product of
+the RegulonFunctionalities of each of the two modules.  Since the
+RegulonFunctionalities are probabilities, the product of
+RegulonFunctionalities represents the probability that both Regulons
+are functional, and the weighted sum then represents the expected
+value of the sum of RegulonSimilarities that involve functional
+modules.
+
+
+
+WholeGeneScore
+
+As provided, groups of genes comprise mixed orthology/paralogy
+relationships.  CisOrtho makes the assumption that true orthology
+relationships must be one-to-one between two species.  Implicitly, it
+assumes that among all species analyzed, there is one which is the
+organism of interest, and the rest are used as supporting species for
+conservation analysis.  So, it proceeds as follows:
+
+For each ortholog group OG,
+  For each gene GG in guide species,
+    For each support species SS,
+     
+      Find gene in SS with maximum GeneRegulonSimilirity with GG and
+        add to the set of supporting species.
+
+
+Thus, this produces one or more sets of { (gene1,
+GeneRegulonSimilirity), (gene2, GeneRegulonSimilirity), ... (geneN,
+GeneRegulonSimilirity) } for each guide gene GG in the guide species.
+This list of supporting genes and their regulatory similarities may be
+used in opportunistic rank fashion, taking the best-ranking score in
+its coverage class (class from 1 to N supporting species).
+
+
+Drawbacks: 
+
+The set of one-to-one module relationships found between each pair of
+genes (one guide-species gene and one supporting gene), called a
+bijection, naturally defines an N-jection for a set of N-pairs
+involving the same guide-species gene.  While each bijection is chosen
+to optimize the GeneRegulonSimilirity for that gene pair, the implied
+N-jection, though it optimizes the set of N GeneRegulonSimilirity
+scores, it does not necessarily optimize the remaining
+GeneRegulonSimilirity scores in all (N-1)(N-2)/2 gene pairings *not*
+involving the guide species.
+
+To calculate this optimal N-jection would require a very large search.
+
+However, it should be noted that the RegulonSimilarity measure obeys
+the triangle inequality because it is itself a weighted sum of three
+components that also obey the triangle inequality.
+
+
+
+CGATGCCTAG-------| 25 |---------CGATCGGA------| 78 |-------GCGCAGTAAAA
+......T...-------< 30 >---------....A..T------/Brk /-------,,,,t,,,t,,

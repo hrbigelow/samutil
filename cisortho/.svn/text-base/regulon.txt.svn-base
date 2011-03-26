@@ -1,0 +1,78 @@
+Regulon
+
+Combination of module, associated gene, and descriptors of their
+spatial relationship.  These are the relative region (HEAD, TAIL,
+intron, exon), offset (number of bases away from the start or end of
+the gene).
+
+There is no inherent strandedness of a module, thus there is no sense
+in which the module is on the same or opposite strand as the gene.
+However, what is important in comparisons is whether the optimal
+comparison of putatively orthologous module pair preserves or switches
+strand.  This logic will be used to score the Regulon::Similarity
+
+
+RegulonFunctionality
+
+An estimate, based on heuristic reasoning, of the probability of true
+regulation.  In the Bayesian sense of "sweep nothing under the rug",
+arbitrary rules like "let's only consider modules within 10,000 bases
+of a gene as potential regulators" are expressed in probabilistic
+concept as P(D|F) where D is an integer offset variable (displacement)
+and F is a boolean variable (site is functional).  Here, the
+probability would be 1/10,000 for all values of D between 0 and 10,000
+and true value of F.
+
+Together with P(S|F), we can calculate
+
+P(S,D|F) = P(D|F) * P(S|F).
+
+iff P(S,D,F) = P(S,F)P(D,F)
+
+This is reasonable since there is no reason apriori to suspect that
+the sequence variants in the module itself would be correlated with
+their positioning relative to the gene they regulate.
+
+Then, P(F|S,D) = P(S,D|F) * P(F) / P(S,D)
+               = P(D|F) * P(S|F) * P(F) / [ P(S) * P(D) ]
+
+Should P(D) be uniform?  
+
+
+
+
+
+
+RegulonSimilarity
+
+a score describing the similarity of two regulatory relations
+involving two orthologous genes.  the score should be a weighted
+combination of the module similarity score, the difference in offsets,
+and the difference in relative regions.  More than likely, there will
+be little emphasis paid to the difference in offsets since most
+researchers see that orthologous genes have very different patterns of
+modules...The difference in relative region might be more important,
+though possibly the regulatory probability estimate, which would
+render a zero probability for a lot of 'undesirable' relationships.
+
+
+
+
+Combinatorial search.  
+
+Given two genes in which the fewer number of modules is N, find all
+possible bijections of N modules in each gene with the highest
+GeneRegulonSimilirity.  This will require, for the greater number of
+modules M, M!/(M-N)!  bijections and M*N pre-calculations of summands.
+Since this is a completely manageable number of summands, each
+GeneRegulonSimilirity requires just summing N numbers.  There is
+really no optimization needed here...
+
+
+
+The GeneRegulonSimilirity has two nice properties.  First, it
+disregards weak modules even if they are well conserved.  Second, it
+scales proportionally to the number of modules.
+
+
+

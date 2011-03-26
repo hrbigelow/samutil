@@ -1,0 +1,311 @@
+K 25
+svn:wc:ra_dav:version-url
+V 34
+/svn/samutil/!svn/ver/26/trunk/dep
+END
+base_qual_strand_reader.h
+K 25
+svn:wc:ra_dav:version-url
+V 59
+/svn/samutil/!svn/ver/2/trunk/dep/base_qual_strand_reader.h
+END
+simc.cc
+K 25
+svn:wc:ra_dav:version-url
+V 41
+/svn/samutil/!svn/ver/2/trunk/dep/simc.cc
+END
+slice_sampling.h
+K 25
+svn:wc:ra_dav:version-url
+V 50
+/svn/samutil/!svn/ver/2/trunk/dep/slice_sampling.h
+END
+transformation_trig.h
+K 25
+svn:wc:ra_dav:version-url
+V 55
+/svn/samutil/!svn/ver/2/trunk/dep/transformation_trig.h
+END
+integrands.cc
+K 25
+svn:wc:ra_dav:version-url
+V 47
+/svn/samutil/!svn/ver/2/trunk/dep/integrands.cc
+END
+discomp.cc
+K 25
+svn:wc:ra_dav:version-url
+V 44
+/svn/samutil/!svn/ver/2/trunk/dep/discomp.cc
+END
+alignment_stats.h
+K 25
+svn:wc:ra_dav:version-url
+V 51
+/svn/samutil/!svn/ver/2/trunk/dep/alignment_stats.h
+END
+anomaly.cc
+K 25
+svn:wc:ra_dav:version-url
+V 44
+/svn/samutil/!svn/ver/2/trunk/dep/anomaly.cc
+END
+tools.cc
+K 25
+svn:wc:ra_dav:version-url
+V 42
+/svn/samutil/!svn/ver/2/trunk/dep/tools.cc
+END
+observed_data.h
+K 25
+svn:wc:ra_dav:version-url
+V 49
+/svn/samutil/!svn/ver/2/trunk/dep/observed_data.h
+END
+simulation_tools.h
+K 25
+svn:wc:ra_dav:version-url
+V 52
+/svn/samutil/!svn/ver/2/trunk/dep/simulation_tools.h
+END
+transformation.cc
+K 25
+svn:wc:ra_dav:version-url
+V 51
+/svn/samutil/!svn/ver/2/trunk/dep/transformation.cc
+END
+dep.cc
+K 25
+svn:wc:ra_dav:version-url
+V 40
+/svn/samutil/!svn/ver/2/trunk/dep/dep.cc
+END
+nucleotide_reader.cc
+K 25
+svn:wc:ra_dav:version-url
+V 54
+/svn/samutil/!svn/ver/2/trunk/dep/nucleotide_reader.cc
+END
+nucleotide_reader.h
+K 25
+svn:wc:ra_dav:version-url
+V 53
+/svn/samutil/!svn/ver/2/trunk/dep/nucleotide_reader.h
+END
+anomaly_tools.cc
+K 25
+svn:wc:ra_dav:version-url
+V 50
+/svn/samutil/!svn/ver/2/trunk/dep/anomaly_tools.cc
+END
+pileup_tools.h
+K 25
+svn:wc:ra_dav:version-url
+V 48
+/svn/samutil/!svn/ver/9/trunk/dep/pileup_tools.h
+END
+stats_tools.h
+K 25
+svn:wc:ra_dav:version-url
+V 47
+/svn/samutil/!svn/ver/2/trunk/dep/stats_tools.h
+END
+simulation.cc
+K 25
+svn:wc:ra_dav:version-url
+V 47
+/svn/samutil/!svn/ver/2/trunk/dep/simulation.cc
+END
+error_estimate.h
+K 25
+svn:wc:ra_dav:version-url
+V 50
+/svn/samutil/!svn/ver/2/trunk/dep/error_estimate.h
+END
+hilbert.cc
+K 25
+svn:wc:ra_dav:version-url
+V 44
+/svn/samutil/!svn/ver/2/trunk/dep/hilbert.cc
+END
+dep.mk
+K 25
+svn:wc:ra_dav:version-url
+V 40
+/svn/samutil/!svn/ver/2/trunk/dep/dep.mk
+END
+hilbert.h
+K 25
+svn:wc:ra_dav:version-url
+V 43
+/svn/samutil/!svn/ver/2/trunk/dep/hilbert.h
+END
+bqslocus.cc
+K 25
+svn:wc:ra_dav:version-url
+V 45
+/svn/samutil/!svn/ver/2/trunk/dep/bqslocus.cc
+END
+trig_transformation.cc
+K 25
+svn:wc:ra_dav:version-url
+V 56
+/svn/samutil/!svn/ver/2/trunk/dep/trig_transformation.cc
+END
+alignment_stats.cc
+K 25
+svn:wc:ra_dav:version-url
+V 53
+/svn/samutil/!svn/ver/14/trunk/dep/alignment_stats.cc
+END
+metropolis.cc
+K 25
+svn:wc:ra_dav:version-url
+V 47
+/svn/samutil/!svn/ver/2/trunk/dep/metropolis.cc
+END
+comp.cc
+K 25
+svn:wc:ra_dav:version-url
+V 41
+/svn/samutil/!svn/ver/2/trunk/dep/comp.cc
+END
+metropolis.h
+K 25
+svn:wc:ra_dav:version-url
+V 46
+/svn/samutil/!svn/ver/2/trunk/dep/metropolis.h
+END
+integrands.h
+K 25
+svn:wc:ra_dav:version-url
+V 46
+/svn/samutil/!svn/ver/2/trunk/dep/integrands.h
+END
+observed_data.cc
+K 25
+svn:wc:ra_dav:version-url
+V 50
+/svn/samutil/!svn/ver/2/trunk/dep/observed_data.cc
+END
+tools.h
+K 25
+svn:wc:ra_dav:version-url
+V 41
+/svn/samutil/!svn/ver/2/trunk/dep/tools.h
+END
+bqs2jpd.cc
+K 25
+svn:wc:ra_dav:version-url
+V 44
+/svn/samutil/!svn/ver/2/trunk/dep/bqs2jpd.cc
+END
+test_dirichlet.cc
+K 25
+svn:wc:ra_dav:version-url
+V 51
+/svn/samutil/!svn/ver/2/trunk/dep/test_dirichlet.cc
+END
+dirichlet.cc
+K 25
+svn:wc:ra_dav:version-url
+V 46
+/svn/samutil/!svn/ver/2/trunk/dep/dirichlet.cc
+END
+simp.cc
+K 25
+svn:wc:ra_dav:version-url
+V 41
+/svn/samutil/!svn/ver/2/trunk/dep/simp.cc
+END
+transformation.h
+K 25
+svn:wc:ra_dav:version-url
+V 50
+/svn/samutil/!svn/ver/2/trunk/dep/transformation.h
+END
+nucleotide_stats.cc
+K 25
+svn:wc:ra_dav:version-url
+V 53
+/svn/samutil/!svn/ver/2/trunk/dep/nucleotide_stats.cc
+END
+dirichlet.h
+K 25
+svn:wc:ra_dav:version-url
+V 45
+/svn/samutil/!svn/ver/2/trunk/dep/dirichlet.h
+END
+dep.h
+K 25
+svn:wc:ra_dav:version-url
+V 39
+/svn/samutil/!svn/ver/2/trunk/dep/dep.h
+END
+nucleotide_stats.h
+K 25
+svn:wc:ra_dav:version-url
+V 52
+/svn/samutil/!svn/ver/2/trunk/dep/nucleotide_stats.h
+END
+usage_strings.cc
+K 25
+svn:wc:ra_dav:version-url
+V 50
+/svn/samutil/!svn/ver/2/trunk/dep/usage_strings.cc
+END
+pileup_tools.cc
+K 25
+svn:wc:ra_dav:version-url
+V 49
+/svn/samutil/!svn/ver/9/trunk/dep/pileup_tools.cc
+END
+stats_tools.cc
+K 25
+svn:wc:ra_dav:version-url
+V 48
+/svn/samutil/!svn/ver/2/trunk/dep/stats_tools.cc
+END
+usage_strings.h
+K 25
+svn:wc:ra_dav:version-url
+V 49
+/svn/samutil/!svn/ver/2/trunk/dep/usage_strings.h
+END
+anomaly_tools.h
+K 25
+svn:wc:ra_dav:version-url
+V 49
+/svn/samutil/!svn/ver/2/trunk/dep/anomaly_tools.h
+END
+error_estimate.cc
+K 25
+svn:wc:ra_dav:version-url
+V 51
+/svn/samutil/!svn/ver/2/trunk/dep/error_estimate.cc
+END
+bqs.cc
+K 25
+svn:wc:ra_dav:version-url
+V 40
+/svn/samutil/!svn/ver/2/trunk/dep/bqs.cc
+END
+simulation.h
+K 25
+svn:wc:ra_dav:version-url
+V 46
+/svn/samutil/!svn/ver/2/trunk/dep/simulation.h
+END
+base_qual_strand_reader.cc
+K 25
+svn:wc:ra_dav:version-url
+V 60
+/svn/samutil/!svn/ver/2/trunk/dep/base_qual_strand_reader.cc
+END
+slice_sampling.cc
+K 25
+svn:wc:ra_dav:version-url
+V 51
+/svn/samutil/!svn/ver/2/trunk/dep/slice_sampling.cc
+END

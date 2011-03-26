@@ -1,0 +1,27 @@
+#include <cstdio>
+
+
+int main(){
+
+  const int MAX_LINE=100000;
+  int chunk = 0;
+  char * line = new char[MAX_LINE];
+
+  while (! feof(stdin)){
+
+    scanf("%s", line);
+    if (line[0] == '>'){ // we have a header line
+      ++chunk;
+      if (chunk > 1){ printf("\n"); }
+      printf("%s\n", line);
+    } else {  // print the DNA chunk without a newline
+      printf("%s", line); 
+    }
+  }
+
+  printf ("\n");
+  delete line;
+
+  return 0;
+}
+
