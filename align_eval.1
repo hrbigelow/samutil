@@ -1,0 +1,23 @@
+sort algorithm complexity
+
+'align_eval sort' is a general merge-sort algorithm using an index.
+Its complexity is the following, with the following constants:
+
+N: number of lines to be sorted
+G: number of contigs in the genome
+C: number of chunks
+
+
+
+1.  N * log(G): read through entire file, computing an index from it.
+2.  --: partition the index into quantiles based on file offset (already sorted, nothing to do)
+3.  C * N/C * log(N/C): sorting each chunk by key
+4.  (C-1) *  N/2: partition index into quantiles based on key value
+5.  (C-1) *  N/2: re-partition by offset quantiles
+6.  C * N/C * log(N/C): sort each offset-partition of the index by key
+7.  C * C * N/C: inplace_merge of pieces of each temporary file
+
+(Note: step 7 can have worst-case behavior: C * C * N/C log(N/C)
+
+
+
