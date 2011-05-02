@@ -42,8 +42,8 @@ struct LessTX2Genome
 
 bool ApplyProjectionToSAM(SequenceProjection const& projection,
                           SequenceProjection const& mate_projection,
-                          SamLine * samline);
-
+                          SamLine * first,
+                          SamLine * second);
 
 SequenceProjection InvertProjection(SequenceProjection const& sp);
 
@@ -170,6 +170,7 @@ class ReadSampler
     BufferedFile qual1_buf_file;
     BufferedFile qual2_buf_file;
     char const* qual_buf_fmt;
+    size_t entry_num_lines; // 1 for qseq, 4 for fastq
 
     ReadSampler(LOCUS_SET const& somatic_mutations,
                 char const* q1_file, char const* q2_file,

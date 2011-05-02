@@ -162,6 +162,17 @@ int main(int argc, char **argv)
 
     char score[] = ".";
 
+    //check if empty file
+    char next_char;
+    if ((next_char = fgetc(user_regions_fh)) == EOF)
+    {
+        //do nothing
+    }
+    else
+    {
+        ungetc(next_char, user_regions_fh);
+    }
+
     while (! feof(user_regions_fh))
     {
         if (with_strand)

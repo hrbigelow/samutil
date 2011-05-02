@@ -68,6 +68,7 @@ public:
     char * qual;
     char * tag_string;
     char * extra;
+    char * extra_tag;
 
     SamLine(SAM_PARSE _parse_flag,
             char const* _qname, int _flag, 
@@ -126,6 +127,8 @@ public:
     void print_fastq(FILE * fastq_fh) const;
 
     int alignment_score(char const* tag, int default_if_missing, bool * has_score) const;
+    void add_tag(char const* tag);
+
     size_t aligned_read_length();
     size_t raw_read_length() const { return strlen(this->seq); }
     size_t ones_based_pos() const { return this->pos + 1; }

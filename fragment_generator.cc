@@ -13,8 +13,11 @@ FragmentGenerator::FragmentGenerator()
 
 
 void FragmentGenerator::Initialize(char const* scheme_string,
-                                   char const* expression_file)
+                                   char const* expression_file,
+                                   size_t random_seed)
 {
+    gsl_rng_set(this->rand_gen, random_seed);
+
     FILE * expression_fh = fopen(expression_file, "r");
     if (expression_fh == NULL)
     {

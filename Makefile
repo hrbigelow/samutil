@@ -9,7 +9,8 @@ SOURCES = $(shell find $(srcdir) -name "*.cc")
 
 BIN = shuffle_paired_fastq fastq2fastq union_regions align_eval			\
 	 pretty_plot make_sq_header gtf_annotate_regions					\
-	 filter_reads_for_tophat make_dnas_file fasta2cisfasta split_reads
+	 filter_reads_for_tophat make_dnas_file fasta2cisfasta split_reads	\
+	 scatter_smoothing
 
 BIN += sim
 #BIN += test_cigar
@@ -77,7 +78,8 @@ shuffle_paired_fastq: $(shuffle_paired_fastq_OBJS)
 #	line_tools.o
 #	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^
 
-union_regions: union_regions.o dep/tools.o
+union_regions_OBJS = $(addprefix $(OBJDIR)/, union_regions.o dep/tools.o)
+union_regions: $(union_regions_OBJS)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^
 
 #sam_stats: sam_stats.o sam_stats_raw.o sam_stats_out.o sam_stats_aux.o	\
@@ -99,7 +101,7 @@ sim: $(sim_OBJS)
 
 
 samutil_OBJS = $(addprefix $(OBJDIR)/, samutil.o						\
-	sam_genome_to_transcript.o sam_transcript_to_genome.o dep/tools.o	\
+	sam_transcript_to_genome.o dep/tools.o	\
 	gtf.o cisortho/dna.o sam_score_mapq.o sam_raw_score_aux.o			\
 	align_eval_raw.o sam_raw_score_dist.o cisortho/region.o				\
 	readsim_aux.o file_utils.o sam_buffer.o sam_helper.o cigar_ops.o	\
@@ -178,10 +180,17 @@ make_dnas_file : $(make_dnas_file_OBJS)
 	$(CXX) $(CXXFLAGS) -o $@ $^
 
 
-fasta2cisfasta_OBJS = $(addprefix $(OBJDIR)/, fasta2cisfasta.o dep/tools.o)
+fasta2cisfasta_OBJS = $(addprefix $(OBJDIR)/, fasta2cisfasta.o dep/tools.o file_utils.o)
 
 fasta2cisfasta : $(fasta2cisfasta_OBJS)
-	$(CXX) $(CXXFLAGS) -o $@ $^
+	$(CXX) $(CXXFLAGS) -lz -o $@ $^
+
+
+scatter_smoothing_OBJS = $(addprefix $(OBJDIR)/, \
+	scatter_smoothing.o file_utils.o dep/tools.o cisortho/string_tools.o)
+
+scatter_smoothing : $(scatter_smoothing_OBJS)
+	$(CXX) $(CXXFLAGS) -lz $(LDFLAGS) -o $@ $^
 
 
 -include $(subst .cc,$(OBJDIR)/.d,$(SOURCES))

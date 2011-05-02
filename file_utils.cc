@@ -188,11 +188,16 @@ bool BufferedFile::initialize()
 
 
 
-//
-char * BufferedFile::next_line(bool * advanced_chunk, bool * reloaded_file)
+//return a null-terminated pointer to the next num_lines lines in the
+//buffer, advancing the chunk or rewinding/reloading the file if there
+//are fewer than that remaining.
+char * BufferedFile::next_n_lines(size_t num_lines, bool * advanced_chunk, bool * reloaded_file)
 {
     //is our current line_iter valid?  if not, we need to read another chunk
-    *advanced_chunk = (this->line_iter == this->line_starts.end());
+    size_t lines_left = std::distance(this->line_iter, this->line_starts.end());
+
+    *advanced_chunk = lines_left < num_lines;
+
     if (*advanced_chunk)
     {
         //reading another chunk.  is our chunk_iter valid?
@@ -201,24 +206,49 @@ char * BufferedFile::next_line(bool * advanced_chunk, bool * reloaded_file)
         if (*reloaded_file)
         {
             //if not, we need to reload the file
+            //assume that if the user is requesting num_lines at a time,
+            //the file contains a multiple of num_lines
+            if (lines_left != 0)
+            {
+                fprintf(stderr, "Error: BufferedFile::next_n_lines: %zu lines requested at a time, \n"
+                        "but there are %zu lines left in this file\n", num_lines, lines_left);
+                exit(1);
+            }
             gzrewind(this->fh);
             this->chunk_iter = this->chunk_lengths.begin();
         }
 
         //now, our chunk_iter is valid.  reload the buffer
-        size_t num_bytes_read = gzread(this->fh, this->chunk_buffer, *this->chunk_iter);
+        //carry over the last 'lines_left' into the next buffer
+        //these will be terminated by newlines
+        size_t carry_over = 0;
+        if (lines_left != 0)
+        {
+            carry_over = strlen(*this->line_iter);
+            strcpy(this->chunk_buffer, *this->line_iter);
+        }
+
+        size_t num_bytes_read = 
+            gzread(this->fh, this->chunk_buffer + carry_over, *this->chunk_iter);
+
         assert(num_bytes_read == *this->chunk_iter);
         ++this->chunk_iter;
 
-        this->chunk_buffer[num_bytes_read] = '\0';
+        this->chunk_buffer[num_bytes_read + carry_over] = '\0';
         this->line_starts = FileUtils::find_line_starts(this->chunk_buffer);
         this->line_iter = this->line_starts.begin();
 
         //replace newlines with nulls
         char * line_end = chunk_buffer;
+        size_t nth = 0;
         while ((line_end = strchr(line_end, '\n')) != NULL)
         {
-            *line_end++ = '\0';
+            ++nth;
+            if (nth % num_lines == 0)
+            {
+                *line_end = '\0';
+            }
+            ++line_end;
         }
 
     }
@@ -227,6 +257,8 @@ char * BufferedFile::next_line(bool * advanced_chunk, bool * reloaded_file)
         *reloaded_file = false;
     }
 
-    return *line_iter++;
+    char * lines = *line_iter;
+    line_iter += num_lines;
+    return lines;
     
 }

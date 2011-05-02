@@ -43,7 +43,7 @@ SamLine::SamLine(SAM_PARSE _parse_flag,
                  char const* _tag_string) :
     parse_flag(_parse_flag), flag(_flag), pos(_pos), 
     mapq(_mapq), mpos(_mpos), 
-    isize(_isize), extra(NULL)
+    isize(_isize), extra(NULL), extra_tag(NULL)
 {
     
     assert(strlen(_qual) < 10000);
@@ -258,7 +258,8 @@ bool SamLine::operator<(SamLine const& b) const
 
 SamLine::SamLine(FILE * seqfile, bool sam_is_ones_based, bool allow_absent_seq_qual) :
     bytes_in_line(0), line(NULL), qname(NULL), qid(0), rname(NULL), 
-    cigar(NULL), mrnm(NULL), seq(NULL), qual(NULL), tag_string(NULL), extra(NULL)
+    cigar(NULL), mrnm(NULL), seq(NULL), qual(NULL), tag_string(NULL), extra(NULL),
+    extra_tag(NULL)
 {
     char buf[4096 + 1];
     if (fgets(buf, 4096, seqfile) == NULL)
@@ -275,7 +276,7 @@ SamLine::SamLine(char const* samline_string,
                  bool sam_is_ones_based,
                  bool allow_absent_seq_qual) :
     qname(NULL), qid(0), rname(NULL), cigar(NULL), mrnm(NULL), 
-    seq(NULL), qual(NULL), tag_string(NULL), extra(NULL)
+    seq(NULL), qual(NULL), tag_string(NULL), extra(NULL), extra_tag(NULL)
 {
     this->Init(samline_string, sam_is_ones_based, allow_absent_seq_qual);
 }
@@ -411,6 +412,11 @@ SamLine::~SamLine()
         delete this->extra;
         this->extra = NULL;
     }
+    if (this->extra_tag != NULL)
+    {
+        delete this->extra_tag;
+        this->extra_tag = NULL;
+    }
 }
 
 
@@ -477,6 +483,30 @@ int SamLine::alignment_score(char const* tag, int default_if_missing, bool * has
     }
 }
 
+
+void SamLine::add_tag(char const* tag)
+{
+    if (this->extra_tag == NULL)
+    {
+        //tag_string was previously pointing into this->line
+        this->extra_tag = new char[strlen(this->tag_string) + strlen(tag) + 1];
+        strcpy(this->extra_tag, this->tag_string);
+        this->tag_string = this->extra_tag;
+    }
+    else
+    {
+        //extra_tag already in use.  grow it.
+        char * old_extra_tag = this->extra_tag;
+        this->extra_tag = new char[strlen(this->tag_string) + strlen(tag) + 1];
+        strcpy(this->extra_tag, old_extra_tag);
+        delete old_extra_tag;
+    }
+    if (strlen(this->extra_tag) != 0)
+    {
+        strcat(this->extra_tag, "\t");
+    }
+    strcat(this->extra_tag, tag);
+}
 
 //true if samlines represent sequence mate pairs, regardless of
 //whether they are mapped as such

@@ -11,56 +11,52 @@
 #include "dep/tools.h"
 #include "dep/stats_tools.h"
 
-//modify 'samline's coordinates (pos, rname, cigar, mrnm, mpos)
-//does not handle cases in which mrnm != rname
 
-bool ApplyProjectionToSAM(SequenceProjection const& projection,
+//apply a partial projection to one sam entry in a pair
+//this is a helper function for ApplyProjectionToSAM
+//returns true if projection successfully applied
+bool apply_projection_aux(SequenceProjection const& projection,
                           SequenceProjection const& mate_projection,
                           SamLine * samline)
 {
     bool add_padding = true;
     bool inserts_are_introns = true;
 
-    
+    if (samline->query_unmapped())
+    {
+        return false;
+    }
+
     Cigar::CIGAR_VEC source_to_read = 
         Cigar::FromString(samline->cigar, samline->pos);
 
-    //determine length of unsequenced portion on reference.
-    // size_t read_span_on_source = 
-    //     Cigar::Length(source_to_read.begin(), source_to_read.end(), true);
+    if (! projection.same_strand)
+    {
+        //reverse alignment if necessary.
+        int64_t right_offset = 
+            Cigar::Length(projection.cigar, true) 
+            - Cigar::Length(source_to_read, true);
 
-    // size_t unsequence_portion_length = 
-    //     samline->mpos - (samline->pos + read_span_on_source);
+        assert(right_offset >= 0);
+        source_to_read.push_back(Cigar::Unit(Cigar::D, static_cast<size_t>(right_offset)));
+        std::reverse(source_to_read.begin(), source_to_read.end());
+        int strand_mask = (SamFlags::QUERY_ON_NEG_STRAND | SamFlags::MATE_ON_NEG_STRAND);
+        samline->flag = samline->flag ^ strand_mask;
+        samline->isize = - samline->isize;
+    }
 
-    // size_t pseudo_match = 1;
-    // source_to_read.push_back(Cigar::Unit(Cigar::N, unsequenced_portion_length));
-    // source_to_read.push_back(Cigar::Unit(Cigar::M, pseudo_match));
-    
     Cigar::CIGAR_VEC target_to_read =
         Cigar::TransitiveMerge(projection.cigar, 
                                projection.cigar_index, source_to_read, 
                                ! add_padding, 
                                ! inserts_are_introns);
 
-    //now recover the pseudo match state representing the first base of the target read
-    // size_t projected_mpos = 
-    //     Cigar::Length(target_to_read.begin(), target_to_read.end(), true) - pseudo_match;
-
-    bool mpos_was_projected;
-
-    size_t projected_mpos = 
-        Cigar::ProjectCoord(mate_projection.cigar,
-                            mate_projection.cigar_index, 
-                            samline->mpos, &mpos_was_projected);
-
     Cigar::CIGAR_ITER trimmed_left, trimmed_right;
     Cigar::Trim(target_to_read, false, &trimmed_left, &trimmed_right);
 
     size_t overlap = Cigar::Overlap(trimmed_left, trimmed_right);
 
-    bool fragment_projected = overlap > 0 && mpos_was_projected;
-
-    if (fragment_projected)
+    if (overlap > 0)
     {
         char bufstring[1024];
         Cigar::ToString(trimmed_left, trimmed_right, bufstring);
@@ -76,15 +72,45 @@ bool ApplyProjectionToSAM(SequenceProjection const& projection,
         samline->extra = new char[new_field_size];
         samline->cigar = samline->extra;
         samline->rname = samline->extra + strlen(bufstring) + 1;
-        samline->mrnm = samline->rname + projection.target_dna.size() + 1;
+        samline->mrnm = samline->rname + mate_projection.target_dna.size() + 1;
 
         strcpy(samline->cigar, bufstring);
         samline->pos = Cigar::LeftOffset(target_to_read, true);
         strcpy(samline->rname, projection.target_dna.c_str());
         strcpy(samline->mrnm, mate_projection.target_dna.c_str());
-        samline->mpos = projected_mpos;
     }
-    return fragment_projected;
+    return overlap > 0;
+
+}
+
+
+//modify 'samline's coordinates (pos, rname, cigar, mrnm, mpos)
+//does not handle cases in which mrnm != rname
+
+bool ApplyProjectionToSAM(SequenceProjection const& projection,
+                          SequenceProjection const& mate_projection,
+                          SamLine * first,
+                          SamLine * second)
+{
+    if (AreMappedMatePairs(*first, *second))
+    {
+        bool first_projected = apply_projection_aux(projection, mate_projection, first);
+        bool second_projected = apply_projection_aux(mate_projection, projection, second);
+        
+        first->mpos = second->pos;
+        second->mpos = first->pos;
+        
+        return first_projected && second_projected;
+    }
+    else if (AreUnmappedMatePairs(*first, *second))
+    {
+        return false;
+    }
+    else
+    {
+        fprintf(stderr, "Error: ApplyProjectionToSAM: not mate pairs\n");
+        return false;
+    }
 }
 
 
@@ -220,8 +246,8 @@ LOCUS_SET parse_somatic_mutations(char const* somatic_mutation_file)
 }
 
 
-char const* ReadSampler::fastq_fmt = "@%*s\n%*s\n%*s\n%s";
-char const* ReadSampler::qseq_fmt = "%*s\t%*s\t%*s\t%*s\t%*s\t%*s\t%*s\t%*s\t%*s\t%s";
+char const* ReadSampler::fastq_fmt = "@%*s\n%*s\n%*s\n%s\n";
+char const* ReadSampler::qseq_fmt = "%*s\t%*s\t%*s\t%*s\t%*s\t%*s\t%*s\t%*s\t%*s\t%s\n";
 
 
 
@@ -249,8 +275,8 @@ void ReadSampler::load_paired_quals(char min_median_qual_code)
     for (size_t rnum = 0; rnum != this->num_qual_strings; ++rnum)
     {
 
-        qual1_line = this->qual1_buf_file.next_line(&advanced_chunk1, &reloaded_file1);
-        qual2_line = this->qual2_buf_file.next_line(&advanced_chunk2, &reloaded_file2);
+        qual1_line = this->qual1_buf_file.next_n_lines(this->entry_num_lines, &advanced_chunk1, &reloaded_file1);
+        qual2_line = this->qual2_buf_file.next_n_lines(this->entry_num_lines, &advanced_chunk2, &reloaded_file2);
 
         if (reloaded_file1 != reloaded_file2)
         {
@@ -617,20 +643,22 @@ void ReadSampler::Initialize()
 
     //determine file format
     bool advanced_chunk, reloaded_file;
-    char * test_line1 = this->qual1_buf_file.next_line(&advanced_chunk, &reloaded_file);
-    this->qual2_buf_file.next_line(&advanced_chunk, &reloaded_file);
+    char * test_line1 = this->qual1_buf_file.next_n_lines(4, &advanced_chunk, &reloaded_file);
+    this->qual2_buf_file.next_n_lines(4, &advanced_chunk, &reloaded_file);
 
     char qual[1000];
     size_t fastq_nfields_read = sscanf(test_line1, fastq_fmt, qual);
     size_t qseq_nfields_read = sscanf(test_line1, qseq_fmt, qual);
 
-    if (fastq_nfields_read == 1)
-    {
-        this->qual_buf_fmt = ReadSampler::fastq_fmt;
-    }
-    else if (qseq_nfields_read == 1)
+    if (qseq_nfields_read == 1)
     {
         this->qual_buf_fmt = ReadSampler::qseq_fmt;
+        this->entry_num_lines = 1;
+    }
+    else if (fastq_nfields_read == 1)
+    {
+        this->qual_buf_fmt = ReadSampler::fastq_fmt;
+        this->entry_num_lines = 4;
     }
     else
     {
@@ -800,14 +828,15 @@ ReadSampler::sample_pair(SequenceProjection const& transcript_proj,
         char const* left_read_string = sampling_strand ? "read1" : "read2";
         char const* right_read_string = sampling_strand ? "read2" : "read1";
 
-            sprintf(qname, "%zu:%s:%s:%c:%zu:%s:%s:%s:%c:%zu:%s",
+            sprintf(qname, "%zu:%s:%s:%c:%zu:%s:%s:%s:%c:%zu:%s:fragment_size:%zu",
                     this->read_counter, 
                     left_read_string,
                     target_dna->name.c_str(),
                     left_strand, position1 + 1, cigar_string1,
                     right_read_string,
                     target_dna->name.c_str(),
-                    right_strand, position2 + 1, cigar_string2);
+                    right_strand, position2 + 1, cigar_string2,
+                    isize);
     }
 
     char const* tag_string1 = "";

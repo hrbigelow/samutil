@@ -602,6 +602,7 @@ size_t Cigar::ProjectCoord(Cigar::CIGAR_VEC const& transformation,
                            size_t source_coord,
                            bool * projection_applied)
 {
+
     Cigar::CIGAR_VEC source_cigar(1, Cigar::Unit(Cigar::D, source_coord));
     source_cigar.push_back(Cigar::Unit(Cigar::M, 1));
 

@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 
 #include "samutil.h"
 
@@ -28,7 +29,9 @@ int main(int argc, char *argv[])
     }
     else if (strcmp(argv[1], "genome2tx") == 0)
     {
-        return main_genome_to_transcript(argc - 1, argv + 1);
+        fprintf(stderr, "Sorry, not implemented");
+        exit(1);
+        //return main_genome_to_transcript(argc - 1, argv + 1);
     }
     else if (strcmp(argv[1], "tx2genome") == 0)
     {

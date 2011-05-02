@@ -167,28 +167,6 @@ int main_score_dist(int argc, char ** argv)
 
             PAIRED_READ_SET::const_iterator pit = sam_buffer.unique_entry_pairs.begin();
 
-            CigarFromSimSAMLine((*pit).first->qname, 
-                                (*pit).first->first_read_in_pair(),
-                                ones_based_pos,
-                                &first_guide_coords);
-
-            CigarFromSimSAMLine((*pit).second->qname, 
-                                (*pit).second->first_read_in_pair(),
-                                ones_based_pos,
-                                &second_guide_coords);
-            
-            Cigar::CIGAR_VEC first_guide_cigar = 
-                Cigar::FromString(first_guide_coords.cigar, first_guide_coords.position);
-
-            std::multiset<std::pair<size_t, size_t> > first_guide_cigar_index =
-                Cigar::ComputeOffsets(first_guide_cigar);
-
-            Cigar::CIGAR_VEC second_guide_cigar = 
-                Cigar::FromString(second_guide_coords.cigar, second_guide_coords.position);
-
-            std::multiset<std::pair<size_t, size_t> > second_guide_cigar_index =
-                Cigar::ComputeOffsets(second_guide_cigar);
-
             size_t frag_index = 0;
             for (pit = sam_buffer.unique_entry_pairs.begin();
                  pit != sam_buffer.unique_entry_pairs.end(); ++pit)
@@ -196,6 +174,28 @@ int main_score_dist(int argc, char ** argv)
                 SamLine const* first = (*pit).first;
                 SamLine const* second = (*pit).second;
 
+                CigarFromSimSAMLine(first->qname, 
+                                    first->first_read_in_pair(),
+                                    ones_based_pos,
+                                    &first_guide_coords);
+                
+                CigarFromSimSAMLine(second->qname, 
+                                    second->first_read_in_pair(),
+                                    ones_based_pos,
+                                    &second_guide_coords);
+                
+                Cigar::CIGAR_VEC first_guide_cigar = 
+                    Cigar::FromString(first_guide_coords.cigar, first_guide_coords.position);
+                
+                std::multiset<std::pair<size_t, size_t> > first_guide_cigar_index =
+                    Cigar::ComputeOffsets(first_guide_cigar);
+                
+                Cigar::CIGAR_VEC second_guide_cigar = 
+                    Cigar::FromString(second_guide_coords.cigar, second_guide_coords.position);
+                
+                std::multiset<std::pair<size_t, size_t> > second_guide_cigar_index =
+                    Cigar::ComputeOffsets(second_guide_cigar);
+                
                 size_t first_num_correct_bases = 
                     CountCorrectBases(first, first_guide_coords,
                                       first_guide_cigar,

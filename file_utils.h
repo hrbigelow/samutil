@@ -54,7 +54,7 @@ class BufferedFile
     ~BufferedFile();
     bool initialize();
 
-    char * next_line(bool * advanced_chunk, bool * reloaded_file);
+    char * next_n_lines(size_t num_lines, bool * advanced_chunk, bool * reloaded_file);
 };
 
 #endif // _FILE_UTILS_H

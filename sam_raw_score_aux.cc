@@ -15,8 +15,8 @@ bool ScorePair::operator<(ScorePair const& s) const
 }
 
 
-size_t FragmentScore(size_t top_raw_score, 
-                     size_t sec_raw_score,
+size_t FragmentScore(size_t first_raw_score, 
+                     size_t second_raw_score,
                      size_t missing_score_default,
                      int template_length,
                      size_t min_allowed_template_length,
@@ -25,10 +25,10 @@ size_t FragmentScore(size_t top_raw_score,
     size_t fragment_score;
     if (template_length >= min_allowed_template_length 
         && template_length <= max_allowed_template_length
-        && top_raw_score != missing_score_default
-        && sec_raw_score != missing_score_default)
+        && first_raw_score != missing_score_default
+        && second_raw_score != missing_score_default)
     {
-        fragment_score = top_raw_score + sec_raw_score;
+        fragment_score = first_raw_score + second_raw_score;
     }
     else
     {
@@ -204,16 +204,27 @@ void NextLine(FILE * unscored_sam_fh,
                ? *prev_qid <= samline->qid
                : strcmp(prev_qname, samline->qname) <= 0))
         {
-            fprintf(stderr, "Error: input SAM file not sorted by read_id\n"
+            if (SamLine::numeric_start_fragment_ids)
+            {
+                fprintf(stderr, "Error: input SAM file not sorted by integer field of read_id\n"
+                        "(and you are running in integer read id mode)\n");
+            }
+            else
+            {
+                fprintf(stderr, "Error: input SAM file not sorted by ascii-interpreted read_id.\n"
+                        "Hint: if read ids are sorted by integer beginning, use option -n.\n");
+            }
+            fprintf(stderr, 
                     "Previous query name: %s\n"
                     "Current query name: %s\n",
                     prev_qname, samline->qname);
             exit(1);
         }
 
-        sam_buffer.insert(samline);
         strcpy(prev_qname, samline->qname);
         *prev_qid = samline->qid;
+
+        sam_buffer.insert(samline);
 
         *seen_a_read = true;
 

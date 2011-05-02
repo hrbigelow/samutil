@@ -69,12 +69,13 @@ class SamBuffer
     bool output_is_ones_based;
     bool ignore_duplicate_mapped_pairs;
 
-    //if known, this marks the lowest possible position that any 
+    //if known, this marks the lowest possible contig position that any 
     //new read will have
-    SamLine const* low_bound;
     LessSAMLinePtr less_ordering;
 
  public:
+
+    SamLine const* low_bound;
 
     PAIRED_READ_SET unique_entry_pairs;
     /* SINGLE_READ_SET single_entries_from_pairs; */
@@ -95,7 +96,7 @@ class SamBuffer
     void update_lowbound(SamLine const* _low_bound);
 
     //insert an entry, checking whether it is a duplicate.
-    void insert(SamLine const* entry);
+    bool insert(SamLine const* entry);
 
     //print entries preceding low_bound, and delete them from memory
     //if 'ignore_bound' set, purge all remaining entries

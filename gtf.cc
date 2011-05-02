@@ -42,7 +42,8 @@ bool GTFEntry::get_next_record(FILE * gtf_fh)
     {
         fprintf(stderr, "Error: GTF file doesn't have 9 tab-separated fields\n"
                 "Please see specification at:\n"
-                "http://genome.ucsc.edu/FAQ/FAQformat.html#format4");
+                "http://genome.ucsc.edu/FAQ/FAQformat.html#format4"
+                "Error at this line:\n%s\n", this->line);
         exit(1);
     }
         

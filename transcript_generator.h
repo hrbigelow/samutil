@@ -24,7 +24,7 @@ public:
     void Initialize(char const* transcript_file,
                     char const* feature);
 
-    void GenerateExpression(char const* density_function_string);
+    void GenerateExpression(char const* density_function_string, size_t random_seed);
     void PrintExpression(char const* expression_file);
 
 };

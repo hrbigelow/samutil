@@ -16,7 +16,12 @@ int pretty_plot_graph_usage(size_t ldef)
     fprintf(stderr,
             "\npretty_plot graph [OPTIONS] exons.gtf loci.txt output_exons.txt output_loci.txt\n\n"
             "Options:\n\n"
-            "-l  INT   length for pseudo-introns [%Zu]\n\n",
+            "-l  INT   length for pseudo-introns [%Zu]\n\n"
+            "loci.txt format:\n"
+            "locus_contig locus_start extra_info\n"
+            "exons.gtf contains exon annotation information.   other records with\n"
+            "third field not equal to 'exon' are ignored\n"
+            ,
             ldef
             );
     return 1;

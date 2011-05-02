@@ -38,6 +38,7 @@ struct read_coords
     bool pos_stranded;
     size_t position;
     char cigar[10000];
+    size_t fragment_size;
 };
 
 

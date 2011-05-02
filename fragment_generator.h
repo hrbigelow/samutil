@@ -44,7 +44,8 @@ class FragmentGenerator
     ~FragmentGenerator();
 
     void Initialize(char const* scheme_string,
-                    char const* expression_file);
+                    char const* expression_file,
+                    size_t random_seed);
 
     BOUNDS Sample(unique_transcript const& transcript);
 

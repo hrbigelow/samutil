@@ -36,7 +36,8 @@ int align_eval_raw_usage(size_t qdef)
 {
     fprintf(stderr,
             "Usage:\n\n"
-            "align_eval raw [OPTIONS] alignment_sorted.sam jumps.txt align_stats.{full,by_half,cumul}.txt\n\n"
+            "align_eval raw [OPTIONS] alignment_sorted.sam jumps.txt align_stats.cumul.txt \\\n"
+            "           align_stats.{oplen,fragsize}.{full,by_half}.txt\n\n"
             "Options:\n\n"
             "-q  INT      minimum quality to include alignment[%Zu]\n"
             "-p  FLAG     (primary alignment) if present, require primary alignment.\n"
@@ -122,11 +123,87 @@ void CigarFromSimSAMLine(char const* readname, bool first_in_pair,
                    guide_coords->cigar);
         assert(num_fields == 4);
     }
+    char const* frag_str = strstr(readname, "fragment_size");
+    if (frag_str == NULL)
+    {
+        // fprintf(stderr, "Error: bad format of read name.  See readsim documentation.\n%s\n",
+        //         readname);
+        // exit(1);
+    }
+    else
+    {
+        num_fields = sscanf(frag_str, "fragment_size:%zu", &guide_coords->fragment_size);
+        if (num_fields != 1)
+        {
+            guide_coords->fragment_size = 0;
+            // fprintf(stderr, "Error: bad format of read name.  See readsim documentation.\n%s\n",
+            //         readname);
+            // exit(1);
+        }
+    }
+
     guide_coords->read_id = (guide_coords->fragment_id<<1) + (first_in_pair ? 0 : 1);
     guide_coords->position -= ones_adjust;
     guide_coords->pos_stranded = (strand == '+');
 }
 
+struct guide_used
+{
+    size_t guide;
+    size_t used;
+};
+
+
+void PrintReadSummaries(std::map<size_t, std::vector<size_t> > const& full_dist, 
+                        std::map<size_t, guide_used> const& marginal, 
+                        char const* first_column,
+                        FILE * full_dist_fh,
+                        FILE * halfs_dist_fh)
+{
+    fprintf(full_dist_fh, "#%s\t%s\t%s\t%s\t%s\n", 
+            first_column,
+            "num_bases_correctly_placed",
+            "num_reads_in_category",
+            "total_number_reads_in_category",
+            "total_number_guide");
+    
+    fprintf(halfs_dist_fh, "#%s\t%s\t%s\t%s\t%s\n", 
+            first_column,
+            "num_reads_under_half_correct",
+            "num_reads_over_half_correct",
+            "total_used_by_type",
+            "total_guide_by_type");
+
+    std::map<size_t, std::vector<size_t> >::const_iterator iter;
+    std::map<size_t, guide_used>::const_iterator marg_iter;
+
+    for (iter = full_dist.begin(); iter != full_dist.end(); ++iter)
+    {
+        size_t const category = (*iter).first;
+        marg_iter = marginal.find(category);
+        assert(marg_iter != marginal.end());
+
+        std::vector<size_t> const& dist = (*iter).second;
+        // ncb == num_correct_bases
+        for (size_t ncb = 0; ncb != dist.size(); ++ncb)
+        {
+            fprintf(full_dist_fh, "%Zu\t%Zu\t%Zu\t%Zu\t%Zu\n", 
+                    category, ncb, dist[ncb], 
+                    (*marg_iter).second.used,
+                    (*marg_iter).second.guide);
+        }
+        size_t half = dist.size() / 2;
+        size_t under_half = std::accumulate(dist.begin(), dist.begin() + half, 0);
+        size_t over_half = std::accumulate(dist.begin() + half, dist.end(), 0);
+
+        fprintf(halfs_dist_fh, 
+                "%Zu\t%Zu\t%Zu\t%Zu\t%Zu\n", 
+                category, under_half, over_half,
+                (*marg_iter).second.used,
+                (*marg_iter).second.guide);
+    }
+
+}
 
 
 int main_align_eval_raw(int argc, char ** argv)
@@ -148,7 +225,7 @@ int main_align_eval_raw(int argc, char ** argv)
         }
     }
     
-    int arg_count = optind + 5;
+    int arg_count = optind + 7;
     if (argc != arg_count)
     {
         return align_eval_raw_usage(min_mapping_quality_def);
@@ -156,14 +233,18 @@ int main_align_eval_raw(int argc, char ** argv)
 
     char const* alignment_sam_file = argv[optind];
     char const* output_jumps_file = argv[optind + 1];
-    char const* dist_full_file = argv[optind + 2];
-    char const* dist_by_halfs_file = argv[optind + 3];
-    char const* dist_summary_file = argv[optind + 4];
+    char const* dist_summary_file = argv[optind + 2];
+    char const* oplen_full_file = argv[optind + 3];
+    char const* oplen_halfs_file = argv[optind + 4];
+    char const* frag_full_file = argv[optind + 5];
+    char const* frag_halfs_file = argv[optind + 6];
 
     FILE * alignment_sam_fh = open_if_present(alignment_sam_file, "r");
     FILE * output_jumps_fh = open_if_present(output_jumps_file, "w");
-    FILE * dist_full_fh = open_or_die(dist_full_file, "w", "Output distribution file in full");
-    FILE * dist_by_halfs_fh = open_or_die(dist_by_halfs_file, "w", "Output distribution file by halfs");
+    FILE * oplen_full_fh = open_or_die(oplen_full_file, "w", "Output oplength distribution file in full");
+    FILE * oplen_halfs_fh = open_or_die(oplen_halfs_file, "w", "Output oplength distribution file by halfs");
+    FILE * frag_full_fh = open_or_die(frag_full_file, "w", "Output fragment size distribution file in full");
+    FILE * frag_halfs_fh = open_or_die(frag_halfs_file, "w", "Output fragment size distribution file by halfs");
     FILE * dist_summary_fh = open_or_die(dist_summary_file, "w", "Output distribution summary file");
 
     bool sam_is_ones_based = true;
@@ -218,10 +299,11 @@ int main_align_eval_raw(int argc, char ** argv)
 
     //some statistics on alignment types.  key is cigar string, value is histogram of 
     //bases correctly placed.
-    std::map<size_t, std::vector<size_t> > correct_placed_by_type;
-    std::map<size_t, std::vector<size_t> >::iterator correct_placed_iter;
-    std::map<size_t, size_t> total_guide_by_type;
-    std::map<size_t, size_t> total_used_by_type;
+    std::map<size_t, std::vector<size_t> > accuracy_by_oplen;
+    std::map<size_t, std::vector<size_t> > accuracy_by_fragsize;
+    std::map<size_t, std::vector<size_t> >::iterator accuracy_iter;
+    std::map<size_t, guide_used> total_by_oplen;
+    std::map<size_t, guide_used> total_by_fragsize;
 
     samline = new SamLine(alignment_sam_fh, sam_is_ones_based, allow_absent_seq_qual);
 
@@ -235,7 +317,7 @@ int main_align_eval_raw(int argc, char ** argv)
         assert(num_used_bases == num_correct_bases + num_error_bases + num_trimmed_bases);
         assert(num_total_bases == num_used_bases + num_skipped_bases);
         assert((! require_primary_alignment) || (num_used_bases <= num_guide_bases));
-        assert(! (samline->mapq > 0 && samline->alignment_not_primary()));
+        //assert(! (samline->mapq > 0 && samline->alignment_not_primary()));
 
         // printf("%s\tID: %Zu\tG: %Zu\tT: %Zu\tU:%Zu\tS: %Zu\tC: %Zu\tE: %Zu\tdiff1: %Zi\tdiff2: %Zi\tdiff3: %Zi\n",
         //        samline->qname, guide_coords.read_id,
@@ -323,7 +405,8 @@ int main_align_eval_raw(int argc, char ** argv)
 
         if (! seen_this_read)
         {
-            total_guide_by_type[first_guide_op_len]++;
+            total_by_oplen[first_guide_op_len].guide++;
+            total_by_fragsize[guide_coords.fragment_size].guide++;
 
             feature_bound = guide_offset_iter->second;
             for (Cigar::CIGAR_ITER gi = guide_cigar.begin(); gi != guide_cigar.end(); ++gi)
@@ -382,7 +465,8 @@ int main_align_eval_raw(int argc, char ** argv)
         {
             //using this read
             num_used_bases += this_num_guide_bases;
-            total_used_by_type[first_guide_op_len]++;
+            total_by_oplen[first_guide_op_len].used++;
+            total_by_fragsize[guide_coords.fragment_size].used++;
         }
         
         bool used_this_read = remember_read(guide_coords.read_id, &used_read_ids);
@@ -560,11 +644,17 @@ int main_align_eval_raw(int argc, char ** argv)
             num_skipped_bases += this_num_guide_bases;
         }
 
-        if (correct_placed_by_type.find(first_guide_op_len) == correct_placed_by_type.end())
+        if (accuracy_by_oplen.find(first_guide_op_len) == accuracy_by_oplen.end())
         {
-            correct_placed_by_type[first_guide_op_len] = std::vector<size_t>(this_num_guide_bases + 1);
+            accuracy_by_oplen[first_guide_op_len] = std::vector<size_t>(this_num_guide_bases + 1);
         }
-        correct_placed_by_type[first_guide_op_len][this_num_correct_bases]++;
+        accuracy_by_oplen[first_guide_op_len][this_num_correct_bases]++;
+
+        if (accuracy_by_fragsize.find(guide_coords.fragment_size) == accuracy_by_fragsize.end())
+        {
+            accuracy_by_fragsize[guide_coords.fragment_size] = std::vector<size_t>(this_num_guide_bases + 1);
+        }
+        accuracy_by_fragsize[guide_coords.fragment_size][this_num_correct_bases]++;
 
         assert(num_used_bases == num_correct_bases + num_error_bases + num_trimmed_bases);
         assert(num_total_bases == num_used_bases + num_skipped_bases);
@@ -654,47 +744,16 @@ int main_align_eval_raw(int argc, char ** argv)
         fprintf(dist_summary_fh, "%Zu\t%Zu\t%Zu\n", q, primary_alignment_mapq[q], q_cumul);
     }
 
-    fprintf(dist_full_fh, "#%s\t%s\t%s\t%s\t%s\n", 
-            "first_op_length",
-            "num_bases_correctly_placed",
-            "num_reads_in_category",
-            "total_number_reads_in_category",
-            "total_number_guide");
-    
-    fprintf(dist_by_halfs_fh, "#%s\t%s\t%s\t%s\t%s\n", 
-            "first_op_length",
-            "num_reads_under_half_correct",
-            "num_reads_over_half_correct",
-            "total_used_by_type",
-            "total_guide_by_type");
-    
-    for (correct_placed_iter = correct_placed_by_type.begin();
-         correct_placed_iter != correct_placed_by_type.end();
-         ++correct_placed_iter)
-    {
-        size_t first_guide_op_len = (*correct_placed_iter).first;
-        std::vector<size_t> & dist = (*correct_placed_iter).second;
-        // ncb == num_correct_bases
-        for (size_t ncb = 0; ncb != dist.size(); ++ncb)
-        {
-            fprintf(dist_full_fh, "%Zu\t%Zu\t%Zu\t%Zu\t%Zu\n", 
-                    first_guide_op_len, ncb, dist[ncb], 
-                    total_used_by_type[first_guide_op_len],
-                    total_guide_by_type[first_guide_op_len]);
-        }
-        size_t half = dist.size() / 2;
-        size_t under_half = std::accumulate(dist.begin(), dist.begin() + half, 0);
-        size_t over_half = std::accumulate(dist.begin() + half, dist.end(), 0);
+    PrintReadSummaries(accuracy_by_oplen, total_by_oplen, "first_guide_op_length",
+                       oplen_full_fh, oplen_halfs_fh);
 
-        fprintf(dist_by_halfs_fh, 
-                "%Zu\t%Zu\t%Zu\t%Zu\t%Zu\n", 
-                first_guide_op_len, under_half, over_half,
-                total_used_by_type[first_guide_op_len],
-                total_guide_by_type[first_guide_op_len]);
-    }
+    PrintReadSummaries(accuracy_by_fragsize, total_by_fragsize, "guide_fragment_size",
+                       frag_full_fh, frag_halfs_fh);
 
-    fclose(dist_full_fh);
-    fclose(dist_by_halfs_fh);
+    fclose(oplen_full_fh);
+    fclose(oplen_halfs_fh);
+    fclose(frag_full_fh);
+    fclose(frag_halfs_fh);
     fclose(dist_summary_fh);
 
     return 0;

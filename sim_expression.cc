@@ -7,7 +7,7 @@
 int sim_expression_usage()
 {
     fprintf(stderr,
-            "Usage:\nsim expression density_function_string transcripts.gtf transcript_expression.txt\n\n"
+            "Usage:\nsim expression density_function_string random_seed transcripts.gtf transcript_expression.txt\n\n"
             "transcript_expression.txt output format:\ntranscript_id\tlength\tsimulated_expression\n\n"
             "Supported density function distributions:\n\n%s\n",
             supported_distributions);
@@ -26,7 +26,7 @@ int main_sim_expression(int argc, char **argv)
         }
     }
 
-    int req_args = 3;
+    int req_args = 4;
     int req_arg_count = optind + req_args;
 
     if (argc != req_arg_count)
@@ -35,13 +35,14 @@ int main_sim_expression(int argc, char **argv)
     }
 
     char * density_function = argv[optind];
-    char * transcript_gtf_file = argv[optind + 1];
-    char * transcript_expression_file = argv[optind + 2];
+    size_t random_seed = static_cast<size_t>(atof(argv[optind + 1]));
+    char * transcript_gtf_file = argv[optind + 2];
+    char * transcript_expression_file = argv[optind + 3];
 
     TranscriptGenerator transcript_gen;
     transcript_gen.Initialize(transcript_gtf_file, "exon");
 
-    transcript_gen.GenerateExpression(density_function);
+    transcript_gen.GenerateExpression(density_function, random_seed);
 
     transcript_gen.PrintExpression(transcript_expression_file);
 

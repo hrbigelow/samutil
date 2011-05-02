@@ -85,11 +85,12 @@ SamBuffer::SamBuffer(SAM_ORDER _sam_order,
     output_pairs_as_same_strand(pairs_same_strand),
     output_is_ones_based(output_ones_based),
     ignore_duplicate_mapped_pairs(ignore_dup_maps),
-    low_bound(NULL),
     less_ordering(sam_order),
+    low_bound(NULL),
     unique_entry_pairs(LessSAMLinePair(sam_order)),
     unpaired_entries(LessSAMLinePtr(sam_order))
-{ }
+{ 
+}
 
 
 
@@ -121,14 +122,15 @@ void SamBuffer::update_lowbound(SamLine const* _low_bound)
 
 
 //returns whether successfully stored.  if not stored, deletes entry
-void SamBuffer::insert(SamLine const* entry)
+bool SamBuffer::insert(SamLine const* entry)
 {
+    bool inserted = false;
     if (! entry->paired_in_sequencing())
     {
         std::pair<SINGLE_READ_SET::iterator, bool> insert = 
             this->unpaired_entries.insert(entry);
-        
         assert(insert.second);
+        inserted = true;
     }
     else
     {
@@ -154,7 +156,9 @@ void SamBuffer::insert(SamLine const* entry)
         SINGLE_READ_ID_MSET::iterator unpaired_iter = yet_unpaired_range.first;
         SINGLE_READ_ID_MSET::iterator unpaired_next_iter = unpaired_iter;
 
-        //go through each unpaired entry that is a possible match
+        //go through each unpaired entry that is a possible match.
+        //policy:  once a match is found, record it and break from the loop.
+        //any other possible matches will be searched by subsequent suitors
         while (unpaired_iter != yet_unpaired_range.second)
         {
             SamLine const* yet_unpaired_entry = *unpaired_iter;
@@ -165,110 +169,70 @@ void SamBuffer::insert(SamLine const* entry)
             bool is_unmapped_mate_pair = AreUnmappedMatePairs(*entry, *yet_unpaired_entry);
             if (is_mapped_mate_pair || is_unmapped_mate_pair)
             {
-                if (mate_found)
+                mate_found = true;
+
+                bool unpaired_iter_is_leftmost = less_entry_matepair(yet_unpaired_entry, entry);
+                SamLine const* left = unpaired_iter_is_leftmost ? yet_unpaired_entry : entry;
+                SamLine const* right = unpaired_iter_is_leftmost ? entry : yet_unpaired_entry;
+                assert(left != right);
+                
+                //now, in accordance with sam format spec
+                if (left->isize < 0 || right->isize > 0)
                 {
-                    if (is_mapped_mate_pair)
-                    {
-                        if (this->ignore_duplicate_mapped_pairs)
-                        {
-                            this->yet_unpaired_entries.erase(unpaired_iter);
-                            duplicate_pair_found = true;
-                            //assume the duplicate mapped pair is
-                            //properly paired, and discard both
-                            //without trying to find another mate
-                            break;
-                        }
-                        else
-                        {
-                            fprintf(stderr, 
-                                    "Error: SamBuffer::insert: found duplicate "
-                                    "mapped mate pairs for read %s\n", entry->qname);
-                            exit(1);
-                        }
-                    }
-                    else
-                    {
-                        //found a duplicate unmapped mate pair.
-                        //assume that it is simply a duplicate because
-                        //there is insufficient information to
-                        //distinguish its exact mate from the mate of
-                        //another.  pretend you didn't see it, so that
-                        //it is left there for another unmapped pair
-                        //to pair up with
-                    }
+                    bool unpaired_iter_is_leftmost = less_entry_matepair(yet_unpaired_entry, entry);
+                    fprintf(stderr, "SAM format error: inappropriate 'isize' fields.  Should be "
+                            "positive for left and negative for right-most reads\n"
+                            "Entries:\n");
+                    left->print(stderr, true);
+                    right->print(stderr, true);
+                    exit(1);
+                }
+                
+                std::pair<PAIRED_READ_SET::const_iterator, bool> insert_success = 
+                    this->unique_entry_pairs.insert(std::make_pair(left, right));
+                
+                if (insert_success.second)
+                {
+                    //successfully inserted the pair together.
+                    inserted = true;
+                    this->yet_unpaired_entries.erase(unpaired_iter);
                 }
                 else
                 {
-                    //mate not yet found.  continue searching
-                    bool unpaired_iter_is_leftmost = less_entry_matepair(yet_unpaired_entry, entry);
-                    SamLine const* left = unpaired_iter_is_leftmost ? yet_unpaired_entry : entry;
-                    SamLine const* right = unpaired_iter_is_leftmost ? entry : yet_unpaired_entry;
-                    assert(left != right);
-                
-                    //now, in accordance with sam format spec
-                    if (left->isize < 0 || right->isize > 0)
+                    //this entry reveals that it and its mate
+                    //create a duplicate read pair in the set of
+                    //unique_entry_pairs.  it is entirely
+                    //redundant but harmless information; simply
+                    //ignore it.
+                    if (this->low_bound == yet_unpaired_entry)
                     {
-                        bool unpaired_iter_is_leftmost = less_entry_matepair(yet_unpaired_entry, entry);
-                        fprintf(stderr, "SAM format error: inappropriate 'isize' fields.  Should be "
-                                "positive for left and negative for right-most reads\n"
-                                "Entries:\n");
-                        left->print(stderr, true);
-                        right->print(stderr, true);
-                        exit(1);
+                        //we want to then set the low bound to the SamLine
+                        //that represents the pre-existing duplicate SamLine
+                        //that the low_bound was previously set to.
+                        this->low_bound = unpaired_iter_is_leftmost ?
+                            (*insert_success.first).first :
+                            (*insert_success.first).second;
+                        assert(! less_entry_matepair(this->low_bound, yet_unpaired_entry));
+                        assert(! less_entry_matepair(yet_unpaired_entry, this->low_bound));
+                        
                     }
-
-                    std::pair<PAIRED_READ_SET::const_iterator, bool> insert_success = 
-                        this->unique_entry_pairs.insert(std::make_pair(left, right));
-
-                    if (insert_success.second)
-                    {
-                        //successfully inserted the pair together.  do not test further
-                        //because we want to allow 
-                        mate_found = true;
-                        this->yet_unpaired_entries.erase(unpaired_iter);
-                        break;
-                    }
-                    else
-                    {
-                        //this entry reveals that it and its mate create a
-                        //duplicate read pair.
-                        if (this->low_bound == yet_unpaired_entry)
-                        {
-                            //we want to then set the low bound to the SamLine
-                            //that represents the pre-existing duplicate SamLine
-                            //that the low_bound was previously set to.
-                            this->low_bound = unpaired_iter_is_leftmost ?
-                                (*insert_success.first).first :
-                                (*insert_success.first).second;
-                            assert(! less_entry_matepair(this->low_bound, yet_unpaired_entry));
-                            assert(! less_entry_matepair(yet_unpaired_entry, this->low_bound));
-
-                        }
-                        delete yet_unpaired_entry;
-                        this->yet_unpaired_entries.erase(unpaired_iter);
-                        duplicate_pair_found = true;
-                        mate_found = false;
-                    }                    
+                    this->yet_unpaired_entries.erase(unpaired_iter);
+                    delete yet_unpaired_entry;
+                    assert(entry != this->low_bound);
+                    delete entry;
                 }
+                break;
             }
             unpaired_iter = unpaired_next_iter;
         }
-
-
-        if (duplicate_pair_found)
+        if (! mate_found)
         {
-            assert(entry != this->low_bound);
-            delete entry;
-        }
-        else
-        {
-            if (! mate_found)
-            {
-                //treat as yet unpaired
-                this->yet_unpaired_entries.insert(entry);
-            }
+            //treat as yet unpaired
+            this->yet_unpaired_entries.insert(entry);
+            inserted = true;
         }
     }
+    return inserted;
 }
 
 /*
@@ -288,15 +252,17 @@ void SamBuffer::purge(FILE * output_sam_fh,
     PAIRED_READ_SET::const_iterator paired_bound;
     SINGLE_READ_SET::const_iterator single_bound;
     SINGLE_READ_SET::const_iterator unpaired_bound;
+    SINGLE_READ_ID_MSET::const_iterator yet_unpaired_bound;
 
     SamLine const* temp_low_bound = this->low_bound;
 
     if (ignore_bound)
     {
-        //at the end of input, consider the bound to be infinite
         paired_bound = this->unique_entry_pairs.end();
         // single_bound = this->single_entries_from_pairs.end();
         unpaired_bound = this->unpaired_entries.end();
+        yet_unpaired_bound = this->yet_unpaired_entries.end();
+
         this->low_bound = NULL;
     }
 
@@ -304,17 +270,26 @@ void SamBuffer::purge(FILE * output_sam_fh,
     {
         //pay attention to the bound that is set.  why wouldn't we want to purge in
         //the same order as the SamBuffer was specified?
+        if (this->low_bound == NULL)
+        {
+            //do not purge anything if low_bound is NULL
+            paired_bound = this->unique_entry_pairs.begin();
+            unpaired_bound = this->unpaired_entries.begin();
+            yet_unpaired_bound = this->yet_unpaired_entries.begin();
+        }
+        else
+        {
+            paired_bound =
+                this->unique_entry_pairs.lower_bound
+                (std::make_pair(this->low_bound, this->low_bound));
+            
+            unpaired_bound =
+                this->unpaired_entries.lower_bound(this->low_bound);
 
-        //bool use_ids = true;
+            yet_unpaired_bound = 
+                this->yet_unpaired_entries.lower_bound(this->low_bound);
 
-        paired_bound =
-            this->unique_entry_pairs.lower_bound
-            (std::make_pair(this->low_bound, this->low_bound));
-
-        unpaired_bound =
-            std::lower_bound(this->unpaired_entries.begin(), 
-                             this->unpaired_entries.end(),
-                             this->low_bound);
+        }
     }
 
     if (output_first_fastq_fh != NULL)
@@ -342,8 +317,6 @@ void SamBuffer::purge(FILE * output_sam_fh,
     {
         SamLine const* first = (*pair_iter).first;
         SamLine const* second = (*pair_iter).second;
-        // pair_iter_copy = pair_iter;
-        // ++pair_iter; // so this will be valid!
 
         if (output_sam_fh != NULL)
         {
@@ -358,7 +331,6 @@ void SamBuffer::purge(FILE * output_sam_fh,
         
         delete first;
         delete second;
-        // this->unique_entry_pairs.erase(pair_iter_copy);
     }
 
     //fprintf(stderr, "unique_read_pairs.size(): %Zu ...", this->unique_read_pairs.size());
@@ -381,6 +353,7 @@ void SamBuffer::purge(FILE * output_sam_fh,
         }
         
         assert(*read_iter != this->low_bound);
+        assert(this->yet_unpaired_entries.find(cur_read) == this->yet_unpaired_entries.end());
         delete cur_read;
     }
     //fprintf(stderr, "unpaired_entries.size(): %Zu ...", this->unpaired_entries.size());
@@ -395,7 +368,7 @@ void SamBuffer::purge(FILE * output_sam_fh,
 
     iter_next = this->yet_unpaired_entries.begin();
 
-    while (iter_next != this->yet_unpaired_entries.end())
+    while (iter_next != yet_unpaired_bound)
     {
 
         unpaired_iter = iter_next;
@@ -431,4 +404,18 @@ void SamBuffer::purge(FILE * output_sam_fh,
             exit(1);
         }
     }
+
+    if (output_sam_fh != NULL)
+    {
+        fflush(output_sam_fh);
+    }
+    if (output_first_fastq_fh != NULL)
+    {
+        fflush(output_first_fastq_fh);
+    }
+    if (output_second_fastq_fh != NULL)
+    {
+        fflush(output_second_fastq_fh);
+    }
+
 }

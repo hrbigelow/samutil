@@ -72,8 +72,11 @@ char const* supported_distributions =
     "tln:%%f,%%f,%%f   (truncated log-normal) fraction_expressed, zeta, sigma\n";
 
 
-void TranscriptGenerator::GenerateExpression(char const* density_function_string)
+void TranscriptGenerator::GenerateExpression(char const* density_function_string,
+                                             size_t random_seed)
 {
+    gsl_rng_set(this->rand_gen, random_seed);
+
     std::set<TranscriptInfo const*>::const_iterator it;
 
     double zeta;

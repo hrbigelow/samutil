@@ -9,6 +9,8 @@
 #include "dep/tools.h"
 
 #include <gsl/gsl_statistics_double.h>
+#include <gsl/gsl_permutation.h>
+#include <gsl/gsl_permute_uint.h>
 
 int score_mapq_usage(float fdef)
 {
@@ -35,6 +37,18 @@ int score_mapq_usage(float fdef)
 
 typedef std::map<size_t, int> TABLE;
 typedef std::map<ScorePair, TABLE> SCORE_CPD;
+
+
+struct ScoreOrder
+{
+    bool increasing;
+    ScoreOrder(bool _inc = true) : increasing(_inc) { }
+    bool operator()(size_t a, size_t b)
+    {
+        return this->increasing ? a < b : b < a;
+    }
+};
+
 
 int main_score_mapq(int argc, char ** argv)
 {
@@ -130,11 +144,13 @@ int main_score_mapq(int argc, char ** argv)
     fclose (score_calibration_fh);
 
     //key raw_score sum.  value:  histogram of template lengths
-    typedef std::map<size_t, size_t, std::greater<size_t> > HISTO; // general histogram
-    typedef std::map<size_t, HISTO, std::greater<size_t> > LENGTH_HISTO_BY_SCORE; // key: score, value: length histo
+    typedef std::map<size_t, size_t, ScoreOrder> HISTO; // general histogram
+    typedef std::map<size_t, HISTO, ScoreOrder> LENGTH_HISTO_BY_SCORE; // key: score, value: length histo
 
-    LENGTH_HISTO_BY_SCORE length_counts;
-    HISTO score_totals;
+    //initialize these so that the best scores are at the beginning.
+    bool increasing_order = ! larger_is_better;
+    LENGTH_HISTO_BY_SCORE length_counts = LENGTH_HISTO_BY_SCORE(ScoreOrder(increasing_order));
+    HISTO score_totals = HISTO(ScoreOrder(increasing_order));
 
     size_t total_fragments;
 
@@ -155,7 +171,7 @@ int main_score_mapq(int argc, char ** argv)
 
     bool ignore_duplicate_mapped_pairs = true;
 
-    SamBuffer sam_buffer(sam_order,
+    SamBuffer tally_buffer(sam_order,
                          paired_reads_are_same_stranded,
                          ones_based_pos,
                          ignore_duplicate_mapped_pairs);
@@ -167,23 +183,24 @@ int main_score_mapq(int argc, char ** argv)
     std::vector<size_t> fragment_scores;
     std::vector<size_t>::iterator fit;
 
+    //tally fragment length and raw score statistics
     while (! feof(unscored_sam_fh))
     {
 
-        NextLine(unscored_sam_fh, sam_buffer, ones_based_pos, allow_absent_seq_qual,
+        NextLine(unscored_sam_fh, tally_buffer, ones_based_pos, allow_absent_seq_qual,
                  &new_fragment, &ignore_sambuffer_bound,
                  &seen_a_read, prev_qname, &prev_qid);
 
         if (new_fragment)
         {
             ScorePair score_pair = 
-                FindTopTwoScores(sam_buffer, 0, SIZE_MAX, score_tag, missing_score_default, 
+                FindTopTwoScores(tally_buffer, 0, SIZE_MAX, score_tag, missing_score_default, 
                                  larger_is_better, & fragment_scores);
 
             fit = max_element(fragment_scores.begin(), fragment_scores.end());
 
             size_t max_pair_score = *fit;
-            PAIRED_READ_SET::const_iterator mpit = sam_buffer.unique_entry_pairs.begin();
+            PAIRED_READ_SET::const_iterator mpit = tally_buffer.unique_entry_pairs.begin();
             std::advance(mpit, std::distance(fragment_scores.begin(), fit));
 
             assert((*mpit).first->isize >= 0);
@@ -191,10 +208,12 @@ int main_score_mapq(int argc, char ** argv)
             length_counts[max_pair_score][template_length]++;
             score_totals[max_pair_score]++;
             total_fragments++;
-            sam_buffer.purge(NULL, NULL, NULL, ignore_sambuffer_bound);
+            tally_buffer.purge(NULL, NULL, NULL, ignore_sambuffer_bound);
         }
     }
     rewind(unscored_sam_fh);
+
+    //at this point, tally_buffer should be spent
 
     //select the top-scoring N% of fragments as a heuristic proxy for 'correctly aligned' fragments
     size_t partial_sum = 0;
@@ -239,20 +258,29 @@ int main_score_mapq(int argc, char ** argv)
     TABLE empty_table;
 
     PrintSAMHeader(&unscored_sam_fh, scored_sam_fh);
+    fflush(scored_sam_fh);
+
 
     prev_qid = 0;
     strcpy(prev_qname, "");
     seen_a_read = false;
 
+
+    SamBuffer cal_buffer(sam_order,
+                         paired_reads_are_same_stranded,
+                         ones_based_pos,
+                         ignore_duplicate_mapped_pairs);
+    
+
     while (! feof(unscored_sam_fh))
     {
-        NextLine(unscored_sam_fh, sam_buffer, ones_based_pos, allow_absent_seq_qual,
+        NextLine(unscored_sam_fh, cal_buffer, ones_based_pos, allow_absent_seq_qual,
                  &new_fragment, &ignore_sambuffer_bound,
                  &seen_a_read, prev_qname, &prev_qid);
 
         if (new_fragment)
         {
-            score_pair = FindTopTwoScores(sam_buffer,
+            score_pair = FindTopTwoScores(cal_buffer,
                                           min_allowed_fragment_length,
                                           max_allowed_fragment_length,
                                           score_tag,
@@ -274,14 +302,25 @@ int main_score_mapq(int argc, char ** argv)
             }
             TABLE const& this_score_table = *table_ptr;
             
-            //4. apply table to each fragment, updating its mapq
+            //4. apply table to each fragment, updating its mapq and HI tag field
             size_t si = 0;
-            for (pit = sam_buffer.unique_entry_pairs.begin();
-                 pit != sam_buffer.unique_entry_pairs.end(); ++pit)
+
+            //use std::greater because mapq is defined as 'higher-is-better', and
+            //rank is defined as 'lower-is-better'
+            std::multimap<int, size_t, std::greater<int> > mapqs;
+            std::multimap<int, size_t, std::greater<int> >::const_iterator mit;
+
+            size_t N = cal_buffer.unique_entry_pairs.size();
+
+            uint * ranks = new uint[N];
+            gsl_permutation * perm = gsl_permutation_calloc(N);
+
+            for (pit = cal_buffer.unique_entry_pairs.begin();
+                 pit != cal_buffer.unique_entry_pairs.end(); ++pit)
             {
                 SamLine * first = const_cast<SamLine *>((*pit).first);
                 SamLine * second = const_cast<SamLine *>((*pit).second);
-                table_iter = this_score_table.find(fragment_scores[si++]);
+                table_iter = this_score_table.find(fragment_scores[si]);
                 if (table_iter == this_score_table.end())
                 {
                     new_mapq = missing_score_default;
@@ -293,8 +332,46 @@ int main_score_mapq(int argc, char ** argv)
                 first->mapq = new_mapq;
                 second->mapq = new_mapq;
                 
+                mapqs.insert(std::make_pair(first->mapq, si));
+                ranks[si] = static_cast<uint>(si);
+                ++si;
             }
-            sam_buffer.purge(scored_sam_fh, NULL, NULL, false);
+
+            for (mit = mapqs.begin(), si = 0; mit != mapqs.end(); ++mit)
+            {
+                perm->data[(*mit).second] = si;
+                ++si;
+            }
+
+            gsl_permute_uint(perm->data, ranks, 1, N);
+
+            char tag_template[20];
+            si = 0;
+            for (pit = cal_buffer.unique_entry_pairs.begin();
+                 pit != cal_buffer.unique_entry_pairs.end(); ++pit)
+            {
+                sprintf(tag_template, "HI:i:%u", ranks[si] + 1);
+                SamLine * first = const_cast<SamLine *>((*pit).first);
+                SamLine * second = const_cast<SamLine *>((*pit).second);
+                first->add_tag(tag_template);
+                second->add_tag(tag_template);
+                if (ranks[si] == 0 && first->mapped_in_proper_pair())
+                {
+                    //alignment is primary
+                    first->flag &= ~SamFlags::ALIGNMENT_NOT_PRIMARY;
+                    second->flag &= ~SamFlags::ALIGNMENT_NOT_PRIMARY;
+                }
+                else
+                {
+                    first->flag |= SamFlags::ALIGNMENT_NOT_PRIMARY;
+                    second->flag |= SamFlags::ALIGNMENT_NOT_PRIMARY;
+                }
+                ++si;
+            }   
+         
+            cal_buffer.purge(scored_sam_fh, NULL, NULL, false);
+            delete ranks;
+            gsl_permutation_free(perm);
         }
         else
         {

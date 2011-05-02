@@ -82,15 +82,16 @@ int sim_reads_usage(char const* ddef, size_t ldef,
            
     fprintf(stderr,
             "read id format is the following:\n\n"
-            "id:read1:D:S:P:C[,D:S:P:C]+:read2:D:S:P:C[,D:S:P:C]+\n\n"
+            "id:read1:D:S:P:C[,D:S:P:C]+:read2:D:S:P:C[,D:S:P:C]+:fragment_size:F\n\n"
             "where\n"
             "D = dna name or contig name\n"
             "S = strand [+ or -]\n"
             "P = start position, (where first base on a contig is 1)\n"
-            "C = CIGAR string for this read only\n\n"
+            "C = CIGAR string for this read only\n"
+            "F = positive integer fragment size\n\n"
             "Any remaining alignment blocks not on the same 'D' (contig) may be appended with commas.\n"
             "For example:\n\n"
-            "1:read1:chr1:+:10592:50M:read2:chr1:-:10792:50M\n"
+            "1:read1:chr1:+:10592:50M:read2:chr1:-:10792:50M:fragment_size:150\n"
             );
     return 1;
 }
@@ -302,7 +303,10 @@ int main_sim_reads(int argc, char ** argv)
     parse_somatic_mutations(somatic_mutation_file);
 
     const bool do_reverse_second_quals = true;
-    const bool flip_query_strand_flag = false;
+
+    bool paired_reads_are_same_stranded = false;
+    bool output_is_ones_based = true;
+    bool ignore_duplicate_mapped_pairs = true;
 
     ReadSampler read_sampler(somatic_mutations, qual_file1, qual_file2,
                              read_length, zero_quality_code,
@@ -321,7 +325,7 @@ int main_sim_reads(int argc, char ** argv)
     bool do_simulate_errors = read_sampler.qual1_buf_file.valid;
 
     FragmentGenerator frag_generator;
-    frag_generator.Initialize(read_sampling_scheme, expression_file);
+    frag_generator.Initialize(read_sampling_scheme, expression_file, random_seed);
 
     if (frag_generator.fragment_length_min < read_length)
     {
@@ -388,10 +392,10 @@ int main_sim_reads(int argc, char ** argv)
     if (do_paired_end)
     {        
         //CIGAR to describe the relationship between genome dna and matepair
-        PAIRED_READ_SET sam_buffer(sam_pair_less_fcn);
-        
-        PAIRED_READ_INS sam_buffer_ins;
-        PAIRED_READ_SET::iterator low_bound;
+        SamBuffer sam_buffer(sam_order, 
+                             paired_reads_are_same_stranded, 
+                             output_is_ones_based,
+                             ignore_duplicate_mapped_pairs);
 
         for (std::set<SequenceProjection>::const_iterator 
              sp_it = tx_to_genome.begin(); sp_it != tx_to_genome.end(); ++sp_it)
@@ -466,12 +470,12 @@ int main_sim_reads(int argc, char ** argv)
                                                      do_simulate_errors,
                                                      do_sample_sense_strand);
                 
-                sam_buffer_ins = sam_buffer.insert(read_pair);
-                
-                if (! sam_buffer_ins.second)
+                bool first_inserted = sam_buffer.insert(read_pair.first);
+                assert(first_inserted);
+
+                bool second_inserted = sam_buffer.insert(read_pair.second);
+                if (! second_inserted)
                 {
-                    delete read_pair.first;
-                    delete read_pair.second;
                     --this_num_fragments;
                 }
                 
@@ -479,7 +483,7 @@ int main_sim_reads(int argc, char ** argv)
                 {
                     if (first_read_on_transcript)
                     {
-                        low_bound = sam_buffer_ins.first;
+                        sam_buffer.safe_advance_lowbound(read_pair.first);
                         first_read_on_transcript = false;
                     }
                     
@@ -496,22 +500,32 @@ int main_sim_reads(int argc, char ** argv)
                     tinfo.length,
                     tinfo.count,
                     this_num_fragments);
-            
-            purge_sam_buffer(sam_buffer, sam_buffer.begin(), sam_buffer.end(),
-                             flip_query_strand_flag,
+
+            sam_buffer.purge(output_sam_fh, 
                              output_first_fastq_fh,
                              output_second_fastq_used_fh,
-                             output_sam_fh);
+                             false);
+
+            // purge_sam_buffer(sam_buffer, sam_buffer.begin(), sam_buffer.end(),
+            //                  flip_query_strand_flag,
+            //                  output_first_fastq_fh,
+            //                  output_second_fastq_used_fh,
+            //                  output_sam_fh);
 
         }
 
-        purge_sam_buffer(sam_buffer, sam_buffer.begin(), sam_buffer.end(),
-                         flip_query_strand_flag,
+        sam_buffer.purge(output_sam_fh, 
                          output_first_fastq_fh,
                          output_second_fastq_used_fh,
-                         output_sam_fh);
+                         true); //purge remainder
 
-    }
+        // purge_sam_buffer(sam_buffer, sam_buffer.begin(), sam_buffer.end(),
+        //                  flip_query_strand_flag,
+        //                  output_first_fastq_fh,
+        //                  output_second_fastq_used_fh,
+        //                  output_sam_fh);
+
+    } // if (do_paired_end)
 
     //clean up
     close_if_present(output_sam_fh);

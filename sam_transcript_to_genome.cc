@@ -138,17 +138,25 @@ int main_transcript_to_genome(int argc, char ** argv)
         tx_name_to_projection[tx_name] = tg_iter;
     }
 
-    SP_ITER min_transcript_proj = tx_to_genome.end();
-    SP_ITER prev_min_transcript_proj = tx_to_genome.end();
+    SP_ITER first_proj = tx_to_genome.end();
+    SP_ITER second_proj = tx_to_genome.end();
 
     bool ignore_duplicate_mapped_pairs = false;
 
-    SamLine * samline;
-    SamBuffer sam_buffer(sam_order,
-                         paired_reads_are_same_stranded,
-                         ones_based_pos,
-                         ignore_duplicate_mapped_pairs);
+    char prev_rname[1024] = "";
 
+    SamLine * samline;
+    SamBuffer input_buffer(sam_order,
+                           paired_reads_are_same_stranded,
+                           ones_based_pos,
+                           ignore_duplicate_mapped_pairs);
+    
+
+    SamBuffer output_buffer(sam_order,
+                            paired_reads_are_same_stranded,
+                            ones_based_pos,
+                            ignore_duplicate_mapped_pairs);
+    
     
     contig_iter = contigs.end();
 
@@ -165,6 +173,8 @@ int main_transcript_to_genome(int argc, char ** argv)
 
     size_t prev_pos_index = 0;
     size_t cur_pos_index = 0;
+
+    bool inserted_to_input;
 
     while (! feof(input_tx_sam_fh))
     {
@@ -197,66 +207,111 @@ int main_transcript_to_genome(int argc, char ** argv)
 
             if (samline->query_unmapped())
             {
-                //just print as is.
                 samline->print(output_genome_sam_fh, true);
                 delete samline;
-                break;
-            }
-            prev_min_transcript_proj = min_transcript_proj;
-            Cigar::CIGAR_VEC source_to_read = 
-                Cigar::FromString(samline->cigar, samline->pos);
-
-            //find projection by name
-            NP_ITER nit = tx_name_to_projection.find(samline->rname);
-            if (nit == tx_name_to_projection.end())
-            {
-                fprintf(stderr, "Error: couldn't find transcript %s in projections "
-                        "derived from GTF file\n", samline->rname);
-                exit(1);
+                inserted_to_input = false;
             }
             else
             {
-                min_transcript_proj = (*nit).second;
+                inserted_to_input = input_buffer.insert(samline);
             }
-            NP_ITER nit_mate = strcmp(samline->rname, samline->mate_ref_name()) == 0 ? nit 
-                : tx_name_to_projection.find(samline->mate_ref_name());
 
-            if (nit_mate == tx_name_to_projection.end())
+            if (inserted_to_input && strcmp(prev_rname, samline->rname) != 0)
             {
-                fprintf(stderr, "Error: couldn't find transcript %s in projections "
-                        "derived from GTF file\n", samline->mate_ref_name());
-                exit(1);
-            }
+                //on a new contig.  
+                // if (input_buffer.low_bound != NULL)
+                // {
+                //     delete input_buffer.low_bound;
+                // }
+                // input_buffer.low_bound = 
+                //     new SamLine(DATA_LINE, "0:", 0, samline->rname, 0, 0, "", "*", 0, 0, "", "", "");
 
-            bool projection_applied =
-                 ApplyProjectionToSAM(*min_transcript_proj, *(*nit_mate).second, samline);
+                if (! input_buffer.unique_entry_pairs.empty())
+                {
+                    //find projection by name
+                    //assume all unique entry pairs in input buffer are on the same
+                    //transcript, namely 'prev_rname'.
+                    NP_ITER nit = tx_name_to_projection.find(prev_rname);
+                    if (nit == tx_name_to_projection.end())
+                    {
+                        fprintf(stderr, "Error: couldn't find transcript %s in projections "
+                                "derived from GTF file\n", prev_rname);
+                        exit(1);
+                    }
+                    else
+                    {
+                        first_proj = (*nit).second;
+                    }
+                    
+                    // PAIRED_READ_SET::const_iterator paired_bound =
+                    //     input_buffer.unique_entry_pairs.lower_bound
+                    //     (std::make_pair(input_buffer.low_bound, input_buffer.low_bound));
+                    
+                    for (PAIRED_READ_SET::iterator pit = input_buffer.unique_entry_pairs.begin();
+                         pit != input_buffer.unique_entry_pairs.end(); ++pit)
+                    {
+
+                        SamLine * first = const_cast<SamLine *>((*pit).first);
+                        SamLine * second = const_cast<SamLine *>((*pit).second);
+
+                        assert(strcmp(prev_rname, first->rname) == 0);
+
+                        //but, their mates may not be
+                        NP_ITER nit_mate = strcmp(first->rname, first->mate_ref_name()) == 0 ? nit 
+                            : tx_name_to_projection.find(first->mate_ref_name());
+                    
+                        if (nit_mate == tx_name_to_projection.end())
+                        {
+                            fprintf(stderr, "Error: couldn't find transcript %s in projections "
+                                    "derived from GTF file\n", samline->mate_ref_name());
+                            exit(1);
+                        }
+                        else
+                        {
+                            second_proj = (*nit_mate).second;
+                        }
+                    
+                        //extract all completed input pairs
+                        bool projection_applied = 
+                            ApplyProjectionToSAM(*first_proj, *second_proj, first, second);
+                        
+                        assert(projection_applied);
+
+                        assert(AreMappedMatePairs(*first, *second));
+
+                        output_buffer.insert(first);
+                        output_buffer.insert(second);
+                        char const* target_contig = (*first_proj).target_dna.c_str();
+                        size_t target_min_pos = (*first_proj).cigar[0].length;
+                        // if (! first->query_unmapped())
+                        // {
+                        //     assert(target_min_pos <= first->pos);
+                        // }
+                    
+                    }
+                    input_buffer.unique_entry_pairs.clear();
+                
+                    //at this point, the low bound
+                    char const* target_contig = (*first_proj).target_dna.c_str();
+                    size_t target_min_pos = (*first_proj).cigar[0].length;
+
+                    if (output_buffer.low_bound != NULL)
+                    {
+                        delete output_buffer.low_bound;
+                    }
+                    output_buffer.low_bound =
+                        new SamLine(DATA_LINE, "0:", 0, target_contig, target_min_pos, 0, "", "*", 0, 0, "", "", "");
+
+                } // finished processing unique entry pairs up to the low bound
+                strcpy(prev_rname, samline->rname);
+            } // if on new contig
             
-            if (projection_applied)
-                //if (1)
-            {
-                sam_buffer.insert(samline);
-            }
-            
-            //purge if necessary
-            if (prev_min_transcript_proj != min_transcript_proj)
-            {
-                //we're on a new transcript.  the first entry on this transcript may or may
-                //not be greater than the first entry from the previous transcript,
-                //which was the previous lowbound.  But, if it is, we may update the lowbound.
-                bool did_advance = sam_buffer.safe_advance_lowbound(samline);
-                // char const* prev_tx = prev_min_transcript_proj == tx_to_genome.end() ? "" 
-                //     : (*prev_min_transcript_proj).source_dna.c_str();
-
-                // char const* cur_tx = min_transcript_proj == tx_to_genome.end() ? "" 
-                //     : (*min_transcript_proj).source_dna.c_str();
-
-                // fprintf(stderr, "prev: %s, cur: %s, advanced: %c\n",
-                //         prev_tx, cur_tx, (did_advance ? 'Y' : 'N'));
-            }
-
+            output_buffer.purge(output_genome_sam_fh, NULL, NULL, false);
         }
     }
-    sam_buffer.purge(output_genome_sam_fh, NULL, NULL, true);
+    output_buffer.purge(output_genome_sam_fh, NULL, NULL, true);
+
+    delete output_buffer.low_bound;
 
     fclose(input_tx_sam_fh);
     fclose(output_genome_sam_fh);
