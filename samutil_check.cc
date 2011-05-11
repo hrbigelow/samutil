@@ -16,9 +16,8 @@ int main(int argc, char ** argv)
     char const* sam_file = argv[1];
     FILE * sam_fh = fopen(sam_file, "r");
 
-    bool source_is_ones_based = true;
     SamLine * samline;
-    while ((samline = new SamLine(sam_fh, source_is_ones_based)))
+    while ((samline = new SamLine(sam_fh)))
     {
         if (samline->parse_flag != HEADER)
         {
@@ -30,7 +29,7 @@ int main(int argc, char ** argv)
     while (samline->parse_flag == DATA_LINE)
     {
         delete samline;
-        samline = new SamLine(sam_fh, source_is_ones_based);
+        samline = new SamLine(sam_fh);
     }
     if (samline->parse_flag == END_OF_FILE)
     {

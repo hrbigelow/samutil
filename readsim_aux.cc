@@ -89,6 +89,7 @@ bool apply_projection_aux(SequenceProjection const& projection,
 
 bool ApplyProjectionToSAM(SequenceProjection const& projection,
                           SequenceProjection const& mate_projection,
+                          char alignment_space,
                           SamLine * first,
                           SamLine * second)
 {
@@ -99,7 +100,13 @@ bool ApplyProjectionToSAM(SequenceProjection const& projection,
         
         first->mpos = second->pos;
         second->mpos = first->pos;
-        
+
+        char tag_template[20];
+        sprintf(tag_template, "%s:%c", AlignSpaceTag, alignment_space);
+
+        first->add_tag(tag_template);
+        second->add_tag(tag_template);
+
         return first_projected && second_projected;
     }
     else if (AreUnmappedMatePairs(*first, *second))

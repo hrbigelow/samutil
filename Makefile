@@ -102,8 +102,8 @@ sim: $(sim_OBJS)
 
 samutil_OBJS = $(addprefix $(OBJDIR)/, samutil.o						\
 	sam_transcript_to_genome.o dep/tools.o	\
-	gtf.o cisortho/dna.o sam_score_mapq.o sam_raw_score_aux.o			\
-	align_eval_raw.o sam_raw_score_dist.o cisortho/region.o				\
+	gtf.o cisortho/dna.o sam_score_mapq.o sam_score_aux.o			\
+	align_eval_raw.o sam_score_dist.o cisortho/region.o				\
 	readsim_aux.o file_utils.o sam_buffer.o sam_helper.o cigar_ops.o	\
 	cisortho/nested.o dep/nucleotide_stats.o get_spliced_sequence.o		\
 	dep/stats_tools.o cisortho/litestream.o cisortho/enum.o				\

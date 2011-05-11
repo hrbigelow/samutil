@@ -117,7 +117,6 @@ int main(int argc, char ** argv)
 
     typedef std::set<SequenceProjection>::const_iterator SP_ITER;
 
-    bool ones_based_pos = true;
     //bool flip_query_strand_flag = false;
     bool use_read_ids_for_uniqueness = true;
     bool paired_reads_are_same_stranded = false;
@@ -217,11 +216,12 @@ int main(int argc, char ** argv)
         transcript_extent_trees = cis::BuildTrees(transcript_extents);
     }
 
+    bool output_is_ones_based = true;
 
     SamLine * samline;
     SamBuffer sam_buffer(use_read_ids_for_uniqueness,
                          paired_reads_are_same_stranded,
-                         ones_based_pos);
+                         output_is_ones_based_pos);
 
     
     contig_iter = contigs.end();
@@ -229,7 +229,7 @@ int main(int argc, char ** argv)
     while (! feof(input_sam_fh))
     {
         // parse samline
-        samline = new SamLine(input_sam_fh, ones_based_pos);
+        samline = new SamLine(input_sam_fh);
         
         switch (samline->parse_flag)
         {

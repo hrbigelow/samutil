@@ -66,7 +66,6 @@ class SamBuffer
 {
     SAM_ORDER sam_order;
     bool output_pairs_as_same_strand;
-    bool output_is_ones_based;
     bool ignore_duplicate_mapped_pairs;
 
     //if known, this marks the lowest possible contig position that any 
@@ -88,7 +87,6 @@ class SamBuffer
 
     SamBuffer(SAM_ORDER sam_order,
               bool output_pairs_as_same_strand,
-              bool output_is_ones_based,
               bool ignore_duplicate_mapped_pairs);
 
     bool safe_advance_lowbound(SamLine const* _proposed_new_low_bound);

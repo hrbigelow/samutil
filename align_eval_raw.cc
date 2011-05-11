@@ -74,11 +74,11 @@ bool remember_read(size_t read_id, std::vector<char> * seen_ids)
 
 
 void CigarFromSimSAMLine(char const* readname, bool first_in_pair,
-                         bool is_ones_based_position,
+                         bool guide_is_ones_based_pos,
                          read_coords * guide_coords)
 {
 
-    int ones_adjust = is_ones_based_position ? 1 : 0;
+    int ones_adjust = guide_is_ones_based_pos ? 1 : 0;
     char strand;
 
     size_t num_fields = sscanf(readname, "%zu:", &guide_coords->fragment_id);
@@ -247,8 +247,6 @@ int main_align_eval_raw(int argc, char ** argv)
     FILE * frag_halfs_fh = open_or_die(frag_halfs_file, "w", "Output fragment size distribution file by halfs");
     FILE * dist_summary_fh = open_or_die(dist_summary_file, "w", "Output distribution summary file");
 
-    bool sam_is_ones_based = true;
-
     //evaluation should not depend on the actual sequence, just the alignment blocks.
     bool allow_absent_seq_qual = true;
 
@@ -267,6 +265,7 @@ int main_align_eval_raw(int argc, char ** argv)
     std::fill(primary_alignment_mapq, primary_alignment_mapq + 256, 0);
 
     read_coords guide_coords;
+    bool guide_is_ones_based_pos = true;
 
     size_t num_read_id_bytes = 1000000;
 
@@ -305,13 +304,13 @@ int main_align_eval_raw(int argc, char ** argv)
     std::map<size_t, guide_used> total_by_oplen;
     std::map<size_t, guide_used> total_by_fragsize;
 
-    samline = new SamLine(alignment_sam_fh, sam_is_ones_based, allow_absent_seq_qual);
+    samline = new SamLine(alignment_sam_fh, allow_absent_seq_qual);
 
     while (samline->parse_flag == DATA_LINE)
     {
         CigarFromSimSAMLine(samline->qname, 
                             samline->first_read_in_pair(),
-                            sam_is_ones_based,
+                            guide_is_ones_based_pos,
                             &guide_coords);
 
         assert(num_used_bases == num_correct_bases + num_error_bases + num_trimmed_bases);
@@ -458,7 +457,7 @@ int main_align_eval_raw(int argc, char ** argv)
         {
             num_skipped_bases += this_num_guide_bases;
             delete samline;
-            samline = new SamLine(alignment_sam_fh, sam_is_ones_based, allow_absent_seq_qual);
+            samline = new SamLine(alignment_sam_fh, allow_absent_seq_qual);
             continue;
         }
         else
@@ -478,7 +477,7 @@ int main_align_eval_raw(int argc, char ** argv)
             exit(1);
         }
                     
-        Cigar::CIGAR_VEC test_cigar = Cigar::FromString(samline->cigar, samline->pos);
+        Cigar::CIGAR_VEC test_cigar = Cigar::FromString(samline->cigar, samline->zero_based_pos());
 
         std::multiset<std::pair<size_t, size_t> > guide_cigar_index =
             Cigar::ComputeOffsets(guide_cigar);
@@ -661,7 +660,7 @@ int main_align_eval_raw(int argc, char ** argv)
         assert((! require_primary_alignment) || (num_used_bases <= num_guide_bases));
 
         delete samline;
-        samline = new SamLine(alignment_sam_fh, sam_is_ones_based, allow_absent_seq_qual);
+        samline = new SamLine(alignment_sam_fh, allow_absent_seq_qual);
     }
     if (samline->parse_flag != END_OF_FILE)
     {

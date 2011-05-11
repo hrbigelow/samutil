@@ -78,12 +78,10 @@ bool LessSAMLinePair::operator()(SAMPTR_PAIR const& a,
 
 SamBuffer::SamBuffer(SAM_ORDER _sam_order,
                      bool pairs_same_strand,
-                     bool output_ones_based,
                      bool ignore_dup_maps) : 
     
     sam_order(_sam_order),
     output_pairs_as_same_strand(pairs_same_strand),
-    output_is_ones_based(output_ones_based),
     ignore_duplicate_mapped_pairs(ignore_dup_maps),
     less_ordering(sam_order),
     low_bound(NULL),
@@ -146,7 +144,7 @@ bool SamBuffer::insert(SamLine const* entry)
 
         //it is an error if the existing entry finds more than one mapped mate
         bool mate_found = false;
-        bool duplicate_pair_found = false;
+        //bool duplicate_pair_found = false;
 
         //
         // used to determine whether the current entry or existing
@@ -179,7 +177,7 @@ bool SamBuffer::insert(SamLine const* entry)
                 //now, in accordance with sam format spec
                 if (left->isize < 0 || right->isize > 0)
                 {
-                    bool unpaired_iter_is_leftmost = less_entry_matepair(yet_unpaired_entry, entry);
+                    //bool unpaired_iter_is_leftmost = less_entry_matepair(yet_unpaired_entry, entry);
                     fprintf(stderr, "SAM format error: inappropriate 'isize' fields.  Should be "
                             "positive for left and negative for right-most reads\n"
                             "Entries:\n");

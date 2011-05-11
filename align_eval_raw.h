@@ -43,7 +43,7 @@ struct read_coords
 
 
 void CigarFromSimSAMLine(char const* readname, bool first_in_pair,
-                         bool is_ones_based_position,
+                         bool guide_is_ones_based,
                          read_coords * guide_coords);
 
 #endif // _ALIGN_EVAL_RAW_H

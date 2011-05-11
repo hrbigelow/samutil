@@ -4,7 +4,7 @@
 #include <cstdlib>
 #include <algorithm>
 
-#include "sam_raw_score_aux.h"
+#include "sam_score_aux.h"
 #include "sam_buffer.h"
 #include "dep/tools.h"
 
@@ -35,7 +35,7 @@ int score_mapq_usage(float fdef)
 }
 
 
-typedef std::map<size_t, int> TABLE;
+typedef std::map<SpaceScore, int> TABLE;
 typedef std::map<ScorePair, TABLE> SCORE_CPD;
 
 
@@ -84,75 +84,90 @@ int main_score_mapq(int argc, char ** argv)
 
     //parse score calibration
     int num_parsed;
-    size_t top_raw_score, sec_raw_score, given_score, num_right, num_wrong;
+    size_t top_raw_score, sec_raw_score, given_raw_score, num_right, num_wrong;
 
     double prob_of_correct_alignment;
 
     SCORE_CPD score_cpd;
     SCORE_CPD::iterator cpd_iter;
 
-    char larger_is_better_char;
+    char larger_score_better_char;
+    char larger_space_better_char;
 
     char score_tag[32];
-    size_t missing_score_default;
-    bool larger_is_better;
-    
+    size_t missing_default_score;
+
+
     num_parsed = fscanf(score_calibration_fh, 
                        "score_tag: %s\n"
-                       "missing_score_default: %zu\n"
-                       "larger_is_better: %c\n", 
-                       score_tag,
-                       &missing_score_default,
-                       &larger_is_better_char);
+                       "missing_default_score: %zu\n"
+                       "larger_score_better: %c\n"
+                       "larger_space_better: %c\n", 
+                        score_tag,
+                        &missing_default_score,
+                        &larger_score_better_char,
+                        &larger_space_better_char);
 
-    if (num_parsed != 3)
+    if (num_parsed != 4)
     {
         fprintf(stderr, "Error: score calibration file %s doesn't have score_tag, "
-                "missing_score_default or larger_is_better fields.\n"
+                "missing_default_score, larger_is_better, or larger_space_better fields.\n"
                 "Please produce with 'samutil score_dist'\n",
                 score_calibration_file);
         exit(1);
     }
 
-    larger_is_better = larger_is_better_char == 'Y';
+    bool larger_score_better = larger_score_better_char == 'Y';
+    bool larger_space_better = larger_space_better_char == 'Y';
+
+    char top_raw_space;
+    char sec_raw_space;
+    char given_raw_space;
 
     while (! feof(score_calibration_fh))
     {
-        num_parsed = fscanf(score_calibration_fh, "%zu\t%zu\t%zu\t%zu\t%zu\n",
-                            &top_raw_score, &sec_raw_score, &given_score, &num_right, &num_wrong);
+        num_parsed = fscanf(score_calibration_fh, "%zu\t%c\t%zu\t%c\t%zu\t%c\t%zu\t%zu\n",
+                            &top_raw_score, &top_raw_space, 
+                            &sec_raw_score, &sec_raw_space,
+                            &given_raw_score, &given_raw_space,
+                            &num_right, &num_wrong);
         
-        if (num_parsed != 5)
+        if (num_parsed != 8)
         {
-            fprintf(stderr, "Error: score calibration file %s doesn't have five fields per line.\n",
+            fprintf(stderr, "Error: score calibration file %s doesn't have eight fields per line.\n",
                     score_calibration_file);
             exit(1);
         }
 
-        cpd_iter = score_cpd.find(ScorePair(top_raw_score, sec_raw_score));
+        AlignmentSpace top_space = ParseAlignmentSpace(top_raw_space);
+        AlignmentSpace sec_space = ParseAlignmentSpace(sec_raw_space);
+        AlignmentSpace given_space = ParseAlignmentSpace(given_raw_space);
+
+        SpaceScore top_spacescore = SpaceScore(top_raw_score, top_space);
+        SpaceScore sec_spacescore = SpaceScore(sec_raw_score, sec_space);
+        SpaceScore given_spacescore = SpaceScore(given_raw_score, given_space);
+
+        cpd_iter = score_cpd.find(ScorePair(top_spacescore, sec_spacescore));
+
         if (cpd_iter == score_cpd.end())
         {
             cpd_iter = 
-                score_cpd.insert(std::make_pair(ScorePair(top_raw_score, sec_raw_score), TABLE())).first;
+                score_cpd.insert(std::make_pair(ScorePair(top_spacescore, sec_spacescore), TABLE())).first;
         }
         TABLE & table = (*cpd_iter).second;
         prob_of_correct_alignment = 
             static_cast<double>(num_right) /
             static_cast<double>(num_right + num_wrong);
 
-        table[given_score] = error_prob_to_quality(1.0 - prob_of_correct_alignment);
+        table[given_spacescore] = error_prob_to_quality(1.0 - prob_of_correct_alignment);
     }
     fclose (score_calibration_fh);
 
+    //use as the 'less' comparator to consider better scores to be 'less'
+    //Places the best scores at the beginning.
+    SpaceScore_better score_best_is_less(larger_score_better, larger_space_better);
+
     //key raw_score sum.  value:  histogram of template lengths
-    typedef std::map<size_t, size_t, ScoreOrder> HISTO; // general histogram
-    typedef std::map<size_t, HISTO, ScoreOrder> LENGTH_HISTO_BY_SCORE; // key: score, value: length histo
-
-    //initialize these so that the best scores are at the beginning.
-    bool increasing_order = ! larger_is_better;
-    LENGTH_HISTO_BY_SCORE length_counts = LENGTH_HISTO_BY_SCORE(ScoreOrder(increasing_order));
-    HISTO score_totals = HISTO(ScoreOrder(increasing_order));
-
-    size_t total_fragments;
 
     std::vector<double> template_lengths;
 
@@ -160,87 +175,32 @@ int main_score_mapq(int argc, char ** argv)
     SamLine::numeric_start_fragment_ids = numeric_read_ids;
 
     bool paired_reads_are_same_stranded = false;
-    bool ones_based_pos = true;
     bool allow_absent_seq_qual = true; // why not?
 
     int new_mapq;
-    size_t template_length;
 
     bool new_fragment;
     bool ignore_sambuffer_bound;
 
     bool ignore_duplicate_mapped_pairs = true;
 
+    
+
+    ScoreVec fragment_scores;
+    ScoreVec::iterator fit;
+
     SamBuffer tally_buffer(sam_order,
-                         paired_reads_are_same_stranded,
-                         ones_based_pos,
-                         ignore_duplicate_mapped_pairs);
-
-    char prev_qname[1024] = "";
-    bool seen_a_read = false;
-    size_t prev_qid = 0;
-
-    std::vector<size_t> fragment_scores;
-    std::vector<size_t>::iterator fit;
+                           paired_reads_are_same_stranded,
+                           ignore_duplicate_mapped_pairs);
 
     //tally fragment length and raw score statistics
-    while (! feof(unscored_sam_fh))
-    {
-
-        NextLine(unscored_sam_fh, tally_buffer, ones_based_pos, allow_absent_seq_qual,
-                 &new_fragment, &ignore_sambuffer_bound,
-                 &seen_a_read, prev_qname, &prev_qid);
-
-        if (new_fragment)
-        {
-            ScorePair score_pair = 
-                FindTopTwoScores(tally_buffer, 0, SIZE_MAX, score_tag, missing_score_default, 
-                                 larger_is_better, & fragment_scores);
-
-            fit = max_element(fragment_scores.begin(), fragment_scores.end());
-
-            size_t max_pair_score = *fit;
-            PAIRED_READ_SET::const_iterator mpit = tally_buffer.unique_entry_pairs.begin();
-            std::advance(mpit, std::distance(fragment_scores.begin(), fit));
-
-            assert((*mpit).first->isize >= 0);
-            template_length = static_cast<size_t>((*mpit).first->isize);
-            length_counts[max_pair_score][template_length]++;
-            score_totals[max_pair_score]++;
-            total_fragments++;
-            tally_buffer.purge(NULL, NULL, NULL, ignore_sambuffer_bound);
-        }
-    }
-    rewind(unscored_sam_fh);
-
-    //at this point, tally_buffer should be spent
-
-    //select the top-scoring N% of fragments as a heuristic proxy for 'correctly aligned' fragments
-    size_t partial_sum = 0;
-    size_t min_num_used_fragments = 
-        static_cast<size_t>(floor(fraction_top_scoring_used * static_cast<float>(total_fragments)));
-
-    HISTO::const_iterator sit_end = score_totals.begin();
-    LENGTH_HISTO_BY_SCORE::const_iterator lit_end = length_counts.begin();
-
-    while (partial_sum < min_num_used_fragments)
-    {
-        partial_sum += (*sit_end++).second;
-        ++lit_end;
-    }
-
-    //compute mean and sd of elite fragment alignments
-    std::vector<double> elite_fragment_lengths;
-    LENGTH_HISTO_BY_SCORE::const_iterator lit;
-    HISTO::const_iterator hit;
-    for (lit = length_counts.begin(); lit != lit_end; ++lit)
-    {
-        for (hit = (*lit).second.begin(); hit != (*lit).second.end(); ++hit)
-        {
-            std::fill_n(std::back_inserter(elite_fragment_lengths), (*hit).second, 
-                        static_cast<double>((*hit).first));
-        }
-    }
+    std::vector<double> elite_fragment_lengths =
+        TallyFragmentLengths(&unscored_sam_fh, 
+                             score_best_is_less, 
+                             tally_buffer, 
+                             score_tag,
+                             missing_default_score,
+                             fraction_top_scoring_used);
 
     double fragment_mean = gsl_stats_mean(elite_fragment_lengths.data(), 1,
                                           elite_fragment_lengths.size());
@@ -261,20 +221,19 @@ int main_score_mapq(int argc, char ** argv)
     fflush(scored_sam_fh);
 
 
-    prev_qid = 0;
-    strcpy(prev_qname, "");
-    seen_a_read = false;
+    size_t prev_qid = 0;
+    char prev_qname[1024] = "";
+    bool seen_a_read = false;
 
 
     SamBuffer cal_buffer(sam_order,
                          paired_reads_are_same_stranded,
-                         ones_based_pos,
                          ignore_duplicate_mapped_pairs);
     
 
     while (! feof(unscored_sam_fh))
     {
-        NextLine(unscored_sam_fh, cal_buffer, ones_based_pos, allow_absent_seq_qual,
+        NextLine(unscored_sam_fh, cal_buffer, allow_absent_seq_qual,
                  &new_fragment, &ignore_sambuffer_bound,
                  &seen_a_read, prev_qname, &prev_qid);
 
@@ -284,8 +243,8 @@ int main_score_mapq(int argc, char ** argv)
                                           min_allowed_fragment_length,
                                           max_allowed_fragment_length,
                                           score_tag,
-                                          missing_score_default,
-                                          larger_is_better,
+                                          missing_default_score,
+                                          score_best_is_less,
                                           &fragment_scores);
             
             cpd_iter = score_cpd.find(score_pair);
@@ -323,7 +282,9 @@ int main_score_mapq(int argc, char ** argv)
                 table_iter = this_score_table.find(fragment_scores[si]);
                 if (table_iter == this_score_table.end())
                 {
-                    new_mapq = missing_score_default;
+                    // we're in a state of complete ignorance.  This shouldn't happen.
+                    new_mapq = 0;
+                    assert(false);
                 }
                 else
                 {
@@ -345,7 +306,7 @@ int main_score_mapq(int argc, char ** argv)
 
             gsl_permute_uint(perm->data, ranks, 1, N);
 
-            char tag_template[20];
+            char tag_template[2000];
             si = 0;
             for (pit = cal_buffer.unique_entry_pairs.begin();
                  pit != cal_buffer.unique_entry_pairs.end(); ++pit)

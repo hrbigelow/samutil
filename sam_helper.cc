@@ -26,6 +26,7 @@ namespace SamFlags
     int const PCR_OR_OPTICAL_DUPLICATE = 0x0400;
 };
 
+//extern char const* AlignSpaceTag;
 
 //serialize the data in a line.  string data will be packed in the
 //'line' variable, with null's terminating each one.  non-string data
@@ -256,7 +257,7 @@ bool SamLine::operator<(SamLine const& b) const
 
 
 
-SamLine::SamLine(FILE * seqfile, bool sam_is_ones_based, bool allow_absent_seq_qual) :
+SamLine::SamLine(FILE * seqfile, bool allow_absent_seq_qual) :
     bytes_in_line(0), line(NULL), qname(NULL), qid(0), rname(NULL), 
     cigar(NULL), mrnm(NULL), seq(NULL), qual(NULL), tag_string(NULL), extra(NULL),
     extra_tag(NULL)
@@ -267,25 +268,21 @@ SamLine::SamLine(FILE * seqfile, bool sam_is_ones_based, bool allow_absent_seq_q
         this->parse_flag = END_OF_FILE;
         return;
     }
-    this->Init(buf, sam_is_ones_based, allow_absent_seq_qual);
+    this->Init(buf, allow_absent_seq_qual);
 }
 
 
 
-SamLine::SamLine(char const* samline_string, 
-                 bool sam_is_ones_based,
-                 bool allow_absent_seq_qual) :
+SamLine::SamLine(char const* samline_string, bool allow_absent_seq_qual) :
     qname(NULL), qid(0), rname(NULL), cigar(NULL), mrnm(NULL), 
     seq(NULL), qual(NULL), tag_string(NULL), extra(NULL), extra_tag(NULL)
 {
-    this->Init(samline_string, sam_is_ones_based, allow_absent_seq_qual);
+    this->Init(samline_string, allow_absent_seq_qual);
 }
 
 
 //samline_string must be terminated by newline
-void SamLine::Init(char const* samline_string,
-                   bool /* sam_is_ones_based */,
-                   bool allow_absent_seq_qual)
+void SamLine::Init(char const* samline_string, bool allow_absent_seq_qual)
 {
 
     this->bytes_in_line = strlen(samline_string);
@@ -324,7 +321,7 @@ void SamLine::Init(char const* samline_string,
         char * ptr = this->line;
 
         char * dummy = NULL;
-        char * end_of_targets = NULL;
+
         char ** trg[] = { 
             &this->qname, &dummy, &this->rname, &dummy, &dummy, &this->cigar, &this->mrnm,
             &dummy, &dummy, &this->seq, &this->qual, &this->tag_string
@@ -461,26 +458,16 @@ size_t SamLine::aligned_read_length()
     return Cigar::Length(cigarvec, ! use_top_coord);
 }
 
+
 int SamLine::alignment_score(char const* tag, int default_if_missing, bool * has_score) const
 {
-    int align_score;
-    char * score_string = this->tag_string == NULL ? NULL : strstr(this->tag_string, tag);
+    return parse_sam_tag(this->tag_string, tag, ":i:%i", default_if_missing, has_score);
+}
 
-    char tag_plus_format[32];
-    strcpy(tag_plus_format, tag);
-    strcat(tag_plus_format, ":i:%i");
 
-    if (score_string != NULL 
-        && sscanf(score_string, tag_plus_format, &align_score) == 1)
-    {
-        *has_score = true;
-        return align_score;
-    }
-    else
-    {
-        *has_score = false;
-        return default_if_missing;
-    }
+char SamLine::alignment_space(char default_if_missing, bool * has_space) const
+{
+    return parse_sam_tag(this->tag_string, AlignSpaceTag, ":%c", default_if_missing, has_space);
 }
 
 
@@ -489,7 +476,7 @@ void SamLine::add_tag(char const* tag)
     if (this->extra_tag == NULL)
     {
         //tag_string was previously pointing into this->line
-        this->extra_tag = new char[strlen(this->tag_string) + strlen(tag) + 1];
+        this->extra_tag = new char[strlen(this->tag_string) + strlen(tag) + 2];
         strcpy(this->extra_tag, this->tag_string);
         this->tag_string = this->extra_tag;
     }
@@ -497,7 +484,7 @@ void SamLine::add_tag(char const* tag)
     {
         //extra_tag already in use.  grow it.
         char * old_extra_tag = this->extra_tag;
-        this->extra_tag = new char[strlen(this->tag_string) + strlen(tag) + 1];
+        this->extra_tag = new char[strlen(this->tag_string) + strlen(tag) + 2];
         strcpy(this->extra_tag, old_extra_tag);
         delete old_extra_tag;
     }
@@ -532,8 +519,8 @@ bool AreMappedMatePairs(SamLine const& a, SamLine const& b)
 
     return
         AreSequencedMatePairs(a, b)
-        && a.mpos == b.pos
-        && b.mpos == a.pos
+        && a.mpos == b.zero_based_pos()
+        && b.mpos == a.zero_based_pos()
         && (a.query_on_pos_strand() != b.query_on_pos_strand())
         && (a.query_on_pos_strand() == b.mate_on_pos_strand())
         && (a.mate_on_pos_strand() == b.query_on_pos_strand())
@@ -642,7 +629,7 @@ std::map<std::string, size_t> ContigLengths(FILE * sam_fh)
     std::map<std::string, size_t> contig_lengths;
     size_t total_length = 0;
     bool allow_absent_seq_qual = true;
-    while ((samline = new SamLine(sam_fh, true, allow_absent_seq_qual)))
+    while ((samline = new SamLine(sam_fh, allow_absent_seq_qual)))
     {
         if (samline->parse_flag != HEADER)
         {
@@ -699,9 +686,9 @@ void SetToFirstDataLine(FILE ** sam_fh)
 {
     SamLine * samline;
     rewind(*sam_fh);
-    SAM_PARSE parse_flag;
+
     bool allow_absent_seq_qual = true;
-    while ((samline = new SamLine(*sam_fh, true, allow_absent_seq_qual)))
+    while ((samline = new SamLine(*sam_fh, allow_absent_seq_qual)))
     {
         if (samline->parse_flag == HEADER)
         {
@@ -753,7 +740,7 @@ size_t samline_position_align(char const* samline, CONTIG_OFFSETS const& contig_
     size_t flag;
 
     // qname flag rname pos mapq cigar mrnm mpos isize seq qual tags...
-    int nfields_read = sscanf(samline, "%*s\t%i\t%s\t%zu", &flag, rname, &pos);
+    int nfields_read = sscanf(samline, "%*s\t%zu\t%s\t%zu", &flag, rname, &pos);
     
     if (nfields_read != 3)
     {

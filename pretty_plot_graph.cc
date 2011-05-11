@@ -235,8 +235,8 @@ int main_pretty_plot_graph(int argc, char **argv)
                     BoundsInfo const& gene_bounds = gene_data.second;
 
                     gene_projected_bound = 
-                        Cigar::ProjectCoord(meta_gene.meta_exon[gtf_entry.seqname],
-                                            meta_gene.meta_exon_offsets[gtf_entry.seqname],
+                        Cigar::ProjectCoord(meta_gene.meta_exon[locus_contig],
+                                            meta_gene.meta_exon_offsets[locus_contig],
                                             gene_bounds.start_boundary,
                                             & projection_applied);
 

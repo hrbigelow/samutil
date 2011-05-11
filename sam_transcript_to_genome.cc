@@ -10,6 +10,8 @@
 #include "cisortho/region.h"
 #include "sam_buffer.h"
 #include "sam_helper.h"
+#include "sam_score_aux.h"
+
 
 /*
 
@@ -75,8 +77,6 @@ int main_transcript_to_genome(int argc, char ** argv)
 
 
     typedef std::set<SequenceProjection>::const_iterator SP_ITER;
-
-    bool ones_based_pos = true;
 
     // input SAM file is allowed to have or not have seq / qual.
     // basically, they are just payload, and unaffected by the transformation
@@ -148,13 +148,11 @@ int main_transcript_to_genome(int argc, char ** argv)
     SamLine * samline;
     SamBuffer input_buffer(sam_order,
                            paired_reads_are_same_stranded,
-                           ones_based_pos,
                            ignore_duplicate_mapped_pairs);
     
 
     SamBuffer output_buffer(sam_order,
                             paired_reads_are_same_stranded,
-                            ones_based_pos,
                             ignore_duplicate_mapped_pairs);
     
     
@@ -179,7 +177,7 @@ int main_transcript_to_genome(int argc, char ** argv)
     while (! feof(input_tx_sam_fh))
     {
         // parse samline
-        samline = new SamLine(input_tx_sam_fh, ones_based_pos, allow_absent_seq_qual);
+        samline = new SamLine(input_tx_sam_fh, allow_absent_seq_qual);
 
         switch (samline->parse_flag)
         {
@@ -273,7 +271,9 @@ int main_transcript_to_genome(int argc, char ** argv)
                     
                         //extract all completed input pairs
                         bool projection_applied = 
-                            ApplyProjectionToSAM(*first_proj, *second_proj, first, second);
+                            ApplyProjectionToSAM(*first_proj, *second_proj,
+                                                 PrintAlignmentSpace(TRANSCRIPTOME),
+                                                 first, second);
                         
                         assert(projection_applied);
 
@@ -281,8 +281,8 @@ int main_transcript_to_genome(int argc, char ** argv)
 
                         output_buffer.insert(first);
                         output_buffer.insert(second);
-                        char const* target_contig = (*first_proj).target_dna.c_str();
-                        size_t target_min_pos = (*first_proj).cigar[0].length;
+                        //char const* target_contig = (*first_proj).target_dna.c_str();
+                        //size_t target_min_pos = (*first_proj).cigar[0].length;
                         // if (! first->query_unmapped())
                         // {
                         //     assert(target_min_pos <= first->pos);

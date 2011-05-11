@@ -192,14 +192,13 @@ int main(int argc, char **argv)
         fclose(exon_output_fh);
 
         //for SAM file
-        bool ones_based_pos = true;
         std::string transformed_cigar;
 
         //parse and transform SAM file
         while (! feof(input_sam_fh))
         {
 
-            samline = new SamLine(input_sam_fh, ones_based_pos);
+            samline = new SamLine(input_sam_fh);
             switch (samline->parse_flag)
             {
             case END_OF_FILE: 

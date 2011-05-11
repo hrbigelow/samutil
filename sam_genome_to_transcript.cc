@@ -78,7 +78,7 @@ int main_genome_to_transcript(int argc, char ** argv)
 
     typedef std::set<SequenceProjection>::const_iterator SP_ITER;
 
-    bool ones_based_pos = true;
+    bool output_is_ones_based_pos = true;
 
     // setting this to true enables running the genome-to-transcript transformation
     // such that seq/quals provided in the input get carried into the output, and if
@@ -155,7 +155,7 @@ int main_genome_to_transcript(int argc, char ** argv)
     SamLine * samline;
     SamBuffer sam_buffer(sam_order,
                          paired_reads_are_same_stranded,
-                         ones_based_pos,
+                         output_is_ones_based_pos,
                          ignore_duplicate_mapped_pairs);
 
     contig_iter = contigs.end();
@@ -171,7 +171,7 @@ int main_genome_to_transcript(int argc, char ** argv)
     while (! feof(input_sam_fh))
     {
         // parse samline
-        samline = new SamLine(input_sam_fh, ones_based_pos, allow_absent_seq_qual);
+        samline = new SamLine(input_sam_fh, allow_absent_seq_qual);
         
         switch (samline->parse_flag)
         {
@@ -184,7 +184,7 @@ int main_genome_to_transcript(int argc, char ** argv)
             exit(1);
             break;
         case HEADER:
-            //samline->print(output_sam_fh, ones_based_pos, true);
+            //samline->print(output_sam_fh, output_is_ones_based_pos, true);
             delete samline;
             break;
         case DATA_LINE:

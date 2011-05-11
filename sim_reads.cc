@@ -305,7 +305,6 @@ int main_sim_reads(int argc, char ** argv)
     const bool do_reverse_second_quals = true;
 
     bool paired_reads_are_same_stranded = false;
-    bool output_is_ones_based = true;
     bool ignore_duplicate_mapped_pairs = true;
 
     ReadSampler read_sampler(somatic_mutations, qual_file1, qual_file2,
@@ -394,7 +393,6 @@ int main_sim_reads(int argc, char ** argv)
         //CIGAR to describe the relationship between genome dna and matepair
         SamBuffer sam_buffer(sam_order, 
                              paired_reads_are_same_stranded, 
-                             output_is_ones_based,
                              ignore_duplicate_mapped_pairs);
 
         for (std::set<SequenceProjection>::const_iterator 

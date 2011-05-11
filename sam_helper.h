@@ -43,6 +43,36 @@ enum SAM_ORDER
         SAM_FID_POSITION
     };
 
+#define AlignSpaceTag "XP:A"
+
+
+template<typename V>
+V parse_sam_tag(char const* tag_string, 
+                char const* tag_name, 
+                char const* tag_format, 
+                V default_if_missing, bool * present)
+{
+    V tag_value;
+    char const* tag_substring = tag_string == NULL ? NULL : strstr(tag_string, tag_name);
+
+    char tag_plus_format[32];
+    strcpy(tag_plus_format, tag_name);
+    strcat(tag_plus_format, tag_format);
+
+    if (tag_substring != NULL 
+        && sscanf(tag_substring, tag_plus_format, &tag_value) == 1)
+    {
+        *present = true;
+        return tag_value;
+    }
+    else
+    {
+        *present = false;
+        return default_if_missing;
+    }
+}
+
+
 
 class SamLine
 {
@@ -79,11 +109,10 @@ public:
             char const* _qual,
             char const* _tag_string);
 
-    SamLine(FILE * sam_fh, bool sam_is_ones_based, bool allow_absent_seq_qual);
-    SamLine(char const* samline_string, bool sam_is_ones_based, bool allow_absent_seq_qual);
+    SamLine(FILE * sam_fh, bool allow_absent_seq_qual);
+    SamLine(char const* samline_string, bool allow_absent_seq_qual);
 
-    void Init(char const* samline_string, bool sam_is_ones_based, 
-              bool allow_absent_seq_qual);
+    void Init(char const* samline_string, bool allow_absent_seq_qual);
 
     SamLine(SamLine const&)
     {
@@ -120,13 +149,15 @@ public:
     //bool operator<(SamLine const& b) const;
     //bool operator==(SamLine const& b) const;
 
-    SAM_PARSE load(FILE * seqfile, bool source_is_ones_based_pos);
+    SAM_PARSE load(FILE * seqfile);
 
     void print(FILE * samfile, bool flip_query_strand_flag) const;
 
     void print_fastq(FILE * fastq_fh) const;
 
     int alignment_score(char const* tag, int default_if_missing, bool * has_score) const;
+    char alignment_space(char default_if_missing, bool * has_space) const;
+
     void add_tag(char const* tag);
 
     size_t aligned_read_length();

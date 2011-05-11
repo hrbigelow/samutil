@@ -108,7 +108,6 @@ int main_pretty_plot_gtf_sam(int argc, char **argv)
     close_if_present(gtf_output_fh);
 
     //for SAM file
-    bool ones_based_pos = true;
     bool allow_absent_seq_qual = false; //this is false because
 
     std::string transformed_cigar;
@@ -118,7 +117,7 @@ int main_pretty_plot_gtf_sam(int argc, char **argv)
     while (sam_input_fh != NULL && ! feof(sam_input_fh))
     {
 
-        samline = new SamLine(sam_input_fh, ones_based_pos, allow_absent_seq_qual);
+        samline = new SamLine(sam_input_fh, allow_absent_seq_qual);
         switch (samline->parse_flag)
         {
         case END_OF_FILE: 
@@ -144,7 +143,7 @@ int main_pretty_plot_gtf_sam(int argc, char **argv)
                 exit(1);
             }
 
-            Cigar::CIGAR_VEC sam_cigar = Cigar::FromString(samline->cigar, samline->pos);
+            Cigar::CIGAR_VEC sam_cigar = Cigar::FromString(samline->cigar, samline->zero_based_pos());
             Cigar::CIGAR_VEC sam_cigar_projected = 
                 Cigar::TransitiveMerge((*mit).second,
                                        meta_gene.meta_exon_offsets[samline->rname],
