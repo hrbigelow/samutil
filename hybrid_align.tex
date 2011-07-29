@@ -1,0 +1,715 @@
+\documentclass[10pt]{article}
+\addtolength{\textwidth}{4.0cm}
+\addtolength{\hoffset}{-2.0cm}
+\addtolength{\textheight}{4cm}
+\addtolength{\voffset}{-2cm}
+\usepackage{parskip}
+\begin{raggedright}
+
+\author{Henry Bigelow}
+\title{Transcriptome / Genome Hybrid Alignment}
+\date{\today}
+\pagestyle{empty}
+\begin{document}
+\maketitle
+
+\section{Introduction}
+
+In working with RNA-Seq data, we expect material to come from at least
+three sources: contiguous sections of genomic DNA, unspliced
+transcribed mRNA, and spliced mRNA. In aligning all of these types of
+sequence back to the genome, a few technical hurdles must be overcome.
+
+\subsection*{Completeness in Searching}
+
+The first hurdle is a search problem. Under a particular scoring
+function, find all (or N best) alignments for a given fragment,
+attaining a particular score or better. Most next-gen aligners
+\emph{guarantee} (or claim) to achieve this completeness, though some
+may be restricted to ungapped alignments, and others to alignments
+with only short-ish gaps.
+
+For finding alignments of (what turn out to be) spliced mRNA to the
+genome, none of these aligners can offer a completeness
+guarantee. This is the case because, in permitting arbitrary large
+gaps in alignments, the search space explodes. So, most aligners do
+not permit such gaps and thus cannot produce intron-spanning
+alignments.
+
+So, the straightforward solution to this is to use a modest-gap, or
+gapless aligner to align fragments to the constructed transcriptome,
+and then project these back to the genome. In doing so, there is a
+many-to-one relationship of transcriptome fragment alignments to
+genome alignments, owing to the fact that there are multiple identical
+stretches of mRNA of different isoforms covering parts of the genome.
+
+\subsection*{Probability Calibration across Alignment Space}
+
+The second hurdle is to estimate the probability of alignment
+error. In considering the possibility that a fragment could have come
+from the genome or the transcriptome, one must generate alignments to
+both, then project the transcriptome alignments to the genome, and
+finally consider the relative probability that either is correct. This
+probability should take into account the expected fraction of
+fragments coming from either, and can be estimated from simulated
+data.
+
+This approach is called `hybrid alignment' since it considers the
+hybrid of genome-projected transcriptome alignments together with
+direct genome alignments in a probabilistically cohesive way.
+
+\subsection*{Alignment merging}
+
+We are interested in exon- and splice-junction level accurate
+alignment, in hopes of using data to estimate isoforms and alternate
+splicing. Because of this, a fraction of modest-length reads (50mer to
+75mer, typically) will span a splice junction in their first or last
+several bases. To use such an alignment to quantitate the presence of
+a specific junction, one must estimate the relative probability of
+alternate explanations: the read does indeed span a junction, but one
+different from that, and 2) the read actually comes from genomic DNA
+or unspliced mRNA.
+
+Since two alternate alignment hypotheses may differ only in the
+placement of these few bases, their raw alignment scores may be very
+similar, especially in the cases where many of the mismatches are due
+to sequence error at ends of reads (thus producing high mismatch even
+for the correct alignment). Because of this, it would be ashame to
+throw out all such alignments as being ambiguous.
+
+In these cases, we would like to retain the common part of the
+alignment as a solid hypothesis, albeit less descriptive.
+
+We implement these concepts in the described workflow and utilities.
+
+\section{Overall Workflows}
+There are two workflow phases for the aligner, a `Preparation'
+workflow, and a `Production' workflow.  During preparation, the
+one-time intermediate files are produced for use during
+production. Each time a new genome or new annotation is desired, there
+will be a need to run the Preparation workflow. However, the
+Preparation will be agnostic to read length, though it will be
+sensitive to overall error rate in sequence.
+
+The preparation workflow assumes an annotated human genome with
+\textbf{hg19.fa}, \textbf{hg19tx.gtf}, and optionally a set of fastq
+files of real data used as a source of quality code strings for
+simulating errors, below as
+\textbf{qualsource.\{read1,read2\}.fq.gz}. Finally, the @SQ
+information for the genome must be provided in SAM header format as
+\textbf{hg19.header.sam}.
+
+During preparation, the transcriptome sequence is extracted, both
+genome and transcriptome are bowtie-indexed, reads (with guide
+alignments encoded in their ID strings) are simulated and aligned, a
+calibration file is produced, and various QC metric files are produced
+measuring accuracy of the alignment.
+
+The production workflow assumes some of these files as input in
+addition to real sample data \textbf{sample.\{read1,read2\}.fastq}. It
+produces a final alignment file \textbf{sample.vs.hg19.final.sam}.
+
+Both workflows follow the same alignment approach.  Reads are aligned
+to the transcriptome and projected to the genome space, de-duplicating
+identical alignments (arising from congruent isoforms).  The same
+reads are aligned directly to the genome.  For each physical fragment,
+the set of its alignments are assigned mapq scores according to the
+set of all raw alignment scores of that fragment.
+
+\section{Preparation Workflow}
+
+{\small
+\begin{verbatim}
+fasta2cisfasta hg19.fa hg19.cfa
+
+make_dnas_file hg19 hg19.cfa . hg19.dnas
+
+sim reads -p -s "uniform:30,60,10,400" -f qualsource.read1.fq.gz -g qualsource.read2.fq.gz \
+    hg19.dnas hg19.gtf hg19 hg19tx.expr hg19sim.{guide.sam,frag,read1.fastq,read2.fastq}
+
+samutil get_tx_sequence -r -d ./ -l 50 hg19 hg19tx.gtf hg19.dnas hg19tx.fa
+
+bowtie-build hg19tx.fa hg19tx
+
+bowtie-build hg19.fa hg19
+
+bowtie --sam -q --un reads.vs.hg19tx.unmapped.fq -v 3 -p 12 -k 50 -I 170 -X 330 hg19tx \ 
+    -1 hg19sim.read1.fastq -2 hg19sim.read2.fastq sample.vs.hg19tx.sam
+
+bowtie --sam-nohead --sam -q --un hg19sim.vs.hg19.unmapped.fq -v 3 -p 12 -k 50 -I 170 -X 330 \
+    hg19 -1 hg19sim.read1.fastq -2 hg19sim.read2.fastq hg19sim.vs.hg19.sam
+
+align_eval sort -s ALIGN -m 4294967296 hg19sim.vs.hg19tx.sam hg19sim.vs.hg19tx.asort.sam
+
+samutil tx2genome -h hg19.header.sam hg19 hg19tx.gtf hg19sim.vs.hg19tx.asort.sam \
+    hg19sim.vs.hg19tx.t2g.sam
+
+cat hg19sim.vs.hg19tx.t2g.sam hg19sim.vs.hg19.sam > hg19sim.vs.hg19.merged.sam
+
+align_eval sort -s READ_ID_FLAG -h hg19.header.sam hg19sim.vs.hg19.merged.sam \
+    hg19sim.vs.hg19.readid.sam
+
+samutil score_dist -c 1.0 -s NM -m 10 hg19sim.vs.hg19.readid.sam hg19sim.vs.hg19.qcal
+
+samutil score_mapq -n hg19sim.vs.hg19.qcal hg19sim.vs.hg19.readid.sam \
+    hg19sim.vs.hg19.final.sam
+
+align_eval sort -s MIN_ALIGN_GUIDE hg19sim.vs.hg19.final.sam hg19sim.vs.hg19.final.agsort.sam
+
+align_eval raw -p hg19sim.vs.hg19.final.agsort.sam hg19sim.vs.hg19.final.{jumps,cumul}.txt \
+    hg19sim.vs.hg19.final.{oplen,fragsize}.{full,by_half}.txt
+
+align_eval stats hg19sim.vs.hg19.final.jumps hg19sim.vs.hg19.final.{stats,dist}
+\end{verbatim}
+}
+
+\section{Production Workflow}
+{\small
+\begin{verbatim}
+bowtie --sam -q --un sample.vs.hg19tx.unmapped.fq -v 3 -p 12 -k 50 -I 170 -X 330 hg19tx \
+    -1 sample.read1.fastq -2 sample.read2.fastq sample.vs.hg19tx.sam
+
+bowtie --sam-nohead --sam -q --un sample.vs.hg19.unmapped.fq -v 3 -p 12 -k 50 -I 170 -X 330 \
+    hg19 -1 sample.read1.fastq -2 sample.read2.fastq sample.vs.hg19.sam
+
+align_eval sort -s ALIGN sample.vs.hg19tx.sam sample.vs.hg19tx.asort.sam
+
+samutil tx2genome -h hg19.header.sam hg19 hg19tx.gtf sample.vs.hg19tx.asort.sam \
+    sample.vs.hg19tx.t2g.sam
+
+cat sample.vs.hg19tx.t2g.sam sample.vs.hg19.sam > sample.vs.hg19.merged.sam
+
+align_eval sort -s READ_ID_FLAG -h hg19.header.sam sample.vs.hg19.merged.sam \
+    sample.vs.hg19.readid.sam
+
+samutil score_mapq -n hg19sim.vs.hg19.qcal sample.vs.hg19.readid.sam \
+    sample.vs.hg19.final.sam
+\end{verbatim}
+}
+
+\section{Command Detail}
+
+{\small
+\begin{verbatim}
+fasta2cisfasta hg19.fa hg19.cfa
+\end{verbatim}
+}
+
+
+Produces the identical fasta file \textbf{hg19.cfa} but with newlines
+removed.
+
+{\small
+\begin{verbatim}
+make_dnas_file hg19 hg19.cfa . hg19.dnas
+\end{verbatim}
+}
+
+
+Produces \textbf{hg19.dnas}, an index file storing the contig names
+and file offsets in \textbf{hg19.cfa} needed for rapidly extracting
+transcriptome sequence.
+
+{\small
+\begin{verbatim}
+samutil get_tx_sequence hg19 hg19tx.gtf hg19.dnas hg19tx.fa
+\end{verbatim}
+}
+
+
+Produces \textbf{hg19tx.fa}, the transcriptome as defined by
+\textbf{hg19tx.gtf}.
+
+{\small
+\begin{verbatim}
+align_eval sort -s ALIGN sample.vs.hg19tx.sam sample.vs.hg19tx.asort.sam
+
+align_eval sort -s READ_ID_FLAG -h hg19.header.sam sample.vs.hg19.merged.sam \
+    sample.vs.hg19.readid.sam
+
+align_eval sort -s MIN_ALIGN_GUIDE hg19sim.vs.hg19.final.sam \
+    hg19sim.vs.hg19.final.agsort.sam
+\end{verbatim}
+}
+
+
+Sort fragments.  Various different sort orders are necessary for
+memory efficient processing, depending on the task. For tx2genome
+projection, fragments must be sorted by alignment position
+(ALIGN). For mapq calibration or mapq scoring, they must be sorted by
+fragment (READ\_ID\_FLAG).  Finally, for evaluation of alignment
+accuracy, they must be sorted by the minimum between the real and
+estimated alignment positions (MIN\_ALIGN\_GUIDE).
+
+{\small
+\begin{verbatim}
+samutil tx2genome -h hg19.header.sam hg19 hg19tx.gtf sample.vs.hg19tx.asort.sam \
+    sample.vs.hg19tx.t2g.sam
+\end{verbatim}
+}
+
+
+Project transcriptome-aligned reads in
+\textbf{sample.vs.hg19tx.asort.sam} to genome according to
+\textbf{hg19tx.gtf}, producing \textbf{sample.vs.hg19tx.t2g.sam}.
+Removes alignment-identical fragments.  Optionally include genomic
+header (-h) in output.
+
+{\small
+\begin{verbatim}
+cat sample.vs.hg19tx.t2g.sam sample.vs.hg19.sam > sample.vs.hg19.merged.sam
+\end{verbatim}
+}
+
+
+{\small
+\begin{verbatim}
+samutil score_dist sample.vs.hg19.readid.sam sample.vs.hg19.qcal
+\end{verbatim}
+}
+
+
+Produces \textbf{sample.vs.hg19.qcal}, a calibration table mapping raw
+alignment scores to numbers of correct and incorrect alignments.
+
+{\small
+\begin{verbatim}
+samutil score_mapq -n sample.vs.hg19.qcal sample.vs.hg19.readid.sam \
+    sample.vs.hg19.final.sam
+\end{verbatim}
+}
+
+
+Applies raw score to mapq calibration in \textbf{sample.vs.hg19.qcal}
+to score alignments in \-\textbf{sample.vs.hg19.readid.sam}, producing
+\textbf{sample.vs.hg19.final.sam} having properly scored mapq fields.
+
+\section{More Detail}
+
+{\small
+\begin{verbatim}
+$ align_eval sort
+
+Usage:
+
+align_eval sort [OPTIONS] alignment.sam alignment_sorted.sam
+
+Options:
+
+-s  STRING    type of sorting to use {READ_ID_FLAG, ALIGN, GUIDE, MIN_ALIGN_GUIDE}[MIN_ALIGN_GUIDE]
+-m  INT       number bytes of memory to use [4294967296]
+-u  FLAG      (unique) if present, omit printing of all but one duplicate lines. [false]
+-h  STRING    optional sam header if alignment.sam header lacks SQ fields.
+              If provided, any header lines in alignment.sam will be ignored.
+
+Sort orders are:
+READ_ID_FLAG: sort by read id / pair flag (uniquely identifies the physical fragment)
+ALIGN: sort by alignment position
+GUIDE: sort by read-id encoded guide alignment position
+MIN_ALIGN_GUIDE: sort by the minimum of ALIGN or GUIDE
+\end{verbatim}
+}
+
+The sorting algorithm first builds an index of all SAM records in a
+first pass, based on the specified sort order, recording file offsets
+in the original file. It then partially sorts each chunk (determined
+by -m flag) of the index and outputs sorted chunks of the input SAM as
+tmp files (named as `alignment\_sorted.sam'.XXXXX). Finally, it rereads
+sub-chunks of each tmp file, merges the records, and outputs to the
+final sorted file using a merge-sort on the index.
+
+READ\_ID\_FLAG sort order is suitable for applications that need to
+process all alignments of each physical fragment together, such as
+mapq scoring.
+
+ALIGN sort order is suitable for feature-counting or processing
+per-locus statistics.
+
+GUIDE sort order as yet has no direct use.
+
+MIN\_ALIGN\_GUIDE sort order is suitable for compiling accuracy
+statistics of an aligner, as used by `align\_eval raw'. Using this sort
+order allows memory efficient single-pass processing of the SAM file
+to score accuracy statistics (See `align\_eval raw').
+
+
+{\small
+\begin{verbatim}
+$ align_eval raw
+
+Usage:
+
+align_eval raw [OPTIONS] alignment_sorted.sam jumps.txt align_stats.cumul.txt \
+           align_stats.{oplen,fragsize}.{full,by_half}.txt
+
+Options:
+
+-q  INT      minimum quality to include alignment[0]
+-p  FLAG     (primary alignment) if present, require primary alignment.
+             in this case, do not tally 'correct' and 'error' jumps
+             for non-primary alignments (SAM flag 0x0100, 256)
+
+Output files:
+
+jumps.txt: <contig> <position> <guide_jump> <correct_jump> <error_jump>
+
+Used as input for other align_eval functions
+
+align_stats.oplen.full.txt fields:
+
+first_op_length    (L, length of first CIGAR operation)
+num_bases_correct  (C, # bases in alignment that are correctly placed)
+num_reads_L_C      (# aligned reads with first_op_length = L, num_bases_correct = C)
+num_reads_L        (# aligned reads with first_op_length = L)
+total_num_guide    (# reads simulated )
+
+
+align_stats.oplen.by_halfs.txt fields:
+
+first_op_length    L, length of first CIGAR operation
+num_reads_L_good   # aligned reads with first_op_length = L, half or more bases correct
+num_reads_L_bad    # aligned reads with first_op_length = L, under half bases correct
+num_reads_L        # aligned reads with first_op_length = L
+total_num_guide    # reads simulated with first_op_length = L
+
+
+align_stats.fragsize.{full,by_halfs}.txt:
+
+fragsize           Fragment size of simulated reads. Retrieved from read id field (see sim)
+<Other fields>     same as oplen output, broken down by fragment size
+
+align_stats.{oplen,fragsize}.{full,by_half}.txt are used to evaluate
+alignment accuracy at the splice-junction level, and taking into account
+fragment length.
+\end{verbatim}
+}
+
+`align\_eval raw' requires the MIN\_ALIGN\_GUIDE sort order. This enables
+a single-pass processing of the SAM file for tallying various
+statistics.
+
+The `jumps.txt' output format records changing coverage at boundary
+positions. For example, the SAM entry
+
+\verb%1:chr1:read1:500:25M1000N25M  chrI 500 25M1010N25M%
+
+represents an aligned read, in which the first 25 bases are correctly
+aligned, but the last 25 are incorrect, being aligned 10 bases away
+from their true position. If this were the only record, it would produce
+jumps output:
+
+\begin{verbatim}
+chrI 500   1  1  0
+chrI 525  -1 -1  0
+chrI 1525  1  0  0
+chrI 1535  0  0  1
+chrI 1550 -1  0  0
+chrI 1560  0  0 -1
+\end{verbatim}
+
+Positive jumps indicate an increase in per-locus coverage when going
+across a boundary position from left to right.  Negative jumps
+indicate a decrease in per-locus coverage. The three categories of
+jumps are `guide', `correct', and `error'. The `guide' jumps indicate
+changes in coverage resulting from the simulated patterns of alignment
+encoded in the read IDs as produced from `sim reads'. A `correct' jump
+is produced for beginning and ending of alignment blocks that are
+correct (i.e. for which all bases in the alignment block are placed
+the same as given in `guide'). Otherwise, the `error' jumps are
+produced.
+
+In all cases, the \verb%position% field indicates a \emph{boundary}
+position (between two nucleotides), and equals the number of
+nucleotides to the left of that boundary.
+
+
+{\small
+\begin{verbatim}
+
+
+\end{verbatim}
+}
+
+{\small
+\begin{verbatim}
+$ samutil tx2genome
+
+Usage:
+
+samutil tx2genome [OPTIONS] species transcripts.gtf reads.vs.tx.sam reads.vs.genome.sam
+
+Options:
+
+-h      STRING    genome-space SAM header file to be included in output
+
+Only one of each group of identical fragment alignments is output.
+These arise from congruent subsets of isoforms in transcripts.gtf.
+SAM Records successfully projected will have the 'XP:A:T' tag added.
+reads.vs.tx.sam must be sorted by [rname, read_pair_flag, pos].
+\end{verbatim}
+}
+
+
+This command uses the coordinate transformation defined by
+\textbf{transcripts.gtf} to project all alignments in
+\textbf{reads.vs.tx.sam} to genome space.  All such projected
+alignments will be tagged with `XP:A:T'.  At present, `T' is the only
+other code besides `G' used in the workflow, but others may be added
+easily.  The reads are assumed sorted by [rname, read\_pair\_flag,
+pos] fields, (as may be produced from \textbf{align\_eval sort -m
+  READ\_ID\_FLAG}) and it is an error if they are not.
+
+\textbf{samutil tx2genome} uses negligible memory and is about as fast
+as alignment itself.
+
+{\small
+\begin{verbatim}
+$ samutil get_tx_sequence
+
+Usage:
+
+samutil get_tx_sequence [OPTIONS] species transcripts.gtf genome.dnas transcripts.fa 
+
+Options:
+
+-d  STRING   dna directory for finding pieces in genome.dnas file ['.']
+-l  INT      maximum line length for fasta output (0 for unlimited) ['0']
+-r  FLAG     reverse complement negative-stranded transcripts
+
+required file genome.dnas is produced from make_dnas_file and fasta2cisfasta
+\end{verbatim}
+}
+
+
+Extracts all transcript sequence as defined by
+\textbf{transcripts.gtf}. Requires genome index file
+\textbf{genome.dnas}. In the context of the hybrid alignment pipeline,
+the -r flag is necessary.
+
+{\small
+\begin{verbatim}
+$ samutil score_dist
+
+Usage:
+
+samutil score_dist [OPTIONS] unscored_fragsort.sam raw_score_calibration.txt
+
+Options:
+
+-f     INT     # top-scoring fragments used for fragment-length distribution [100000]
+-q     FLOAT   min quantile [0,0.5] for -f fragments to calc. min fragment size [0.05]
+-Q     FLOAT   max quantile [0.5,1] for -f fragments to calc. max fragment size [0.95]
+-l     INT     min allowed fragment length for paired alignment [0]
+-L     INT     max allowed fragment length for paired alignment [1000000]
+-c     FLOAT   fraction of correctly aligned bases to call an alignment 'correct' [1.00]
+-s     STRING  SAM tag representing the alignment score.  Must be ":i" tag [AS]
+-i     FLAG    if present, consider a larger alignment score better [false]
+-j     FLAG    consider GENOME alignment better. if absent, TRANSCRIPTOME is better.
+-m     INT     default alignment score assumed for SAM entries with missing tag [0]
+
+
+raw_score_calibration.txt: a histogram over the set of alignment categories
+(top score, top space, 2nd score, 2nd space, given score, given space)
+tallying number of alignments that are correct or incorrect.
+space is currently one of 'G' (genome) or 'T' (transcriptome)
+
+unscored_fragsort.sam: alignment file sorted by (read id / pair flag) and
+having alignment score tags given in option -s.
+\end{verbatim}
+}
+
+
+\textbf{samutil score\_dist} processes the sorted input file
+\textbf{unscored\_fragsort.sam} one fragment at a time, considering the
+collection of alignments of each fragment together. For each such
+fragment, it extracts a raw alignment score (currently taken as the
+sum of the paired reads tag value given in option -s), and the
+`alignment space', extracted from the `XS:A:' tag (currently one of
+`T' (transcriptome) or `G' (genome). The top two fragment alignment
+scores in the group are recorded. Then, for each fragment alignment,
+the tuple (top score, top space, 2nd score, 2nd space, given score,
+given space) is tallied in a histogram, along with the classification
+of whether the alignment is `correct' (alignment base accuracy at or
+above threshold option -c) or `incorrect'. This multi-dimensional
+histogram is the output file \textbf{calibration.qcal}. The number of correct
+and incorrect alignments is then used to determine error probability
+and thus mapq score (according to the Phred scale) during
+\textbf{samutil score\_mapq}. This scoring procedure is akin to that
+used in maq.
+
+In addition to this histogram, calibration.qcal will record the
+options given during the run, as:
+
+{\small
+\begin{verbatim}
+score_tag: NM
+missing_default_score: 10
+larger_score_better: N
+larger_space_better: N
+\end{verbatim}
+}
+
+for example, for options \textbf{-s NM -m 10}.
+
+In cases where only one alignment is provided for a given fragment,
+the option -m is supplied as a `dummy' second alignment. The ordering
+given by option -i is used to determine the top and second alignment
+scores. (For example, if using number of mismatches as the raw score,
+the -i flag should be set.)
+
+Fragments whose implied length falls outside of a reasonable bound are
+rejected as having a `missing' or `worst' alignment score. The
+fragment length range is estimated as follows:
+
+The distribution of N (option -f) top-scoring fragment lengths, and
+from that the low and high extremes (option -q and -Q) found in the
+data. This is done to avoid the nuissance of explicitly specifying
+fragment length cutoffs. However, if such cutoffs are desired, options
+-l and -L may override those estimated if they are more restrictive.
+
+{\small
+\begin{verbatim}
+$ samutil score_mapq
+
+Usage:
+
+samutil score_mapq [OPTIONS] calibration.qcal unscored.fragsort.sam scored.sam
+
+Options:
+
+-f     INT     # top-scoring fragments used for fragment-length distribution [100000]
+-q     FLOAT   min quantile [0,0.5] for -f fragments to calc. min fragment size [0.05]
+-Q     FLOAT   max quantile [0.5,1] for -f fragments to calc. max fragment size [0.95]
+-l     INT     min allowed fragment length for paired alignment [0]
+-L     INT     max allowed fragment length for paired alignment [1000000]
+-n     FLAG    if set, assume numeric read ids (start with an integer) sorting
+-m     INT     minimum mapq score required to avoid merging top alignments [10]
+
+
+calibration.qcal: a histogram over the set of alignment categories
+(top score, top space, 2nd score, 2nd space, given score, given space)
+tallying number of alignments that are correct or incorrect.
+
+unscored_fragsort.sam: alignment file sorted by (read id / pair flag) and
+having alignment score tags given in option -s.
+
+scored.sam:    output alignment file with mapq field updated.
+
+mapq will reflect Phred-scaled probability of correct alignment.
+\end{verbatim}
+}
+
+
+\textbf{samutil score\_mapq} processes \textbf{unscored.fragsort.sam}
+file the same way as \textbf{samutil score\_dist}, namely, all
+alignments for a given fragment at a time. Input calibration file
+\textbf{calibration.qcal} defines those specifications determined in
+\textbf{samutil score\_mapq} (see above). The first five options of
+\textbf{samutil score\_mapq} (-f, -q, -Q, -l, -L) are identical to
+those of \textbf{samutil score\_dist}.
+
+Finally, there is the concept of `alignment merging'. To illustrate,
+there may be alignments:
+
+{\small
+\begin{verbatim}
+48M1050N2M
+48M2030N2M
+\end{verbatim}
+}
+
+
+both with the same single mismatch in the last 2M chunk. Ordinarily,
+two similarly scoring alignments would foil each other and both
+receive a low mapq score due to the uncertainty in which was the
+correct alignment. In cases where the two alignments significantly
+overlap (to be defined), it is desirable to merge them by their common
+part. Option -m provides a mapq minimum threshold at which this is
+done for the top two scoring alignments.
+
+When this is triggered for a fragment alignment group, the top two
+alignments are merged and the entire alignment group is then
+re-scored. To rescore the merged alignment, there must be a way of
+re-calculating the raw score. Currently this is done by consulting the
+`MD:Z:' tag which defines the positions of single-base mismatches.
+
+
+
+{\small
+\begin{verbatim}
+$ sim reads
+
+Usage:
+
+sim reads [OPTIONS] genome.dnas transcripts.gtf species transcripts.expr sim.sam
+    sim.frag sim.read1.fastq [sim.read2.fastq]
+
+Options:
+
+-d  STRING   dna directory for finding pieces in genome_dna.fa file [.]
+-l  INT      output read length [50]
+-p  FLAG     produce paired-end reads (if absent, single-end produced)
+-b  FLAG     if absent, qname format id:chr:strand:start:CIGAR[,chr:strand:start:CIGAR]+
+-h  FLAG     sample the sense strand of the transcript
+-q  FLAG     create pairs on same strand (if absent, pairs are on opposite strands)
+-s  STRING   sampling scheme (see below) [uniform:100,0,100]
+-f  STRING   fastq file 1, quality strings to randomly sample for error model
+-g  STRING   fastq file 2 (if paired), together with fastq file 1
+-i  FLAG     output only one of alignment-identical simulated reads
+-c  CHAR     quality code in fastq input defining quality score of zero [@]
+-u  INT      minimum median Phred quality score to use quality string [30]
+-m  STRING   somatic mutation file: species, contig, position, orig_base, mut_base []
+-M  INT      number bytes maximum memory to use [4294967296]
+-r  INT      random seed for repeatability [28374979]
+
+genome.dnas         dna index file generated from make_dnas_file and fasta2cisfasta
+transcripts.gtf     gtf-formatted annotation file defining all transcripts
+transcripts.expr    expression levels of transcripts, produced from 'sim expression'
+
+Output Files
+
+sim.sam             SAM containing alignment definitions
+sim.frag            fields: contig transcript strand num_fragments num_transcript_mols
+sim.read1.fastq     fastq containing first-in-pair simulated reads
+sim.read2.fastq     fastq containing second-in-pair simulated reads
+
+Note: if 'sim.read2.fastq' is not provided, sim.read1.fastq will contain
+      intercalated read pairs as first,second,first,second, etc.
+
+Note 2: if any of the three files are '/dev/null', will not print to that file
+and execution will be faster.
+
+Possible sampling schemes:
+
+'cut:cutprob,fmin,fmax,totmol'	where:
+
+cutprob (FLOAT) is the probability [0,1] of a nucleotide bond being cut
+fmin, fmax (INT) size range of retained fragments
+totmol (INT): total num transcript mols to generate
+
+'uniform:stepsize,fmin,fstep,fmax'	where:
+
+stepsize (INT) num bases apart of each start position on sampled transcript
+fmin, fstep, fmax (INT) e.g. 100,10,150 generates sizes 100,110,120,130,140,150
+
+read id format is the following:
+
+id:read1:D:S:P:C[,D:S:P:C]+:read2:D:S:P:C[,D:S:P:C]+:fragment_size:F
+
+where
+D = dna name or contig name
+S = strand [+ or -]
+P = start position, (where first base on a contig is 1)
+C = CIGAR string for this read only
+F = positive integer fragment size
+
+Any remaining alignment blocks not on the same 'D' (contig) may be appended with commas.
+For example:
+
+1:read1:chr1:+:10592:50M:read2:chr1:-:10792:50M:fragment_size:150
+\end{verbatim}
+}
+
+\end{raggedright}
+
+\end{document}
