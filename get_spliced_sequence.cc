@@ -15,13 +15,15 @@
 int get_tx_sequence_usage(char const* ddef, size_t ldef)
 {
     fprintf(stderr, 
-            "Usage:\n\n"
-            "samutil get_tx_sequence [OPTIONS] species_name genes.gtf genome.dnas spliced_sequence.fa \n"
+            "\nUsage:\n\n"
+            "samutil get_tx_sequence [OPTIONS] species transcripts.gtf genome.dnas transcripts.fa \n"
             "\n"
             "Options:\n\n"
             "-d  STRING   dna directory for finding pieces in genome.dnas file ['%s']\n"
-            "-l  INT      maximum line length for fasta output, or 0 for unlimited ['%Zu']\n"
-            "-r  FLAG     if true, reverse complement all negative-stranded transcripts [false if absent]\n",
+            "-l  INT      maximum line length for fasta output (0 for unlimited) ['%Zu']\n"
+            "-r  FLAG     reverse complement negative-stranded transcripts\n\n"
+            "required file genome.dnas is produced from make_dnas_file and fasta2cisfasta\n"
+            ,
             ddef, ldef);
 
     return 1;

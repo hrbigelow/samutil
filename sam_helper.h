@@ -34,17 +34,8 @@ enum SAM_PARSE
     };
 
 
-enum SAM_ORDER
-    {
-        SAM_RID,
-        SAM_POSITION_RID,
-        SAM_RID_POSITION,
-        SAM_POSITION,
-        SAM_FID_POSITION
-    };
-
-#define AlignSpaceTag "XP:A"
-
+#define AlignSpaceTag "XP"
+#define AlignSpaceType 'A'
 
 template<typename V>
 V parse_sam_tag(char const* tag_string, 
@@ -73,11 +64,29 @@ V parse_sam_tag(char const* tag_string,
 }
 
 
+struct less_char_ptr
+{
+    bool operator()(char const* a, char const* b) const
+    {
+        return strcmp(a, b) < 0;
+    }
+};
+
+struct eqstr
+{
+  bool operator()(const char* s1, const char* s2) const
+  {
+    return strcmp(s1, s2) == 0;
+  }
+};
+
+//typedef std::unordered_map<char const*, size_t, std::hash<char const*>, eqstr> CONTIG_OFFSETS;
+
 
 class SamLine
 {
 public:
-    static bool numeric_start_fragment_ids; 
+
     // set this to true if we're in a training situation with
     // numerically named qnames.
 
@@ -114,6 +123,9 @@ public:
 
     void Init(char const* samline_string, bool allow_absent_seq_qual);
 
+    static void SetGlobalFlags(bool _numeric);
+    static bool numeric_start_fragment_ids;
+
     SamLine(SamLine const&)
     {
         assert(false);
@@ -122,29 +134,6 @@ public:
 
     ~SamLine();
 
-    //uses fields [rname, pos, strand, cigar]
-    bool less_position(SamLine const& b) const;
-    bool equal_position(SamLine const& b) const;
-
-    //uses fields [rname, first_read_in_pair()]
-    bool less_rid(SamLine const& b) const;
-    bool equal_rid(SamLine const& b) const;
-
-    //sort order [qname, pair, rname, pos, query_strand, cigar, mrnm, mpos]
-    bool less_rid_position(SamLine const& b) const;
-    bool equal_rid_position(SamLine const& b) const;
-
-    // sort order [rname, pos, query_strand, cigar, mrnm, mpos, qname, pair]
-    bool less_position_rid(SamLine const& b) const;
-    bool equal_position_rid(SamLine const& b) const;
-
-    // sort order [rname]
-    bool less_fid(SamLine const& b) const;
-    bool equal_fid(SamLine const& b) const;
-
-    // sort order [rname, pos, strand, cigar]
-    bool less_fid_position(SamLine const& b) const;
-    bool equal_fid_position(SamLine const& b) const;
 
     //bool operator<(SamLine const& b) const;
     //bool operator==(SamLine const& b) const;
@@ -158,7 +147,13 @@ public:
     int alignment_score(char const* tag, int default_if_missing, bool * has_score) const;
     char alignment_space(char default_if_missing, bool * has_space) const;
 
-    void add_tag(char const* tag);
+    //queries the samline for the desired tag code, loading type and value_string if found.
+    //returns whether the tag was found
+    bool has_tag(char const* tag_code, char & type, char * value_string) const;
+
+
+    //adds the desired tag. 
+    void add_tag(char const* tag_code, char type, char const* value_string);
 
     size_t aligned_read_length();
     size_t raw_read_length() const { return strlen(this->seq); }
@@ -184,31 +179,6 @@ public:
 
 };
 
-
-struct less_char_ptr
-{
-    bool operator()(char const* a, char const* b) const
-    {
-        return strcmp(a, b) < 0;
-    }
-};
-
-struct eqstr
-{
-  bool operator()(const char* s1, const char* s2) const
-  {
-    return strcmp(s1, s2) == 0;
-  }
-};
-
-//typedef std::unordered_map<char const*, size_t, std::hash<char const*>, eqstr> CONTIG_OFFSETS;
-typedef std::map<char const*, size_t, less_char_ptr> CONTIG_OFFSETS;
-typedef CONTIG_OFFSETS::const_iterator OFFSETS_ITER;
-
-
-std::map<std::string, size_t> ContigLengths(FILE * sam_fh);
-
-CONTIG_OFFSETS ContigOffsets(std::map<std::string, size_t> const& contig_lengths);
 
 void SetToFirstDataLine(FILE ** sam_fh);
 
@@ -248,19 +218,6 @@ void print_sam_line(FILE * sam_fh,
                     char const* qual,
                     char const* tag_string,
                     bool output_is_ones_based);
-
-size_t flattened_position(char const* contig, size_t position, size_t flag,
-                          CONTIG_OFFSETS const& contig_offsets,
-                          CONTIG_OFFSETS::const_iterator * contig_iter);
-
-size_t samline_position_align(char const* samline, CONTIG_OFFSETS const& contig_offsets);
-
-size_t samline_read_id_flag(char const* samline, CONTIG_OFFSETS const& /* unused */);
-
-size_t index_sam_rid_position(char const* samline, CONTIG_OFFSETS const& contig_offsets);
-
-size_t samline_position_min_align_guide(char const* samline, 
-                                        CONTIG_OFFSETS const& contig_offsets);
 
 void PrintSAMHeader(FILE ** input_sam_fh, FILE * output_fh);
 

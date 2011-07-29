@@ -42,7 +42,7 @@ struct LessTX2Genome
 
 bool ApplyProjectionToSAM(SequenceProjection const& projection,
                           SequenceProjection const& mate_projection,
-                          char alignment_space,
+                          char * alignment_space,
                           SamLine * first,
                           SamLine * second);
 

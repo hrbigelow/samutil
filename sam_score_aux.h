@@ -7,12 +7,12 @@
 
 enum AlignmentSpace
     {
-        GENOME,
-        TRANSCRIPTOME
+        TRANSCRIPTOME,
+        GENOME
     };
 
 
-#define AlignmentSpaces "GT"
+#define AlignmentSpaces "TG"
 #define AlignmentSpaceMissingDefault 'G'
 
 
@@ -56,6 +56,20 @@ struct ScorePair
 };
 
 
+struct RawScoreBetter
+{
+    bool larger_score_better;
+    RawScoreBetter(bool _lsb) : larger_score_better(_lsb) { }
+
+    //returns true if a is 'better' than b
+    bool operator()(size_t a, size_t b) const
+    {
+        return this->larger_score_better ? a > b : a < b;
+    }
+};
+
+
+
 typedef std::vector<SpaceScore> ScoreVec;
 
 SpaceScore FragmentScore(size_t top_raw_score, 
@@ -75,10 +89,21 @@ ScorePair FindTopTwoScores(SamBuffer const& sam_buffer,
                            ScoreVec * fragment_scores);
 
 
+void SetScoreFields(SamBuffer const& sam_buffer, 
+                    size_t min_allowed_fragment_length,
+                    size_t max_allowed_fragment_length,
+                    char const* raw_score_tag,
+                    size_t missing_default_score,
+                    bool larger_raw_score_is_better,
+                    SCORE_CPD const& score_cpd);
+
+
 size_t CountCorrectBases(SamLine const* samline, 
                          read_coords const& guide_coords, 
                          Cigar::CIGAR_VEC const& guide_cigar, 
-                         Cigar::CIGAR_INDEX const& guide_cigar_index);
+                         Cigar::CIGAR_INDEX const& guide_cigar_index,
+                         size_t * num_guide_bases,
+                         size_t * num_test_bases);
 
 
 void NextLine(FILE * unnscored_sam_fh, 
@@ -91,12 +116,32 @@ void NextLine(FILE * unnscored_sam_fh,
               size_t * prev_qid);
 
 
-std::vector<double>
+std::vector<size_t>
 TallyFragmentLengths(FILE ** sam_fh, 
                      SpaceScore_better const& score_best_is_less,
                      SamBuffer & tally_buffer,
                      char const* score_tag,
                      size_t missing_default_score,
-                     float fraction_top_scoring_frags_used);
+                     size_t num_top_fragments_used);
+
+
+//estimate fragment lengths based on quantiles
+void QuantileFragmentEstimate(size_t min_allowed_fragment_length,
+                              size_t max_allowed_fragment_length,
+                              float frag_dist_low_quantile,
+                              float frag_dist_high_quantile,
+                              FILE ** sam_fh,
+                              SpaceScore_better const& score_best_is_less,
+                              SamBuffer & tally_buffer,
+                              char const* score_tag,
+                              size_t missing_default_score,
+                              size_t num_top_scoring_frags_used,
+                              size_t * min_est_fragment_length, 
+                              size_t * max_est_fragment_length);
+
+
+//set ranks and primary flag bit for a collection of alignments of a given fragment
+void SetRankAndPrimaryFlags(SamBuffer & buffer);
+
 
 #endif // _SAM_RAW_SCORE_AUX_H

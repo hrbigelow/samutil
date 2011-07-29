@@ -12,6 +12,7 @@ int usage()
             "Usage:\n\n"
             "samutil genome2tx        Condense reads-to-genome alignments to reads-to-transcriptome\n"
             "samutil tx2genome        Expand reads-to-transcriptome alignments to reads-to-genome alignments\n"
+            "samutil merge_tg         Merge duplicate genome-projected and direct genome alignments\n"
             "samutil get_tx_sequence  Get transcript sequence from genomic sequence\n"
             "samutil score_dist       Generate raw score distribution statistics for 'score_mapq'\n"
             "samutil score_mapq       Score alignment mapping quality from fragment-sorted SAM file\n"
@@ -36,6 +37,10 @@ int main(int argc, char *argv[])
     else if (strcmp(argv[1], "tx2genome") == 0)
     {
         return main_transcript_to_genome(argc - 1, argv + 1);
+    }
+    else if (strcmp(argv[1], "merge_tg") == 0)
+    {
+        return main_merge_tg(argc - 1, argv + 1);
     }
     else if (strcmp(argv[1], "get_tx_sequence") == 0)
     {

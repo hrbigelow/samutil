@@ -36,48 +36,57 @@ int sim_reads_usage(char const* ddef, size_t ldef,
                     char const* mdef, size_t Mdef, size_t rdef)
 {
     fprintf(stderr, 
-            "Usage:\n\n"
-            "sim reads [OPTIONS] genomic_dna.index annotation.gtf species transcript.expression.txt output.sam\n"
-            "    output_counts.txt first_read_sim.fastq [second_read_sim.fastq]\n\n"
+            "\nUsage:\n\n"
+            "sim reads [OPTIONS] genome.dnas transcripts.gtf species transcripts.expr sim.sam\n"
+            "    sim.frag sim.read1.fastq [sim.read2.fastq]\n\n"
             "Options:\n\n"
-            "-d  STRING   dna directory for finding pieces in genome_dna.fa file ['%s']\n"
+            "-d  STRING   dna directory for finding pieces in genome_dna.fa file [%s]\n"
             "-l  INT      output read length [%Zu]\n"
-            "-p  FLAG     produce paired-end reads (if absent, single-end produced) [false]\n"
-            "-b  FLAG     (blind) if absent, read names have id:chr:strand:start:CIGAR[,chr:strand:start:CIGAR]+ [false]\n"
-            "-h  FLAG     if present, sample the sense strand of the transcript [false]\n"
-            "-q  FLAG     create pairs on same strand (if absent, pairs are on opposite strands) [false]\n"
-            "-s  STRING   sampling scheme (see below) [%s])\n"
+            "-p  FLAG     produce paired-end reads (if absent, single-end produced)\n"
+            "-b  FLAG     if absent, qname format id:chr:strand:start:CIGAR[,chr:strand:start:CIGAR]+\n"
+            "-h  FLAG     sample the sense strand of the transcript\n"
+            "-q  FLAG     create pairs on same strand (if absent, pairs are on opposite strands)\n"
+            "-s  STRING   sampling scheme (see below) [%s]\n"
             "-f  STRING   fastq file 1, quality strings to randomly sample for error model\n"
             "-g  STRING   fastq file 2 (if paired), together with fastq file 1\n"
-            "-i  FLAG     if present, filter alignment-identical simulated reads.  if absent, output all simulated reads.[false]\n"
+            "-i  FLAG     output only one of alignment-identical simulated reads\n"
             "-c  CHAR     quality code in fastq input defining quality score of zero [%c]\n"
-            "-u  INT      quality score in fastq input defining minimum median quality for a quality string to be used [%Zu]\n"
-            "-m  STRING   somatic mutation file: (species, contig_name, position, orig_base, mut_base)['%s']\n"
-            "-M  INT      number bytes maximum memory to use[%Zu]\n"
+            "-u  INT      minimum median Phred quality score to use quality string [%Zu]\n"
+            "-m  STRING   somatic mutation file: species, contig, position, orig_base, mut_base [%s]\n"
+            "-M  INT      number bytes maximum memory to use [%Zu]\n"
             "-r  INT      random seed for repeatability [%Zu]\n\n",
             ddef, ldef, sdef, cdef, udef, mdef, Mdef, rdef);
 
     fprintf(stderr,
+            "genome.dnas         dna index file generated from make_dnas_file and fasta2cisfasta\n"
+            "transcripts.gtf     gtf-formatted annotation file defining all transcripts\n"
+            "transcripts.expr    expression levels of transcripts, produced from 'sim expression'\n\n"
+
             "Output Files\n\n"
-            "transcript.expression.txt: expression levels of transcripts, produced from 'sim expression'\n"
-            "output.sam:                output sam file containing alignment definitions\n"
-            "output_counts.txt:         output file with contig transcript strand num_fragments num_transcript_molecules\n"
-            "first_read_sim.fastq:      output fastq file containing first-in-pair simulated reads\n"
-            "second_read_sim.fastq:     [optional] output fastq file containing first-in-pair simulated reads\n\n"
-            "Note: if 'second_read_sim.fastq' is not provided, first_read_sim.fastq will contain\n"
-            "intercalated read pairs as first,second,first,second, etc.\n\n"
+
+            "sim.sam             SAM containing alignment definitions\n"
+            "sim.frag            fields: contig transcript strand num_fragments num_transcript_mols\n"
+            "sim.read1.fastq     fastq containing first-in-pair simulated reads\n"
+            "sim.read2.fastq     fastq containing second-in-pair simulated reads\n\n"
+            "Note: if 'sim.read2.fastq' is not provided, sim.read1.fastq will contain\n"
+            "      intercalated read pairs as first,second,first,second, etc.\n\n"
+
             "Note 2: if any of the three files are '/dev/null', will not print to that file\n"
-            "and execution will be faster\n\n");
+            "and execution will be faster.\n\n"
+
+            );
 
     fprintf(stderr,
             "Possible sampling schemes:\n\n"
             "'cut:cutprob,fmin,fmax,totmol'\twhere:\n\n"
             "cutprob (FLOAT) is the probability [0,1] of a nucleotide bond being cut\n"
-            "fmin, fmax,  (INTEGER) are the minimum and maximum allowable sizes of fragments to be retained\n"
-            "totmol (INTEGER): total number of original transcripts to generate from the expression file proportions\n\n"
+            "fmin, fmax (INT) size range of retained fragments\n"
+            "totmol (INT): total num transcript mols to generate\n\n"
+
             "'uniform:stepsize,fmin,fstep,fmax'\twhere:\n\n"
-            "stepsize (INTEGER) is the number of bases apart of each start position on the sampled transcript\n"
-            "fmin, fstep, fmax (INTEGER) e.g. 100,10,150 will generate fragment sizes 100,110,120,130,140,150\n\n"
+
+            "stepsize (INT) num bases apart of each start position on sampled transcript\n"
+            "fmin, fstep, fmax (INT) e.g. 100,10,150 generates sizes 100,110,120,130,140,150\n\n"
             );
            
     fprintf(stderr,
@@ -91,7 +100,7 @@ int sim_reads_usage(char const* ddef, size_t ldef,
             "F = positive integer fragment size\n\n"
             "Any remaining alignment blocks not on the same 'D' (contig) may be appended with commas.\n"
             "For example:\n\n"
-            "1:read1:chr1:+:10592:50M:read2:chr1:-:10792:50M:fragment_size:150\n"
+            "1:read1:chr1:+:10592:50M:read2:chr1:-:10792:50M:fragment_size:150\n\n"
             );
     return 1;
 }
@@ -305,7 +314,6 @@ int main_sim_reads(int argc, char ** argv)
     const bool do_reverse_second_quals = true;
 
     bool paired_reads_are_same_stranded = false;
-    bool ignore_duplicate_mapped_pairs = true;
 
     ReadSampler read_sampler(somatic_mutations, qual_file1, qual_file2,
                              read_length, zero_quality_code,
@@ -364,9 +372,10 @@ int main_sim_reads(int argc, char ** argv)
         }
     }
         
-    SAM_ORDER sam_order = ignore_read_ids_for_uniqueness ? SAM_POSITION : SAM_POSITION_RID;
+    SamOrder sam_order((ignore_read_ids_for_uniqueness ? SAM_POSITION : SAM_POSITION_RID),
+                       "MIN_ALIGN_GUIDE");
 
-    LessSAMLinePair sam_pair_less_fcn(sam_order);
+    LessSAMLinePair sam_pair_less_fcn(&sam_order);
 
     FILE * output_sam_fh = open_if_present(output_sam_file, "w");
 
@@ -391,9 +400,7 @@ int main_sim_reads(int argc, char ** argv)
     if (do_paired_end)
     {        
         //CIGAR to describe the relationship between genome dna and matepair
-        SamBuffer sam_buffer(sam_order, 
-                             paired_reads_are_same_stranded, 
-                             ignore_duplicate_mapped_pairs);
+        SamBuffer sam_buffer(&sam_order, paired_reads_are_same_stranded);
 
         for (std::set<SequenceProjection>::const_iterator 
              sp_it = tx_to_genome.begin(); sp_it != tx_to_genome.end(); ++sp_it)
@@ -468,11 +475,11 @@ int main_sim_reads(int argc, char ** argv)
                                                      do_simulate_errors,
                                                      do_sample_sense_strand);
                 
-                bool first_inserted = sam_buffer.insert(read_pair.first);
-                assert(first_inserted);
+                std::pair<SamLine const*, bool> first_inserted = sam_buffer.insert(read_pair.first);
+                assert(first_inserted.second);
 
-                bool second_inserted = sam_buffer.insert(read_pair.second);
-                if (! second_inserted)
+                std::pair<SamLine const*, bool> second_inserted = sam_buffer.insert(read_pair.second);
+                if (! second_inserted.second)
                 {
                     --this_num_fragments;
                 }

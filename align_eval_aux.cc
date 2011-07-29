@@ -23,8 +23,8 @@ build_index(char const* sam_file,
             char * chunk_buffer,
             size_t max_mem,
             size_t max_line,
-            size_t (* samline_pos)(char const*, CONTIG_OFFSETS const&), 
-            CONTIG_OFFSETS const& contig_offsets,
+            SamOrder const& sam_order,
+            // size_t (* samline_pos)(char const*), 
             size_t * num_chunks)
 {
 
@@ -64,7 +64,7 @@ build_index(char const* sam_file,
         {
             //zero terminated.  we still want to record the spacer for what was the \n
             line_length = strlen(*sit) + 1; 
-            index = samline_pos(*sit, contig_offsets);
+            index = (sam_order.*(sam_order.sam_index))(*sit);
             line_index.push_back(LineIndex(index, current_offset, line_length));
             current_offset += line_length;
         }

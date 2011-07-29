@@ -1,5 +1,6 @@
 #include "align_eval_aux.h"
 #include "dep/tools.h"
+#include "sam_order.h"
 
 #include <ext/algorithm>
 #include <getopt.h>
@@ -48,24 +49,15 @@ int main_align_eval_checksort(int argc, char ** argv)
 
     char const* sorted_sam_file = argv[optind];
     FILE * sorted_sam_fh = open_if_present(sorted_sam_file, "r");
+    
+    bool numeric_start_fragment_ids = false;
+    SamLine::SetGlobalFlags(numeric_start_fragment_ids);
 
+    SamOrder sam_order(SAM_RID, sort_type);
 
-    size_t (* samline_index)(char const*, CONTIG_OFFSETS const&);
-    if (strcmp(sort_type, "MIN_ALIGN_GUIDE") == 0)
-    {
-        samline_index = &samline_position_min_align_guide;
-    }
-    else
-    {
-        fprintf(stderr, "Sorry, %s sort type not implemented\n", sort_type);
-        exit(1);
-    }
+    sam_order.AddHeaderContigStats(sorted_sam_fh);
 
-
-    std::map<std::string, size_t> contig_lengths = ContigLengths(sorted_sam_fh);
     SetToFirstDataLine(&sorted_sam_fh);
-
-    CONTIG_OFFSETS contig_offsets = ContigOffsets(contig_lengths);
 
     size_t const max_mem = 1024l * 1024l * 100l;
     size_t const max_line = 10000;
@@ -75,7 +67,7 @@ int main_align_eval_checksort(int argc, char ** argv)
 
     std::vector<LineIndex> line_index = 
         build_index(sorted_sam_file, chunk_buffer, max_mem, max_line,
-                    samline_index, contig_offsets, &num_chunks);
+                    sam_order, &num_chunks);
     
     delete chunk_buffer;
 

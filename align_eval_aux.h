@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "sam_helper.h"
+#include "sam_order.h"
 
 struct LineIndex
 {
@@ -25,8 +26,8 @@ build_index(char const* sam_file,
             char * chunk_buffer,
             size_t max_mem,
             size_t max_line,
-            size_t (* samline_pos)(char const*, CONTIG_OFFSETS const&), 
-            CONTIG_OFFSETS const& contig_offsets,
+            SamOrder const& sam_order,
+            /* size_t (* samline_pos)(char const*),  */
             size_t * num_chunks);
 
 

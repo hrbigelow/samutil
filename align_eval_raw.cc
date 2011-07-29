@@ -28,6 +28,7 @@
 
 #include "cigar_ops.h"
 #include "sam_helper.h"
+#include "sam_order.h"
 #include "dep/tools.h"
 #include "align_eval_raw.h"
 
@@ -35,26 +36,49 @@
 int align_eval_raw_usage(size_t qdef)
 {
     fprintf(stderr,
-            "Usage:\n\n"
+            "\nUsage:\n\n"
             "align_eval raw [OPTIONS] alignment_sorted.sam jumps.txt align_stats.cumul.txt \\\n"
             "           align_stats.{oplen,fragsize}.{full,by_half}.txt\n\n"
             "Options:\n\n"
-            "-q  INT      minimum quality to include alignment[%Zu]\n"
+            "-q  INT      minimum mapping quality to include alignment[%Zu]\n"
             "-p  FLAG     (primary alignment) if present, require primary alignment.\n"
             "             in this case, do not tally 'correct' and 'error' jumps\n"
-            "             for non-primary alignments (SAM flag 0x0100, 256) [absent]\n",
+            "             for non-primary alignments (SAM flag 0x0100, 256)\n\n",
             qdef);
 
     fprintf(stderr,
-            "jumps.txt has fields:\n"
-            "<contig> <position> <guide_jump> <correct_jump> <error_jump>\n"
-            "It is used as input for other align_eval functions\n\n"
             "Output files:\n\n"
-            "align_stats.full.txt:  first_op_length num_bases_correct num_reads_in_category total_num_reads_in_category total_num_guidefields:\n"
-            "align_stats.by_halfs.txt:  first_op_length num_bases_correct num_reads_in_category total_num_reads_in_category total_num_guidefields:\n"
-            "<guide_cigar> <num_correct_placed_bases> <num_reads>\n"
-            "It tallies the number of each primary alignment having the number of \n"
-            "correctly placed bases\n");
+
+            "jumps.txt: <contig> <position> <guide_jump> <correct_jump> <error_jump>\n\n"
+
+            "Used as input for other align_eval functions\n\n"
+
+            "align_stats.oplen.full.txt fields:\n\n"
+            "first_op_length    L, length of first CIGAR operation\n"
+            "num_bases_correct  C, # bases in alignment that are correctly placed\n"
+            "num_reads_L_C      # aligned reads with first_op_length = L, num_bases_correct = C\n"
+            "num_reads_L        # aligned reads with first_op_length = L\n"
+            "total_num_guide    # reads simulated \n\n\n"
+
+
+            "align_stats.oplen.by_halfs.txt fields:\n\n"
+            "first_op_length    L, length of first CIGAR operation\n"
+            "num_reads_L_good   # aligned reads with first_op_length = L, half or more bases correct\n"
+            "num_reads_L_bad    # aligned reads with first_op_length = L, under half bases correct\n"
+            "num_reads_L        # aligned reads with first_op_length = L\n"
+            "total_num_guide    # reads simulated with first_op_length = L\n\n\n"
+
+
+            "align_stats.fragsize.{full,by_halfs}.txt:\n\n"
+
+            "fragsize           Fragment size of simulated reads. Retrieved from read id field (see sim)\n"
+            "<Other fields>     same as oplen output, broken down by fragment size\n\n"
+
+            "align_stats.{oplen,fragsize}.{full,by_half}.txt are used to evaluate\n"
+            "alignment accuracy at the splice-junction level, and taking into account\n"
+            "fragment length.\n\n"
+
+            );
     return 1;
 }
 
@@ -251,10 +275,12 @@ int main_align_eval_raw(int argc, char ** argv)
     bool allow_absent_seq_qual = true;
 
     SamLine * samline;
-    std::map<std::string, size_t> contig_lengths = ContigLengths(alignment_sam_fh);
-    SetToFirstDataLine(&alignment_sam_fh);
 
-    CONTIG_OFFSETS contig_offsets = ContigOffsets(contig_lengths);
+    SamOrder sam_order(SAM_RID, "MIN_ALIGN_GUIDE"); // doesn't matter what the order is here.
+
+    sam_order.AddHeaderContigStats(alignment_sam_fh);
+
+    SetToFirstDataLine(&alignment_sam_fh);
 
     //stores features ordered by flattened transcript coordinate
     std::map<size_t, Feature> ordered_features;
@@ -304,6 +330,7 @@ int main_align_eval_raw(int argc, char ** argv)
     std::map<size_t, guide_used> total_by_oplen;
     std::map<size_t, guide_used> total_by_fragsize;
 
+
     samline = new SamLine(alignment_sam_fh, allow_absent_seq_qual);
 
     while (samline->parse_flag == DATA_LINE)
@@ -330,14 +357,12 @@ int main_align_eval_raw(int argc, char ** argv)
         //determine low_bound coordinate for read (least coordinate
         //between its guide and aligned positions)
         //tally the guide state
-        guide_offset_iter = contig_offsets.find(guide_coords.contig);
+        guide_offset_iter = sam_order.contig_offsets.find(guide_coords.contig);
 
         size_t align_flat_low_bound = 
-            flattened_position(samline->rname, samline->zero_based_pos(), 
-                               samline->flag, contig_offsets,
-                               &align_offset_iter);
+            sam_order.flattened_position(samline, &align_offset_iter);
 
-        assert(guide_offset_iter != contig_offsets.end());
+        assert(guide_offset_iter != sam_order.contig_offsets.end());
         
         size_t guide_flat_low_bound = (*guide_offset_iter).second + guide_coords.position;
 
@@ -588,7 +613,7 @@ int main_align_eval_raw(int argc, char ** argv)
 
         }
 
-        else if (align_offset_iter != contig_offsets.end())
+        else if (align_offset_iter != sam_order.contig_offsets.end())
         {
             //guide and test not on same contig or strand.  classify
             //as completely wrong
@@ -697,23 +722,6 @@ int main_align_eval_raw(int argc, char ** argv)
     
     close_if_present(output_jumps_fh);
 
-    //delete contig_offsets names
-    char const** keys = new char const*[contig_offsets.size()];
-    size_t k;
-    CONTIG_OFFSETS::iterator ci;
-    for (ci = contig_offsets.begin(), k = 0; ci != contig_offsets.end(); ++ci, ++k)
-    {
-        keys[k] = (*ci).first;
-    }
-    contig_offsets.clear();
-
-    for (size_t k = 0; k != contig_offsets.size(); ++k)
-    {
-        delete keys[k];
-    }
-    delete keys;
-
-    
     fprintf(dist_summary_fh, 
             "G (guide bases)           :%14Zu\n"
             "T (total in alignments)   :%14Zu\n"

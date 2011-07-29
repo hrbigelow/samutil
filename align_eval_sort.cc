@@ -35,7 +35,7 @@
 #include "file_utils.h"
 #include "dep/tools.h"
 #include "sam_helper.h"
-
+#include "sam_order.h"
 
 
 std::vector<INDEX_ITER> 
@@ -86,7 +86,7 @@ int align_eval_sort_usage(char const* sdef, size_t mdef)
 
     fprintf(stderr,
             "Sort orders are:\n"
-            "READ_ID: sort by read id\n"
+            "READ_ID_FLAG: sort by read id / pair flag (uniquely identifies the physical fragment)\n"
             "ALIGN: sort by alignment position\n"
             "GUIDE: sort by read-id encoded guide alignment position\n"
             "MIN_ALIGN_GUIDE: sort by the minimum of ALIGN or GUIDE\n\n");
@@ -126,25 +126,6 @@ int main_align_eval_sort(int argc, char ** argv)
         return align_eval_sort_usage(sort_type_def, max_mem_def);
     }
 
-    size_t (* samline_index)(char const*, CONTIG_OFFSETS const&);
-    if (strcmp(sort_type, "MIN_ALIGN_GUIDE") == 0)
-    {
-        samline_index = &samline_position_min_align_guide;
-    }
-    else if (strcmp(sort_type, "ALIGN") == 0)
-    {
-        samline_index = &samline_position_align;
-    }
-    else if (strcmp(sort_type, "READ_ID_FLAG") == 0)
-    {
-        samline_index = &samline_read_id_flag;
-    }
-    else
-    {
-        fprintf(stderr, "Sorry, %s sort type not implemented\n", sort_type);
-        exit(1);
-    }
-
     char const* alignment_sam_file = argv[optind];
     char const* sorted_sam_file = argv[optind + 1];
 
@@ -154,7 +135,10 @@ int main_align_eval_sort(int argc, char ** argv)
 
     FILE * used_header_fh = (sam_header_fh != NULL) ? sam_header_fh : alignment_sam_fh;
 
-    std::map<std::string, size_t> contig_lengths = ContigLengths(used_header_fh);
+    SamOrder sam_order(SAM_RID, sort_type);
+
+    sam_order.AddHeaderContigStats(used_header_fh);
+
     SetToFirstDataLine(&used_header_fh);
 
     size_t header_length = ftell(used_header_fh);
@@ -167,9 +151,8 @@ int main_align_eval_sort(int argc, char ** argv)
 
     fflush(sorted_sam_fh);
 
-   SetToFirstDataLine(&alignment_sam_fh);
+    SetToFirstDataLine(&alignment_sam_fh);
 
-    CONTIG_OFFSETS contig_offsets = ContigOffsets(contig_lengths);
 
     /*
       The index will transition between four possible orderings during these
@@ -224,7 +207,7 @@ int main_align_eval_sort(int argc, char ** argv)
     fflush(stderr);
     std::vector<LineIndex> line_index = 
         build_index(alignment_sam_file, chunk_buffer, max_mem, max_line,
-                    samline_index, contig_offsets, &num_chunks);
+                    sam_order, &num_chunks);
     fprintf(stderr, "done\n");
     fflush(stderr);
 

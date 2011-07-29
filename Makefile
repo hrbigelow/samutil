@@ -88,12 +88,11 @@ union_regions: $(union_regions_OBJS)
 #	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^
 
 
-sim_OBJS = $(addprefix $(OBJDIR)/,\
-	sim.o sim_reads.o sim_expression.o transcript_generator.o	\
-	readsim_aux.o cigar_ops.o sam_helper.o dep/tools.o			\
-	dep/simulation.o dep/nucleotide_stats.o cisortho/dna.o		\
-	cisortho/dnacol.o cisortho/litestream.o dep/stats_tools.o	\
-	sam_buffer.o fragment_generator.o gtf.o file_utils.o)
+sim_OBJS = $(addprefix $(OBJDIR)/, sim.o sim_reads.o sim_expression.o	\
+	transcript_generator.o readsim_aux.o cigar_ops.o sam_helper.o		\
+	dep/tools.o dep/simulation.o dep/nucleotide_stats.o cisortho/dna.o	\
+	cisortho/dnacol.o cisortho/litestream.o dep/stats_tools.o			\
+	sam_buffer.o sam_order.o fragment_generator.o gtf.o file_utils.o)
 
 sim: $(sim_OBJS)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -lz -o $@ $^
@@ -101,10 +100,10 @@ sim: $(sim_OBJS)
 
 
 samutil_OBJS = $(addprefix $(OBJDIR)/, samutil.o						\
-	sam_transcript_to_genome.o dep/tools.o	\
-	gtf.o cisortho/dna.o sam_score_mapq.o sam_score_aux.o			\
-	align_eval_raw.o sam_score_dist.o cisortho/region.o				\
-	readsim_aux.o file_utils.o sam_buffer.o sam_helper.o cigar_ops.o	\
+	sam_transcript_to_genome.o sam_merge_transcript_genome.o			\
+	dep/tools.o gtf.o cisortho/dna.o sam_score_mapq.o sam_score_aux.o	\
+	sam_score_dist.o align_eval_raw.o cisortho/region.o readsim_aux.o	\
+	file_utils.o sam_buffer.o sam_helper.o sam_order.o cigar_ops.o		\
 	cisortho/nested.o dep/nucleotide_stats.o get_spliced_sequence.o		\
 	dep/stats_tools.o cisortho/litestream.o cisortho/enum.o				\
 	cisortho/dnacol.o)
@@ -133,7 +132,7 @@ align_eval_OBJS = $(addprefix $(OBJDIR)/, \
 	align_eval.o align_eval_raw.o align_eval_sort.o				\
 	align_eval_aux.o align_eval_checksort.o align_eval_mask.o			\
 	align_eval_coverage.o align_eval_stats.o cigar_ops.o file_utils.o	\
-	sam_helper.o dep/tools.o)
+	sam_helper.o sam_order.o dep/tools.o)
 
 align_eval: $(align_eval_OBJS)
 	$(CXX) $(CXXFLAGS) -lz -o $@ $^

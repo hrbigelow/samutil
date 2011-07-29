@@ -89,7 +89,7 @@ bool apply_projection_aux(SequenceProjection const& projection,
 
 bool ApplyProjectionToSAM(SequenceProjection const& projection,
                           SequenceProjection const& mate_projection,
-                          char alignment_space,
+                          char * alignment_space,
                           SamLine * first,
                           SamLine * second)
 {
@@ -101,11 +101,8 @@ bool ApplyProjectionToSAM(SequenceProjection const& projection,
         first->mpos = second->pos;
         second->mpos = first->pos;
 
-        char tag_template[20];
-        sprintf(tag_template, "%s:%c", AlignSpaceTag, alignment_space);
-
-        first->add_tag(tag_template);
-        second->add_tag(tag_template);
+        first->add_tag(AlignSpaceTag, AlignSpaceType, alignment_space);
+        second->add_tag(AlignSpaceTag, AlignSpaceType, alignment_space);
 
         return first_projected && second_projected;
     }

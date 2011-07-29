@@ -145,6 +145,18 @@ namespace Cigar
                         CIGAR_VEC const& cigar2,
                         bool add_padding,
                         bool inserts_are_introns);
+
+    //Used for discovering the agreeing subset of two very similar alignments.
+    //inputs: cigar1, (CIGAR(ref, first))
+    //        cigar2, (CIGAR(ref,second))
+    //output: tcigar: (CIGAR(ref, trimmed_first))
+    //'M' states that are the intersection of cigar1 and cigar2
+    //are retained in tcigar, the remaining states are converted to 'S'
+    CIGAR_VEC 
+        TransitiveTrim(CIGAR_VEC const& cigar1,
+                       CIGAR_VEC const& cigar2,
+                       bool add_padding,
+                       bool inserts_are_introns);
         
     
     size_t ProjectCoord(CIGAR_VEC const& transformation,
@@ -177,7 +189,9 @@ namespace Cigar
     //invert a cigar.  
     CIGAR_VEC Invert(Cigar::CIGAR_VEC const& source, size_t position);
 
-    size_t CountAlignedPositions(Cigar::CIGAR_VEC const& merged);
+    size_t CountAlignedPositions(Cigar::CIGAR_VEC const& merged,
+                                 size_t * total_bases_top,
+                                 size_t * total_bases_bottom);
 
     typedef std::multiset<std::pair<size_t, size_t> > CIGAR_INDEX;
     std::multiset<std::pair<size_t, size_t> > ComputeOffsets(CIGAR_VEC const& cigar);

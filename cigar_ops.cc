@@ -346,9 +346,9 @@ std::multiset<std::pair<size_t, size_t> > Cigar::ComputeOffsets(Cigar::CIGAR_VEC
 
 
 //returns the cigar relationship CIGAR(first, second) from CIGAR(ref,
-//first) and CIGAR(ref, second).  Sets <first_to_second_displacement
-//to the calculated displacement from the beginning of the first to
-//the beginning of the second sequence.
+//first) and CIGAR(ref, second).  The 'cigar1' may in general be long
+//representing an entire transcriptome on one contig, for example.
+//It must be indexed, allowing efficient merging of first and second.
 Cigar::CIGAR_VEC 
 Cigar::TransitiveMerge(Cigar::CIGAR_VEC const& cigar1,
                        std::multiset<std::pair<size_t, size_t> > const& cigar_index1,
@@ -596,6 +596,187 @@ Cigar::TransitiveMerge(Cigar::CIGAR_VEC const& cigar1,
 }
 
 
+
+//Used for discovering the agreeing subset of two very similar alignments.
+//inputs: cigar1, (CIGAR(ref, first))
+//        cigar2, (CIGAR(ref,second))
+//output: tcigar: (CIGAR(ref, trimmed_first))
+//'M' states that are the intersection of cigar1 and cigar2
+//are retained in tcigar, the remaining states are converted to 'S'
+
+Cigar::CIGAR_VEC 
+Cigar::TransitiveTrim(Cigar::CIGAR_VEC const& cigar1,
+                      Cigar::CIGAR_VEC const& cigar2,
+                      bool add_padding,
+                      bool inserts_are_introns)
+{
+    Cigar::CIGAR_VEC cigar_trans;
+
+    if (cigar2.empty())
+    {
+        return cigar_trans;
+    }
+    
+    Cigar::CIGAR_ITER iter1 = cigar1.begin();
+    Cigar::CIGAR_ITER end1 = cigar1.end();
+
+    Cigar::CIGAR_ITER iter2 = cigar2.begin();
+    Cigar::CIGAR_ITER end2 = cigar2.end();
+
+    Cigar::Op op1 = (*iter1).op;
+    size_t remain1 = (*iter1).length;
+
+    Cigar::Op op2 = (*iter2).op;
+    size_t remain2 = (*iter2).length;
+
+    Cigar::Op delete_op = inserts_are_introns ? Cigar::N : Cigar::D;
+
+    size_t minstep;
+
+    //bool cigar1_finished = (iter1 == end1);
+    bool cigar2_finished = (iter2 == end2);
+
+    while (! cigar2_finished)
+    {
+
+        //if op2 == D, gobble up op1 units until the unit that straddles the
+        //end coordinate of op2
+        minstep = std::min(remain1, remain2);
+        
+        switch (op1)
+        {
+        case Cigar::M:
+            switch (op2)
+            {
+            case Cigar::M:
+            case Cigar::D:
+            case Cigar::N:
+                {
+                    cigar_trans.push_back(Cigar::Unit(op2, minstep));
+                    remain1 -= minstep;
+                    remain2 -= minstep;
+                }
+                break;
+            case Cigar::I:
+            case Cigar::S:
+            case Cigar::H:
+                {
+                    cigar_trans.push_back(Cigar::Unit(op2, remain2));
+                    remain2 = 0;
+                }
+                break;
+            case Cigar::P:
+            case Cigar::None:
+                assert(false);
+                break;
+            }
+            break;
+        case Cigar::I:
+            switch (op2)
+            {
+            case Cigar::M:
+            case Cigar::D:
+            case Cigar::N:
+            case Cigar::S:
+            case Cigar::H:
+                {
+                    cigar_trans.push_back(Cigar::Unit(delete_op, remain1));
+                    remain1 = 0;
+                }
+                break;
+            case Cigar::I:
+                {
+                    fprintf(stderr, "CigarTransitiveMerge: Cannot combine two I states."
+                            "Undefined alignment\n");
+                    exit(1);
+                }
+                break;
+            case Cigar::P:
+            case Cigar::None:
+                assert(false);
+                break;
+            }
+            break;
+        case Cigar::D:
+            switch (op2)
+            {
+            case Cigar::M:
+                cigar_trans.push_back(Cigar::Unit(Cigar::I, minstep));
+                remain1 -= minstep;
+                remain2 -= minstep;
+                break;
+
+            case Cigar::I:
+                cigar_trans.push_back(Cigar::Unit(Cigar::I, remain2));
+                remain2 = 0;
+                break;
+
+            case Cigar::D:
+            case Cigar::N:
+                if (add_padding)
+                {
+                    cigar_trans.push_back(Cigar::Unit(Cigar::P, minstep));
+                }
+                remain1 -= minstep;
+                remain2 -= minstep;
+                break;
+
+            case Cigar::S:
+            case Cigar::H:
+                {
+                    //ignore this operation in the second block
+                    remain2 = 0;
+                }
+                break;
+
+            case Cigar::P:
+            case Cigar::None:
+                assert(false);
+                break;
+            }
+            break;
+
+        default:
+            fprintf(stderr, "Error: transitive merge only valid for M, I, and D CIGAR ops.");
+            exit(2);
+        }
+            
+        if (remain1 == 0)
+        {
+            ++iter1;
+            if (iter1 != end1)
+            {
+                remain1 = (*iter1).length;
+                op1 = (*iter1).op;
+            }
+            else
+            {
+                op1 = Cigar::D;
+                remain1 = UINT64_MAX;
+            }
+        }
+        if (remain2 == 0)
+        {
+            ++iter2;
+            cigar2_finished = (iter2 == end2);
+            if (! cigar2_finished)
+            {
+                remain2 = (*iter2).length;
+                op2 = (*iter2).op;
+            }
+        }
+        if (cigar2_finished)
+        {
+            break;
+        }
+    }
+//now consolidate consecutive like-states in the CIGAR vector
+return Cigar::Consolidate(cigar_trans);
+}
+
+
+
+
 //how to tell if this is a valid projection?
 size_t Cigar::ProjectCoord(Cigar::CIGAR_VEC const& transformation,
                            std::multiset<std::pair<size_t, size_t> > const& trans_index,
@@ -709,9 +890,11 @@ Cigar::CIGAR_VEC Cigar::Invert(Cigar::CIGAR_VEC const& source, size_t position)
 }
 
 
-//count the number of correctly aligned positions, represented by a merged
-//cigar.
-size_t Cigar::CountAlignedPositions(Cigar::CIGAR_VEC const& merged)
+//count the number of correctly aligned positions, represented by a
+//merged cigar.
+size_t Cigar::CountAlignedPositions(Cigar::CIGAR_VEC const& merged, 
+                                    size_t * total_bases_top, 
+                                    size_t * total_bases_bottom)
 {
     size_t guide_read_pos = 0;
     size_t test_read_pos = 0;
@@ -763,6 +946,9 @@ size_t Cigar::CountAlignedPositions(Cigar::CIGAR_VEC const& merged)
             break;
         }
     }
+    *total_bases_top = guide_read_pos;
+    *total_bases_bottom = test_read_pos;
+
     return num_correct_bases;
 }
 
@@ -817,3 +1003,5 @@ int64_t Cigar::ProjectCoord(Cigar::CIGAR_ITER projection_start,
     return coordinate + target_position - source_position;
 }
 */
+
+

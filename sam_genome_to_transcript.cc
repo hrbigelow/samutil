@@ -150,13 +150,8 @@ int main_genome_to_transcript(int argc, char ** argv)
     }
     transcript_extent_trees = cis::BuildTrees(transcript_extents);
 
-    bool ignore_duplicate_mapped_pairs = false;
-
     SamLine * samline;
-    SamBuffer sam_buffer(sam_order,
-                         paired_reads_are_same_stranded,
-                         output_is_ones_based_pos,
-                         ignore_duplicate_mapped_pairs);
+    SamBuffer sam_buffer(sam_order, paired_reads_are_same_stranded);
 
     contig_iter = contigs.end();
 

@@ -9,12 +9,12 @@ int main_usage()
 {
     fprintf(stderr,
             "\nUsage:\n\n"
-            "align_eval raw [OPTIONS] alignment_sorted.sam jumps.txt\n"
+            "align_eval raw [OPTIONS] alignment_sorted.sam jumps.txt align_stats.cumul.txt align_stats.{oplen,fragsize}.{full,by_half}.txt \n"
             "align_eval sort [OPTIONS] alignment.sam alignment_sorted.sam\n"
             "align_eval checksort [OPTIONS] alignment_sorted.sam\n"
             "align_eval mask [OPTIONS] jumps.txt mask.txt\n"
             "align_eval coverage [OPTIONS] jumps.txt coverage.txt\n"
-            "align_eval stats [OPTIONS] jumps.txt stats.txt\n\n"
+            "align_eval stats [OPTIONS] jumps.txt stats.txt dist.txt\n\n"
             );
 
     return 1;

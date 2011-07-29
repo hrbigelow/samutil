@@ -36,14 +36,117 @@ by start on the genome, then we just keep track of new transcripts in the SamLin
 int transcript_to_genome_usage()
 {
     fprintf(stderr,
-            "Usage:\n\n"
-            "samutil tx2genome [OPTIONS] species annotations.gtf transcript_alignment.sam genome_header.sam projected_genome_alignment.sam\n\n"
+            "\nUsage:\n\n"
+            "samutil tx2genome [OPTIONS] species transcripts.gtf reads.vs.tx.sam reads.vs.genome.sam\n\n"
             "Options:\n\n"
             "-h      STRING    genome-space SAM header file to be included in output\n"
             "\n"
+            "Only one of each group of identical fragment alignments is output.\n"
+            "These arise from congruent subsets of isoforms in transcripts.gtf.\n"
+            "SAM Records successfully projected will have the 'XP:A:T' tag added.\n"
+            "reads.vs.tx.sam must be sorted by [rname, read_pair_flag, pos].\n"
             );
     return 1;
 }
+
+typedef std::set<SequenceProjection>::const_iterator SP_ITER;
+typedef std::map<char const*, SP_ITER, less_char_ptr> PROJ_MAP;
+typedef PROJ_MAP::const_iterator NP_ITER;
+
+//call at the end of loading the input_buffer with all alignments to a
+//given transcript.
+
+//find projection by name.  assume all unique entry pairs in input
+//buffer are on the same transcript, namely 'prev_rname'. Project them
+//to the output buffer, and update the lowbound for the output buffer
+//to the minimum position on the genome of the transcript being processed.
+void ProjectTranscriptEntries(PROJ_MAP const& tx_name_to_projection, 
+                              SamBuffer & input_buffer, 
+                              SamBuffer & output_buffer,
+                              char const* prev_rname)
+{
+    if (! input_buffer.unique_entry_pairs.empty())
+    {
+
+        std::pair<SamLine const*, bool> insert_result;
+
+        SP_ITER first_proj;
+        SP_ITER second_proj;
+        NP_ITER nit = tx_name_to_projection.find(prev_rname);
+        if (nit == tx_name_to_projection.end())
+        {
+            fprintf(stderr, "Error: couldn't find transcript %s in projections "
+                    "derived from GTF file\n", prev_rname);
+            exit(1);
+        }
+        else
+        {
+            first_proj = (*nit).second;
+        }
+                    
+        for (PAIRED_READ_SET::iterator pit = input_buffer.unique_entry_pairs.begin();
+             pit != input_buffer.unique_entry_pairs.end(); ++pit)
+        {
+
+            SamLine * first = const_cast<SamLine *>((*pit).first);
+            SamLine * second = const_cast<SamLine *>((*pit).second);
+
+            assert(strcmp(prev_rname, first->rname) == 0);
+
+            //but, their mates may not be
+            NP_ITER nit_mate = strcmp(first->rname, first->mate_ref_name()) == 0 ? nit 
+                : tx_name_to_projection.find(first->mate_ref_name());
+                    
+            if (nit_mate == tx_name_to_projection.end())
+            {
+                fprintf(stderr, "Error: couldn't find transcript %s in projections "
+                        "derived from GTF file\n", first->mate_ref_name());
+                exit(1);
+            }
+            else
+            {
+                second_proj = (*nit_mate).second;
+            }
+                    
+            //extract all completed input pairs
+            char aspace[] = "0";
+            aspace[0] = PrintAlignmentSpace(TRANSCRIPTOME);
+
+            bool projection_applied = 
+                ApplyProjectionToSAM(*first_proj, *second_proj, aspace, first, second);
+                        
+            assert(projection_applied);
+
+            assert(AreMappedMatePairs(*first, *second));
+
+            insert_result = output_buffer.insert(first);
+            insert_result = output_buffer.insert(second);
+
+
+            //char const* target_contig = (*first_proj).target_dna.c_str();
+            //size_t target_min_pos = (*first_proj).cigar[0].length;
+            // if (! first->query_unmapped())
+            // {
+            //     assert(target_min_pos <= first->pos);
+            // }
+                    
+        }
+        input_buffer.unique_entry_pairs.clear();
+                
+        //at this point, the low bound
+        char const* target_contig = (*first_proj).target_dna.c_str();
+        size_t target_min_pos = (*first_proj).cigar[0].length;
+
+        if (output_buffer.low_bound != NULL)
+        {
+            delete output_buffer.low_bound;
+        }
+        output_buffer.low_bound =
+            new SamLine(DATA_LINE, "0:", 0, target_contig, target_min_pos, 0, "", "*", 0, 0, "", "", "");
+
+    } // finished processing unique entry pairs up to the low bound
+}
+
 
 int main_transcript_to_genome(int argc, char ** argv)
 {
@@ -76,16 +179,22 @@ int main_transcript_to_genome(int argc, char ** argv)
     FILE * output_genome_sam_fh = open_or_die(output_genome_sam_file, "w", "Output genome-projected SAM file");
 
 
-    typedef std::set<SequenceProjection>::const_iterator SP_ITER;
-
     // input SAM file is allowed to have or not have seq / qual.
     // basically, they are just payload, and unaffected by the transformation
     bool allow_absent_seq_qual = true;
 
-    //bool flip_query_strand_flag = false;
-    SAM_ORDER sam_order = SAM_POSITION_RID;
-    bool paired_reads_are_same_stranded = false;
+    bool numeric_start_fragment_ids = true;
 
+    SamLine::SetGlobalFlags(numeric_start_fragment_ids);
+
+    SamOrder genome_sam_order(SAM_POSITION_RID, "ALIGN");
+    SamOrder tx_sam_order(SAM_POSITION_RID, "ALIGN");
+
+    genome_sam_order.AddHeaderContigStats(input_genome_sam_header_fh);
+    tx_sam_order.AddHeaderContigStats(input_tx_sam_fh);
+
+    bool paired_reads_are_same_stranded = false;
+    
     std::set<SequenceProjection> genome_to_tx = 
         gtf_to_sequence_projection(gtf_file, species);
 
@@ -113,9 +222,9 @@ int main_transcript_to_genome(int argc, char ** argv)
     //expansion mode, the sequence projection will be
     //transcript->genome 't2g', and be iterators into tx_to_genome.
     //otherwise, these will be iterators into genome_to_tx
-    typedef std::map<char const*, SP_ITER, less_char_ptr> PROJ_MAP;
+    
     PROJ_MAP tx_name_to_projection;
-    typedef PROJ_MAP::const_iterator NP_ITER;
+    
 
     std::map<cis::region const*, SP_ITER> tx_extent_to_projection;
     typedef std::map<cis::region const*, SP_ITER>::const_iterator MP_ITER;
@@ -141,26 +250,15 @@ int main_transcript_to_genome(int argc, char ** argv)
     SP_ITER first_proj = tx_to_genome.end();
     SP_ITER second_proj = tx_to_genome.end();
 
-    bool ignore_duplicate_mapped_pairs = false;
-
     char prev_rname[1024] = "";
 
     SamLine * samline;
-    SamBuffer input_buffer(sam_order,
-                           paired_reads_are_same_stranded,
-                           ignore_duplicate_mapped_pairs);
-    
-
-    SamBuffer output_buffer(sam_order,
-                            paired_reads_are_same_stranded,
-                            ignore_duplicate_mapped_pairs);
-    
+    SamBuffer input_buffer(&tx_sam_order, paired_reads_are_same_stranded);
+    SamBuffer output_buffer(&genome_sam_order, paired_reads_are_same_stranded);
     
     contig_iter = contigs.end();
 
-    std::map<std::string, size_t> tx_lengths = ContigLengths(input_tx_sam_fh);
-    CONTIG_OFFSETS tx_offsets = ContigOffsets(tx_lengths);
-    
+
     if (input_genome_sam_header_fh != NULL)
     {
         PrintSAMHeader(&input_genome_sam_header_fh, output_genome_sam_fh);
@@ -172,7 +270,7 @@ int main_transcript_to_genome(int argc, char ** argv)
     size_t prev_pos_index = 0;
     size_t cur_pos_index = 0;
 
-    bool inserted_to_input;
+    std::pair<SamLine const*, bool> insert_result;
 
     while (! feof(input_tx_sam_fh))
     {
@@ -182,6 +280,11 @@ int main_transcript_to_genome(int argc, char ** argv)
         switch (samline->parse_flag)
         {
         case END_OF_FILE: 
+            delete samline;
+            ProjectTranscriptEntries(tx_name_to_projection, input_buffer,
+                                     output_buffer, prev_rname);
+            break;
+
         case HEADER:
             delete samline;
             break;
@@ -193,12 +296,13 @@ int main_transcript_to_genome(int argc, char ** argv)
 
         case DATA_LINE:
 
+            //check well-orderedness of input
             sprintf(fake_samline, "fake\t%i\t%s\t%Zu", samline->flag, samline->rname, samline->pos);
-
-            cur_pos_index = samline_position_align(fake_samline, tx_offsets);
+            cur_pos_index = (input_buffer.sam_order->*(input_buffer.sam_order->sam_index))(fake_samline);
             if (cur_pos_index < prev_pos_index)
             {
-                fprintf(stderr, "Error: input is not sorted by [rname, flag, pos] fields\n");
+                fprintf(stderr, "Error: input is not sorted by [rname, flag, pos] fields\n"
+                        "Please sort by 'ALIGN' using align_eval sort\n");
                 exit(1);
             }
             prev_pos_index = cur_pos_index;
@@ -207,102 +311,19 @@ int main_transcript_to_genome(int argc, char ** argv)
             {
                 samline->print(output_genome_sam_fh, true);
                 delete samline;
-                inserted_to_input = false;
+                insert_result.second = false;
             }
             else
             {
-                inserted_to_input = input_buffer.insert(samline);
+                insert_result = input_buffer.insert(samline);
             }
 
-            if (inserted_to_input && strcmp(prev_rname, samline->rname) != 0)
+            if (insert_result.second && strcmp(prev_rname, samline->rname) != 0)
             {
-                //on a new contig.  
-                // if (input_buffer.low_bound != NULL)
-                // {
-                //     delete input_buffer.low_bound;
-                // }
-                // input_buffer.low_bound = 
-                //     new SamLine(DATA_LINE, "0:", 0, samline->rname, 0, 0, "", "*", 0, 0, "", "", "");
 
-                if (! input_buffer.unique_entry_pairs.empty())
-                {
-                    //find projection by name
-                    //assume all unique entry pairs in input buffer are on the same
-                    //transcript, namely 'prev_rname'.
-                    NP_ITER nit = tx_name_to_projection.find(prev_rname);
-                    if (nit == tx_name_to_projection.end())
-                    {
-                        fprintf(stderr, "Error: couldn't find transcript %s in projections "
-                                "derived from GTF file\n", prev_rname);
-                        exit(1);
-                    }
-                    else
-                    {
-                        first_proj = (*nit).second;
-                    }
-                    
-                    // PAIRED_READ_SET::const_iterator paired_bound =
-                    //     input_buffer.unique_entry_pairs.lower_bound
-                    //     (std::make_pair(input_buffer.low_bound, input_buffer.low_bound));
-                    
-                    for (PAIRED_READ_SET::iterator pit = input_buffer.unique_entry_pairs.begin();
-                         pit != input_buffer.unique_entry_pairs.end(); ++pit)
-                    {
+                ProjectTranscriptEntries(tx_name_to_projection, input_buffer,
+                                         output_buffer, prev_rname);
 
-                        SamLine * first = const_cast<SamLine *>((*pit).first);
-                        SamLine * second = const_cast<SamLine *>((*pit).second);
-
-                        assert(strcmp(prev_rname, first->rname) == 0);
-
-                        //but, their mates may not be
-                        NP_ITER nit_mate = strcmp(first->rname, first->mate_ref_name()) == 0 ? nit 
-                            : tx_name_to_projection.find(first->mate_ref_name());
-                    
-                        if (nit_mate == tx_name_to_projection.end())
-                        {
-                            fprintf(stderr, "Error: couldn't find transcript %s in projections "
-                                    "derived from GTF file\n", samline->mate_ref_name());
-                            exit(1);
-                        }
-                        else
-                        {
-                            second_proj = (*nit_mate).second;
-                        }
-                    
-                        //extract all completed input pairs
-                        bool projection_applied = 
-                            ApplyProjectionToSAM(*first_proj, *second_proj,
-                                                 PrintAlignmentSpace(TRANSCRIPTOME),
-                                                 first, second);
-                        
-                        assert(projection_applied);
-
-                        assert(AreMappedMatePairs(*first, *second));
-
-                        output_buffer.insert(first);
-                        output_buffer.insert(second);
-                        //char const* target_contig = (*first_proj).target_dna.c_str();
-                        //size_t target_min_pos = (*first_proj).cigar[0].length;
-                        // if (! first->query_unmapped())
-                        // {
-                        //     assert(target_min_pos <= first->pos);
-                        // }
-                    
-                    }
-                    input_buffer.unique_entry_pairs.clear();
-                
-                    //at this point, the low bound
-                    char const* target_contig = (*first_proj).target_dna.c_str();
-                    size_t target_min_pos = (*first_proj).cigar[0].length;
-
-                    if (output_buffer.low_bound != NULL)
-                    {
-                        delete output_buffer.low_bound;
-                    }
-                    output_buffer.low_bound =
-                        new SamLine(DATA_LINE, "0:", 0, target_contig, target_min_pos, 0, "", "*", 0, 0, "", "", "");
-
-                } // finished processing unique entry pairs up to the low bound
                 strcpy(prev_rname, samline->rname);
             } // if on new contig
             
