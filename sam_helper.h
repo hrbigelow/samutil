@@ -7,6 +7,8 @@
 #include <string>
 #include <cassert>
 #include <map>
+
+
 //#include <unordered_map>
 
 //flag masks.  When set, these flags proclaim their name
@@ -32,6 +34,34 @@ enum SAM_PARSE
         HEADER,
         DATA_LINE
     };
+
+enum SAM_QNAME_FORMAT
+    {
+        SAM_NUMERIC,
+        SAM_ILLUMINA,
+        SAM_CASAVA18,
+        SAM_NON_INTERPRETED
+    };
+
+struct less_char_ptr
+{
+    bool operator()(char const* a, char const* b) const
+    {
+        return strcmp(a, b) < 0;
+    }
+};
+
+struct eqstr
+{
+  bool operator()(const char* s1, const char* s2) const
+  {
+    return strcmp(s1, s2) == 0;
+  }
+};
+
+
+typedef std::map<char const*, size_t, less_char_ptr> CONTIG_OFFSETS;
+typedef CONTIG_OFFSETS::const_iterator OFFSETS_ITER;
 
 
 #define AlignSpaceTag "XP"
@@ -64,37 +94,26 @@ V parse_sam_tag(char const* tag_string,
 }
 
 
-struct less_char_ptr
-{
-    bool operator()(char const* a, char const* b) const
-    {
-        return strcmp(a, b) < 0;
-    }
-};
-
-struct eqstr
-{
-  bool operator()(const char* s1, const char* s2) const
-  {
-    return strcmp(s1, s2) == 0;
-  }
-};
-
 //typedef std::unordered_map<char const*, size_t, std::hash<char const*>, eqstr> CONTIG_OFFSETS;
 
+/*
+  Storage policy:
+  line, extra, and extra_tag own the memory they point to.
+  all other pointers point to offsets within them.
+  qname, rname, mrnm, seq, and qual always point into line.
+  cigar may point into line or extra
+  tag_string may point into line or extra_tag
+ */
 
 class SamLine
 {
 public:
 
-    // set this to true if we're in a training situation with
-    // numerically named qnames.
-
     size_t bytes_in_line;
     char * line;
     SAM_PARSE parse_flag;
     char * qname;
-    size_t qid;
+    size_t fragment_id;
     int flag;
     char * rname;
     size_t pos;
@@ -108,6 +127,7 @@ public:
     char * tag_string;
     char * extra;
     char * extra_tag;
+    size_t flattened_pos; //position along a virtual concatenated meta-contig.
 
     SamLine(SAM_PARSE _parse_flag,
             char const* _qname, int _flag, 
@@ -121,15 +141,16 @@ public:
     SamLine(FILE * sam_fh, bool allow_absent_seq_qual);
     SamLine(char const* samline_string, bool allow_absent_seq_qual);
 
+    SamLine(SamLine const& s);
+
     void Init(char const* samline_string, bool allow_absent_seq_qual);
+    void SetFlattenedPosition(CONTIG_OFFSETS const& contig_offsets,
+                              CONTIG_OFFSETS::const_iterator * contig_iter);
 
-    static void SetGlobalFlags(bool _numeric);
-    static bool numeric_start_fragment_ids;
+    static void SetGlobalFlags(SAM_QNAME_FORMAT _qname_format);
+    static SAM_QNAME_FORMAT sam_qname_format;
+    static size_t (* parse_fragment_id)(char const* qname);
 
-    SamLine(SamLine const&)
-    {
-        assert(false);
-    }
     SamLine();
 
     ~SamLine();
@@ -209,15 +230,15 @@ int SAM_cmp_qname_flag_aux(char const* qname1, int flag1,
                            char const* qname2, int flag2);
 
 
-void print_sam_line(FILE * sam_fh,
-                    char const* qname, int flag, 
-                    char const* rname, size_t pos,
-                    size_t mapq, char const* cigar,
-                    char const* mrnm, size_t mpos,
-                    int isize, char const* seq,
-                    char const* qual,
-                    char const* tag_string,
-                    bool output_is_ones_based);
+/* void print_sam_line(FILE * sam_fh, */
+/*                     char const* qname, int flag,  */
+/*                     char const* rname, size_t pos, */
+/*                     size_t mapq, char const* cigar, */
+/*                     char const* mrnm, size_t mpos, */
+/*                     int isize, char const* seq, */
+/*                     char const* qual, */
+/*                     char const* tag_string, */
+/*                     bool output_is_ones_based); */
 
 void PrintSAMHeader(FILE ** input_sam_fh, FILE * output_fh);
 

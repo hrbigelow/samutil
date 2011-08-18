@@ -3,19 +3,20 @@ SHELL = /bin/bash
 srcdir = .
 SOURCES = $(shell find $(srcdir) -name "*.cc")
 
-#BIN = evaluate_sam_alignment fastq2fastq shuffle_paired_fastq \
+#BIN = evaluate_sam_alignment fastq2fastq \
 # filter_sam_by_score filter_matching_lines get_peak_regions
 # test/matrix_test samutil_check sam_eval
 
-BIN = shuffle_paired_fastq fastq2fastq union_regions align_eval			\
-	 pretty_plot make_sq_header gtf_annotate_regions					\
-	 filter_reads_for_tophat make_dnas_file fasta2cisfasta split_reads	\
-	 scatter_smoothing
+BIN = fastq2fastq align_eval pretty_plot make_sq_header make_dnas_file	\
+	 fasta2cisfasta gtf_annotate_regions shuffle_paired_fastq
 
 BIN += sim
-#BIN += test_cigar
 BIN += samutil
 
+# BIN += filter_reads_for_tophat split_reads scatter_smoothing \
+# shuffle_paired_fastq union_regions 
+
+# BIN += test_cigar
 
 OPT = -O0
 
@@ -89,10 +90,11 @@ union_regions: $(union_regions_OBJS)
 
 
 sim_OBJS = $(addprefix $(OBJDIR)/, sim.o sim_reads.o sim_expression.o	\
-	transcript_generator.o readsim_aux.o cigar_ops.o sam_helper.o		\
-	dep/tools.o dep/simulation.o dep/nucleotide_stats.o cisortho/dna.o	\
-	cisortho/dnacol.o cisortho/litestream.o dep/stats_tools.o			\
-	sam_buffer.o sam_order.o fragment_generator.o gtf.o file_utils.o)
+	transcript_generator.o readsim_aux.o cigar_ops.o sam_order.o		\
+	sam_helper.o dep/tools.o dep/simulation.o dep/nucleotide_stats.o	\
+	cisortho/dna.o cisortho/dnacol.o cisortho/litestream.o				\
+	dep/stats_tools.o sam_buffer.o fragment_generator.o gtf.o			\
+	file_utils.o)
 
 sim: $(sim_OBJS)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -lz -o $@ $^
@@ -106,19 +108,19 @@ samutil_OBJS = $(addprefix $(OBJDIR)/, samutil.o						\
 	file_utils.o sam_buffer.o sam_helper.o sam_order.o cigar_ops.o		\
 	cisortho/nested.o dep/nucleotide_stats.o get_spliced_sequence.o		\
 	dep/stats_tools.o cisortho/litestream.o cisortho/enum.o				\
-	cisortho/dnacol.o)
+	cisortho/dnacol.o sam_generate_projection_header.o)
 
 samutil: $(samutil_OBJS)
-	$(CXX) $(CXXFLAGS) -lz -lgsl -lgslcblas -o $@ $^
+	$(CXX) $(CXXFLAGS) -lz -lgsl -lgslcblas -lpthread -o $@ $^
 
 
 
 #get_peak_regions: get_peak_regions.o
 #	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^
 
-pretty_plot_OBJS = $(addprefix $(OBJDIR)/, \
-	pretty_plot.o pretty_plot_graph.o pretty_plot_gtf_sam.o	\
-	cigar_ops.o nclist.o sam_helper.o gtf.o dep/tools.o meta_gene.o		\
+pretty_plot_OBJS = $(addprefix $(OBJDIR)/, pretty_plot.o			\
+	pretty_plot_graph.o pretty_plot_gtf_sam.o cigar_ops.o nclist.o	\
+	sam_order.o sam_helper.o gtf.o dep/tools.o meta_gene.o			\
 	file_utils.o)
 
 pretty_plot: $(pretty_plot_OBJS)

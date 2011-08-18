@@ -17,10 +17,10 @@
 //returns true if projection successfully applied
 bool apply_projection_aux(SequenceProjection const& projection,
                           SequenceProjection const& mate_projection,
-                          SamLine * samline)
+                          SamLine * samline,
+                          bool inserts_are_introns)
 {
     bool add_padding = true;
-    bool inserts_are_introns = true;
 
     if (samline->query_unmapped())
     {
@@ -49,7 +49,7 @@ bool apply_projection_aux(SequenceProjection const& projection,
         Cigar::TransitiveMerge(projection.cigar, 
                                projection.cigar_index, source_to_read, 
                                ! add_padding, 
-                               ! inserts_are_introns);
+                               inserts_are_introns);
 
     Cigar::CIGAR_ITER trimmed_left, trimmed_right;
     Cigar::Trim(target_to_read, false, &trimmed_left, &trimmed_right);
@@ -89,14 +89,19 @@ bool apply_projection_aux(SequenceProjection const& projection,
 
 bool ApplyProjectionToSAM(SequenceProjection const& projection,
                           SequenceProjection const& mate_projection,
-                          char * alignment_space,
+                          char const* alignment_space,
                           SamLine * first,
-                          SamLine * second)
+                          SamLine * second,
+                          bool inserts_are_introns,
+                          bool add_cufflinks_xs_tag)
 {
     if (AreMappedMatePairs(*first, *second))
     {
-        bool first_projected = apply_projection_aux(projection, mate_projection, first);
-        bool second_projected = apply_projection_aux(mate_projection, projection, second);
+        bool first_projected = 
+            apply_projection_aux(projection, mate_projection, first, inserts_are_introns);
+
+        bool second_projected = 
+            apply_projection_aux(mate_projection, projection, second, inserts_are_introns);
         
         first->mpos = second->pos;
         second->mpos = first->pos;
@@ -104,6 +109,19 @@ bool ApplyProjectionToSAM(SequenceProjection const& projection,
         first->add_tag(AlignSpaceTag, AlignSpaceType, alignment_space);
         second->add_tag(AlignSpaceTag, AlignSpaceType, alignment_space);
 
+        if (add_cufflinks_xs_tag)
+        {
+            //Did this fragment originate from the sense or antisense
+            //DNA from the transcript in question.
+            // char const* sense = 
+            //     (first->first_read_in_pair() == (first->query_on_pos_strand() == projection.same_strand)) ?
+            //     "+" : "-";
+
+            char const* sense = projection.same_strand ? "+" : "-";
+
+            first->add_tag("XS", 'A', sense);
+            second->add_tag("XS", 'A', sense);
+        }
         return first_projected && second_projected;
     }
     else if (AreUnmappedMatePairs(*first, *second))
@@ -455,13 +473,14 @@ void fill_quality_distribution(QUALSCORE_DIST * qualscore_dist)
 }
 
 
-
-void simulate_errors(char const* founder_read,
-                     char const* qual_string,
-                     QUALSCORE_DIST qualscore_dist,
-                     char zero_quality_code,
-                     gsl_rng * rand_gen,
-                     char * called_read)
+//generates a 'called_read' with simulated errors,
+//returning the number of errors.
+size_t simulate_errors(char const* founder_read,
+                       char const* qual_string,
+                       QUALSCORE_DIST qualscore_dist,
+                       char zero_quality_code,
+                       gsl_rng * rand_gen,
+                       char * called_read)
 {
     char const* fbase;
     char const* qual;
@@ -469,6 +488,8 @@ void simulate_errors(char const* founder_read,
 
     size_t fbase_index;
     size_t cbase_index;
+
+    size_t num_errors = 0;
 
     int qualscore;
 
@@ -487,7 +508,9 @@ void simulate_errors(char const* founder_read,
                                        qualscore_dist[qualscore][fbase_index], 1.0);
 
         *cbase = Nucleotide::bases_upper[cbase_index];
+        num_errors += cbase_index == fbase_index ? 0 : 1;
     }
+    return num_errors;
 }
 
 
@@ -690,7 +713,7 @@ ReadSampler::set_somatic_mutation_range(LOCUS_SET::const_iterator start,
     this->somatic_mutations_end = end;
 }
 
-std::pair<SamLine const*, SamLine const*>
+std::pair<SamLine *, SamLine *>
 ReadSampler::sample_pair(SequenceProjection const& transcript_proj,
                          cis::dna_t const* target_dna,
                          size_t transcript_start_pos,
@@ -708,6 +731,9 @@ ReadSampler::sample_pair(SequenceProjection const& transcript_proj,
 
     char * left_read_qual_print;
     char * right_read_qual_print;
+
+    size_t num_left_errors;
+    size_t num_right_errors;
 
     char min_median_qual_code = this->zero_quality_code + min_median_qual_score;
 
@@ -759,15 +785,17 @@ ReadSampler::sample_pair(SequenceProjection const& transcript_proj,
         this->qual[0] = this->qual_buffer + qual_buffer_offset;
         this->qual[1] = this->qual_buffer + qual_buffer_offset + (read_length + 1);
                         
-        simulate_errors(this->seq_raw[0], this->qual[0],
-                        this->qualscore_distribution,
-                        zero_quality_code,
-                        this->rand_gen, this->seq_sim[0]);
-                        
-        simulate_errors(this->seq_raw[1], this->qual[1],
-                        this->qualscore_distribution, 
-                        zero_quality_code,
-                        this->rand_gen, this->seq_sim[1]);
+        num_left_errors = 
+            simulate_errors(this->seq_raw[0], this->qual[0],
+                            this->qualscore_distribution,
+                            zero_quality_code,
+                            this->rand_gen, this->seq_sim[0]);
+        
+        num_right_errors = 
+            simulate_errors(this->seq_raw[1], this->qual[1],
+                            this->qualscore_distribution, 
+                            zero_quality_code,
+                            this->rand_gen, this->seq_sim[1]);
 
         left_read_qual_print = this->qual[0];
         right_read_qual_print = this->qual[1];
@@ -813,6 +841,7 @@ ReadSampler::sample_pair(SequenceProjection const& transcript_proj,
         (! transcript_proj.same_strand);
 
     int left_read_flag, right_read_flag;
+
     set_paired_read_flags(sampling_strand, &left_read_flag, &right_read_flag);
 
     char qname[1000];
@@ -832,31 +861,31 @@ ReadSampler::sample_pair(SequenceProjection const& transcript_proj,
         char const* left_read_string = sampling_strand ? "read1" : "read2";
         char const* right_read_string = sampling_strand ? "read2" : "read1";
 
-            sprintf(qname, "%zu:%s:%s:%c:%zu:%s:%s:%s:%c:%zu:%s:fragment_size:%zu",
+            sprintf(qname, "%zu:%s:%s:%c:%zu:%s:%zu:%s:%s:%c:%zu:%s:%zu:fragment_size:%zu",
                     this->read_counter, 
                     left_read_string,
                     target_dna->name.c_str(),
-                    left_strand, position1 + 1, cigar_string1,
+                    left_strand, position1 + 1, cigar_string1, num_left_errors,
                     right_read_string,
                     target_dna->name.c_str(),
-                    right_strand, position2 + 1, cigar_string2,
+                    right_strand, position2 + 1, cigar_string2, num_right_errors,
                     isize);
     }
 
     char const* tag_string1 = "";
-    SamLine const* left_read = 
+    SamLine * left_read = 
         new SamLine(DATA_LINE, qname, left_read_flag, target_dna->name.c_str(),
                     position1, mapping_quality, cigar_string1,
                     "=", position2, isize,
                     left_read_seq_print, left_read_qual_print, tag_string1);
 
     char const* tag_string2 = "";
-    SamLine const* right_read =
+    SamLine * right_read =
         new SamLine(DATA_LINE, qname, right_read_flag, target_dna->name.c_str(),
                     position2, mapping_quality, cigar_string2,
                     "=", position1, -1 * isize,
                     right_read_seq_print, right_read_qual_print, tag_string2);
 
     assert(left_read->qname != NULL);
-    return std::pair<SamLine const*, SamLine const*>(left_read, right_read);
+    return std::make_pair(left_read, right_read);
 }

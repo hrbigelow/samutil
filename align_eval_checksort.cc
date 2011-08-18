@@ -11,12 +11,12 @@ int align_eval_checksort_usage(char const* sdef)
             "Usage:\n\n"
             "align_eval checksort [OPTIONS] alignment_sorted.sam\n\n"
             "Options:\n\n"
-            "-s  STRING    type of sorting to use {READ_ID, ALIGN, GUIDE, MIN_ALIGN_GUIDE}[%s]\n",
+            "-s  STRING    type of sorting to use {READ_ID_FLAG, ALIGN, GUIDE, MIN_ALIGN_GUIDE}[%s]\n",
             sdef);
 
     fprintf(stderr,
             "Sort orders are:\n"
-            "READ_ID: sort by read id\n"
+            "READ_ID_FLAG: sort by read id\n"
             "ALIGN: sort by alignment position\n"
             "GUIDE: sort by read-id encoded guide alignment position\n"
             "MIN_ALIGN_GUIDE: sort by the minimum of ALIGN or GUIDE\n\n");
@@ -50,12 +50,12 @@ int main_align_eval_checksort(int argc, char ** argv)
     char const* sorted_sam_file = argv[optind];
     FILE * sorted_sam_fh = open_if_present(sorted_sam_file, "r");
     
-    bool numeric_start_fragment_ids = false;
-    SamLine::SetGlobalFlags(numeric_start_fragment_ids);
-
     SamOrder sam_order(SAM_RID, sort_type);
 
+    SAM_QNAME_FORMAT qname_fmt = sam_order.InitFromFile(sorted_sam_fh);
     sam_order.AddHeaderContigStats(sorted_sam_fh);
+
+    SamLine::SetGlobalFlags(qname_fmt);
 
     SetToFirstDataLine(&sorted_sam_fh);
 

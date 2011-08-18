@@ -35,7 +35,7 @@ bool LessSAMLinePair::operator()(SAMPTR_PAIR const& a,
 bool LessSAMLineFragmentIDPtr::operator()(SamLine const* a,
                                           SamLine const* b)
 {
-    return this->sam_order->less_fid(*a, *b);
+    return this->sam_order->less_fragment_id(*a, *b);
 }
 
 
@@ -53,7 +53,7 @@ SamBuffer::SamBuffer(SamOrder const* _sam_order, bool pairs_same_strand) :
     less_ordering(_sam_order),
     less_entry_matepair(_sam_order),
     sam_order(_sam_order),
-    low_bound(NULL),
+    // low_bound(NULL),
     unique_entry_pairs(LessSAMLinePair(_sam_order)),
     yet_unpaired_entries(LessSAMLineFragmentIDPtr(_sam_order)),
     unpaired_entries(LessSAMLinePtr(_sam_order))
@@ -64,6 +64,7 @@ SamBuffer::SamBuffer(SamOrder const* _sam_order, bool pairs_same_strand) :
 
 //advance lowbound with proposed new lowbound, if it is indeed
 //greater.  if not, do nothing and return false.
+/*
 bool SamBuffer::safe_advance_lowbound(SamLine const* _proposed_new_low_bound)
 {
     if (this->low_bound == NULL
@@ -86,7 +87,7 @@ void SamBuffer::update_lowbound(SamLine const* _low_bound)
 
     this->low_bound = _low_bound; 
 }
-
+*/
 
 
 //returns pair, with a pointer to the inserted entry or a pre-existing
@@ -181,21 +182,21 @@ SamBuffer::insert(SamLine const* entry)
 
                     result = std::make_pair(pre_existing_entry, false);
 
-                    if (this->low_bound == yet_unpaired_entry)
-                    {
-                        //we want to then set the low bound to the SamLine
-                        //that represents the pre-existing duplicate SamLine
-                        //that the low_bound was previously set to.
-                        this->low_bound = unpaired_iter_is_leftmost ?
-                            (*insert_success.first).first :
-                            (*insert_success.first).second;
-                        assert(! this->less_entry_matepair(this->low_bound, yet_unpaired_entry));
-                        assert(! this->less_entry_matepair(yet_unpaired_entry, this->low_bound));
+                    // if (this->low_bound == yet_unpaired_entry)
+                    // {
+                    //     //we want to then set the low bound to the SamLine
+                    //     //that represents the pre-existing duplicate SamLine
+                    //     //that the low_bound was previously set to.
+                    //     this->low_bound = unpaired_iter_is_leftmost ?
+                    //         (*insert_success.first).first :
+                    //         (*insert_success.first).second;
+                    //     assert(! this->less_entry_matepair(this->low_bound, yet_unpaired_entry));
+                    //     assert(! this->less_entry_matepair(yet_unpaired_entry, this->low_bound));
                         
-                    }
+                    // }
                     this->yet_unpaired_entries.erase(unpaired_iter);
                     delete yet_unpaired_entry;
-                    assert(entry != this->low_bound);
+                    // assert(entry != this->low_bound);
                     delete entry;
                 }
                 break;
@@ -224,7 +225,7 @@ SamBuffer::insert(SamLine const* entry)
 void SamBuffer::purge(FILE * output_sam_fh, 
                       FILE * output_first_fastq_fh, 
                       FILE * output_second_fastq_fh, 
-                      bool ignore_bound)
+                      SamLine const* low_bound)
 {
 
     //since no new read can come before low-bound, we can be sure that
@@ -246,16 +247,14 @@ void SamBuffer::purge(FILE * output_sam_fh,
     SINGLE_READ_SET::const_iterator unpaired_bound;
     //SINGLE_READ_ID_MSET::const_iterator yet_unpaired_bound;
 
-    SamLine const* temp_low_bound = this->low_bound;
+    // SamLine const* temp_low_bound = this->low_bound;
 
-    if (ignore_bound)
+    if (low_bound == NULL)
     {
         paired_bound = this->unique_entry_pairs.end();
         // single_bound = this->single_entries_from_pairs.end();
         unpaired_bound = this->unpaired_entries.end();
         //yet_unpaired_bound = this->yet_unpaired_entries.end();
-
-        this->low_bound = NULL;
     }
 
     else
@@ -263,43 +262,33 @@ void SamBuffer::purge(FILE * output_sam_fh,
         //pay attention to the bound that is set.  why wouldn't we
         //want to purge in the same order as the SamBuffer was
         //specified?
-        if (this->low_bound == NULL)
-        {
-            //do not purge anything if low_bound is NULL
-            paired_bound = this->unique_entry_pairs.begin();
-            unpaired_bound = this->unpaired_entries.begin();
-            //yet_unpaired_bound = this->yet_unpaired_entries.begin();
-        }
-        else
-        {
-            SamLine const* min_incomplete =
-                this->yet_unpaired_entries.empty()
-                ? this->low_bound
-                : std::min(this->low_bound, *this->yet_unpaired_entries.begin(), this->less_ordering);
+        SamLine const* min_incomplete =
+            this->yet_unpaired_entries.empty()
+            ? low_bound
+            : std::min(low_bound, *this->yet_unpaired_entries.begin(), this->less_ordering);
+        
+        paired_bound =
+            this->unique_entry_pairs.lower_bound
+            (std::make_pair(min_incomplete, min_incomplete));
+        
+        // if (paired_bound != this->unique_entry_pairs.begin())
+        // {
+        //     //this allows us to recover an existing SAMline pair
+        //     //entry and thus avoid the following problem: Given a
+        //     //pre-existing set of pairs (A B) (C D), the
+        //     //pseudo-lower-bound pair (B B) would insert as: (A B)
+        //     //(B B) (C D). So, if we purge, we would delete (A B)
+        //     //and thus delete the individual entry B, invalidating
+        //     //the low_bound of (B B)
+        //     --paired_bound;
+        // }
 
-            paired_bound =
-                this->unique_entry_pairs.lower_bound
-                (std::make_pair(min_incomplete, min_incomplete));
-
-            // if (paired_bound != this->unique_entry_pairs.begin())
-            // {
-            //     //this allows us to recover an existing SAMline pair
-            //     //entry and thus avoid the following problem: Given a
-            //     //pre-existing set of pairs (A B) (C D), the
-            //     //pseudo-lower-bound pair (B B) would insert as: (A B)
-            //     //(B B) (C D). So, if we purge, we would delete (A B)
-            //     //and thus delete the individual entry B, invalidating
-            //     //the low_bound of (B B)
-            //     --paired_bound;
-            // }
-
-            unpaired_bound =
-                this->unpaired_entries.lower_bound(this->low_bound);
-
-            //yet_unpaired_bound = 
-            //this->yet_unpaired_entries.lower_bound(this->low_bound);
-
-        }
+        unpaired_bound =
+            this->unpaired_entries.lower_bound(low_bound);
+        
+        //yet_unpaired_bound = 
+        //this->yet_unpaired_entries.lower_bound(low_bound);
+        
     }
 
     if (output_first_fastq_fh != NULL)
@@ -340,8 +329,8 @@ void SamBuffer::purge(FILE * output_sam_fh,
         }
 
         //since the paired_bound contains the
-        // assert(first != this->low_bound);
-        // assert(second != this->low_bound);
+        // assert(first != low_bound);
+        // assert(second != low_bound);
 
         delete first;
         delete second;
@@ -366,7 +355,7 @@ void SamBuffer::purge(FILE * output_sam_fh,
             cur_read->print(output_sam_fh, flip_query_strand_flag);
         }
         
-        // assert(*read_iter != this->low_bound);
+        // assert(*read_iter != low_bound);
         assert(this->yet_unpaired_entries.find(cur_read) == this->yet_unpaired_entries.end());
         delete cur_read;
     }
@@ -404,11 +393,8 @@ void SamBuffer::purge(FILE * output_sam_fh,
     }
     */
 
-    if (ignore_bound)
+    if (low_bound == NULL)
     {
-        //restore old low_bound
-        this->low_bound = temp_low_bound;
-
         if (! this->yet_unpaired_entries.empty())
         {
             fprintf(stderr, "Warning: SamBuffer::purge(): request to purge all remaining "
@@ -418,8 +404,6 @@ void SamBuffer::purge(FILE * output_sam_fh,
         }
     }
     
-    this->low_bound = NULL;
-
     if (output_sam_fh != NULL)
     {
         fflush(output_sam_fh);

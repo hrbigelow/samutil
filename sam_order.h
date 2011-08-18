@@ -2,8 +2,10 @@
 #define _SAM_ORDER_H
 
 #include "sam_helper.h"
+#include "gtf.h"
 
 #include <map>
+#include <set>
 #include <string>
 
 enum SAM_ORDER
@@ -15,8 +17,13 @@ enum SAM_ORDER
         SAM_FID_POSITION
     };
 
-typedef std::map<char const*, size_t, less_char_ptr> CONTIG_OFFSETS;
-typedef CONTIG_OFFSETS::const_iterator OFFSETS_ITER;
+/* enum SAM_INDEX_TYPE */
+/*     { */
+/*         SAM_POS_MIN_ALIGN_GUIDE, */
+/*         SAM_POS_ALIGN, */
+/*         SAM_READ_ID, */
+/*         SAM_READ_ID_ILLUMINA */
+/*     }; */
 
 
 class SamOrder
@@ -25,8 +32,12 @@ class SamOrder
     SamOrder(SAM_ORDER _so, char const* _sort_type);
     SamOrder();
     ~SamOrder();
+    SAM_QNAME_FORMAT InitFromFile(FILE * sam_fh);
+    void InitFromChoice(SAM_QNAME_FORMAT qname_format);
 
     SAM_ORDER order;
+    /* SAM_INDEX_TYPE index_type; */
+
     char sort_type[50];
 
     std::map<std::string, size_t> contig_lengths;
@@ -34,7 +45,10 @@ class SamOrder
 
     bool (SamOrder::* less)(SamLine const& a, SamLine const& b) const;
     bool (SamOrder::* equal)(SamLine const& a, SamLine const& b) const;
+    size_t (* parse_fragment_id)(char const* qname);
+
     size_t (SamOrder::* sam_index)(char const* samline) const;
+    
     
     void AddHeaderContigStats(FILE * sam_fh);
 
@@ -64,17 +78,30 @@ class SamOrder
     bool equal_position_rid(SamLine const& a, SamLine const& b) const;
 
     // sort order [rname]
-    bool less_fid(SamLine const& a, SamLine const& b) const;
-    bool equal_fid(SamLine const& a, SamLine const& b) const;
+    bool less_fragment_id(SamLine const& a, SamLine const& b) const;
+    bool equal_fragment_id(SamLine const& a, SamLine const& b) const;
 
     // sort order [rname, pos, strand, cigar]
-    bool less_fid_position(SamLine const& a, SamLine const& b) const;
-    bool equal_fid_position(SamLine const& a, SamLine const& b) const;
+    bool less_fragment_id_position(SamLine const& a, SamLine const& b) const;
+    bool equal_fragment_id_position(SamLine const& a, SamLine const& b) const;
 
     size_t samline_position_min_align_guide(char const* samline) const;
     size_t samline_position_align(char const* samline) const;
-    size_t samline_read_id_flag(char const* samline) const;
+    size_t samline_read_id(char const* samline) const;
 
 };
+
+
+void GenerateProjectionHeader(CONTIG_OFFSETS const& genome_contig_order,
+                              std::set<SequenceProjection> const& tx_to_genome,
+                              FILE * out_sam_header_fh);
+
+size_t parse_fragment_id_numeric(char const* qname);
+
+size_t parse_fragment_id_illumina(char const* qname);
+
+size_t parse_fragment_id_casava_1_8(char const* qname);
+
+size_t parse_fragment_id_zero(char const* /* qname */);
 
 #endif // _SAM_ORDER_H

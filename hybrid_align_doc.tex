@@ -1,0 +1,405 @@
+\documentclass[10pt]{article}
+\addtolength{\textwidth}{3.0cm}
+\addtolength{\hoffset}{-1.5cm}
+%% \addtolength{\textheight}{4cm}
+%% \addtolength{\voffset}{-2cm}
+\usepackage{parskip}
+\usepackage{draftwatermark}
+\raggedright
+
+\title{Genome / Transcriptome Hybrid Alignment}
+\date{\today}
+\pagestyle{empty}
+\SetWatermarkText{SHOBDAR}
+\SetWatermarkScale{4}
+\SetWatermarkLightness{0.95}
+\begin{document}
+
+\maketitle
+
+\section*{Overview}
+
+This aligner attempts to provide a thorough alignment of fragments to
+the genome and known transcriptome, assuming that the fragments arose
+through simple fragmentation and end sequencing with a limited number
+of sequencing errors. It does not attempt to provide alignments for
+fragments to de novo junctions or fusions.
+
+Because of this, the bowtie alignment steps for both genome and
+transcriptome are run with the same settings for -I and -X (min and
+max fragment length limits) as provided by the user. These settings
+are meant to be real physical fragment lengths as estimated
+independently. Also, for paired-end alignments, only cases in which
+both reads are mapped in proper orientation, distance, and on the same
+contig, are considered valid alignments.
+
+\section*{Synopsis}
+
+{\small
+\begin{verbatim}
+Produce inferred transcriptome and all ebwt indices
+
+make -f align_prep.mk fa=hg19.fa gtf=GRCh37.60.filt.gtf
+
+
+Produce the final alignment SAM file:
+
+make -f hybrid_align.mk ebwt_dir=index read_tag=165_Mel \
+reads1=165_Melanocytes_1.fastq reads2=165_Melanocytes_2.fastq \
+fa=hg19.fa gtf=GRCh37.60.filt.gtf genome_sam_header=hg19.header.sam \
+cal_file=top_stratum.qcal
+
+
+Required arguments:
+
+fa                 reference genome fasta file
+gtf                transcript annotations
+reads1             fastq first reads file
+reads2             fastq second reads file
+genome_sam_header  genome header file for chromosomes in fa
+cal_file           mapq calibration file
+
+Optional parameters (defaults in []):
+
+ebwt_dir           directory for reference ebwt indices [<same as fa directory>]
+ncpu               number of cpu passed to -p option of bowtie [12]
+min_fraglen        minimum physical fragment length (a.k.a. `insert size' from library) [0]
+max_fraglen        maximum physical fragment length [500]
+bowtie_param1      first pass bowtie params [--chunkmbs 1024 --fr -l 28 -n 3 -e 200 -k 50]
+bowtie_param2      second pass bowtie params [--chunkmbs 1024 --fr -y -l 24 -n 3 -e 400 -a]
+read_tag           nickname for this reads dataset [`reads']
+do_tx_pass2        set to `yes' or `no' if second bowtie pass on transcriptome is desired [`yes']
+do_gen_pass2       set to `yes' or `no' if second bowtie pass on genome is desired [`no']
+add_xs_tag         set to `-x' or blank to add (or not) cufflinks transcript sense tag `XS:i:' [`-x']
+intron_cigar_n     `-n' gives spanned introns the CIGAR `N' operation. Otherwise, `D' is used [`-n']
+
+Make targets:
+
+all (or empty)     makes the full hybrid alignment file against genome
+                   and separate alignment file against transcriptome
+tx_single          subset of hybrid containing transcriptomic single mappers
+tx_multi           subset containing transcriptomic multi mappers
+genome_single      subset containing genomic-origin (see `Usage') single mappers
+genome_multi       subset containing genomic-origin multi-mappers
+unmapped           nonmappers
+clean_sam          delete all sam files, but preserve ebwt indexes
+\end{verbatim}
+}
+
+\section*{Workflow}
+
+1. Align all fragments to transcriptome with first-pass bowtie
+parameters.
+
+2. Align unmapped fragments from (1) to transcriptome with second-pass
+bowtie parameters.
+
+3. Align all fragments to genome with first-pass bowtie parameters.
+
+4. Align unmapped fragments from (3) to genome with second-pass bowtie
+parameters.
+
+5. Project alignments (1) and (2) to genome, reporting only one of
+sets of identical fragment alignments.
+
+6. Take union of (3), (4) and (5), report only one of sets of
+identical fragment alignments.
+
+7. Set mapq, primary alignment flag, and tags of entries in (6) for
+further filtering.
+
+
+\section*{Detail}
+
+\subsection*{Steps 1-4}
+
+These are an efficient way to get as thorough a set of alignments as
+possible without trimming and without excessively long run times. The
+stringencies of the first and second pass are necessarily tradeoffs
+between speed and desired sensitivity. Typically, the first pass on
+transcriptome places about 85 \% of the data and the second pass
+places another 10-50\% of the remaining data. Depending on the
+parameters, the second pass may take 5 times longer than the first
+pass. It may be skipped if desired.
+
+\subsection*{Step 5} 
+
+This uses the transcriptome GTF to define the projections to the
+genome. Note that transcriptome-to-genome projection is a many-to-one
+reduction that destroys information about the implied fragment
+size. During this operation, the first alignment in the set of
+duplicate projected alignments is retained with its isize field
+intact. All projected alignments are tagged XP:A:T.
+
+\subsection*{Step 6}
+
+The set of projected transcriptome alignments from step 5 are combined
+with the set of direct genome alignments from steps 3 and
+4. Individually, the set of projected transcriptome alignments are
+distinct among themselves. Also, the set of genome alignments are
+distinct among themselves. When combining them, there are only three
+possibilities for duplicate alignments.
+
+Possibility 1: If the genome alignment for a fragment is distinct, the
+alignment is tagged XP:A:G.
+
+Possibility 2: If the transcriptome projected to genome alignment is
+distinct, it retains tag XP:A:T.
+
+Possibility 3: If the genome and projected alignments are identical to
+each other, only one is retained, and the record is tagged XP:A:M
+(merged).
+
+
+
+\subsection*{Step 7}
+
+This step sets the mapq, primary alignment flag, and tags of the
+merged de-duplicated entries in step 6. The logic is as follows. Each
+fragment provides a list of alignments. Each alignment produces a raw
+alignment score as follows: if both reads are mapped in proper
+orientation, on the same contig, and within acceptable length range,
+raw score equals the sum of mismatches of each individual read
+alignment. Otherwise, the fragment `default missing' score, defined to
+be one higher than the max valid fragment score is supplied.
+
+Then the list of raw alignment scores for each fragment alignment are
+grouped into strata. For example, alignment scores (0,2,5,2,0,3,10)
+provide strata (0,2,3,5,10).
+
+The mapping quality of a given alignment is determined from a
+lookup-table stored in a .qcal file, based on the top and second
+strata raw scores of that fragment, together with the given alignment
+raw score. This format affords the user with finer control over which
+raw score combinations should be ignored or downgraded, but may also
+be used simply to assign high score to top stratum and low score to
+lower strata.
+
+The .qcal file has the following format:
+
+{\small
+\begin{verbatim}
+score_tag: NM
+max_valid_fragment_score: 30
+larger_score_better: N
+31      31     31      0
+12      31     31      0
+12      31     12    255
+...
+0       2       3      0
+0       2       2      0
+0       2       0    255
+...
+0       1       2      0
+0       1       1      0
+0       1       0    255
+\end{verbatim}
+}
+
+The columns of the data are:
+
+{\small
+\begin{verbatim}
+Column 1: top stratum raw score
+Column 2: second stratum raw score
+Column 3: given raw score
+Column 4: assigned mapping quality
+\end{verbatim}
+}
+
+For example, for the a set of fragment alignments with raw scores
+(0,2,3,5,10), the top stratum score is 0, and the second stratum score
+is 2. For alignments with a given score of zero, the relevant
+calibration line is:
+
+{\small \verb!0       2       0    255!}
+
+and these alignments will receive a mapq of 255. Since these
+accuracies are calculated on a stratum level, the given mapq's are
+insensitive to stratum size. In short, this is desirable for
+evaluating aligner accuracy since it reflects only the search
+properties of the aligner rather than the redundancy level of the
+reference. For the purposes of choosing single and multi-mappers in
+the top stratum, a combination filter against mapq and tags is
+provided as described below.
+
+\section*{Usage}
+
+For a given fragment, each alignment produces a raw score, which may
+be stratified, meaning that the alignments are grouped into strata
+having identical raw score.  Doing so produces a stratum rank and
+stratum size. Usually, what one is interested in is the top-stratum
+(rank = 1), and perhaps the subset of those that are single-mappers
+(stratum size = 1).
+
+However, in the context of hybrid alignment, there may be the case
+where a score-based stratum contains both XP:A:T and XP:A:G
+alignments. Even though both are in the same stratum, there are cases
+where one prefers the XP:A:T alignment. A solution to this is to
+stratify by raw score, breaking ties by transcript (XP:A:T, XP:A:M)
+vs. genome (XP:A:G).
+
+For example, suppose we had alignments (0M, 2G, 3T, 2G, 0G, 2M). Using
+this scheme, they would be stratified as: (0T, 0G, 2T, 2G, 3T),
+(symbolically, M is equivalent to T here). So the top stratum is 0T,
+and even though there may be non-equivalent genomic alignments
+attaining a raw score of zero, they fall in the second stratum.
+
+Stratifying this way, we have four situations in the top stratum:
+
+\begin{enumerate}
+
+\item \textbf{Transcriptomic single mappers.} Tag combination `XP:A:[TM]
+  XY:i:1 XZ:i:1'. In this most desirable situation, the best alignment
+  is a single-mapping transcript alignment. Though there may be a
+  genome alignment achieving the same score, it is by definition
+  downgraded to a lower stratum and not considered as a serious
+  alternative to this.
+
+\item \textbf{Transcriptomic multi-mappers.}  Tag combination
+  `XP:A:[TM] XY:i:1 XZ:i:[23...]' We are confident that the fragment
+  came from transcript, but it is not possible to discern among a
+  number of alternatives. These may be a mix of transcripts in the
+  same gene, or among orthologs. Note: though many of these records
+  are single exon and thus have tag XP:A:M (merged transcript and
+  genome), the interpretation should be that they come from the
+  transcriptome.
+
+\item \textbf{Genomic single mappers.} Tag
+  combination `XP:A:G XY:i:1 XZ:i:1'. This is a genome single
+  mapper. There was no equal or better scoring alignment to the
+  transcriptome. This is strong evidence that this fragment came from
+  the genome.
+
+\item \textbf{Genomic multi-mappers.} Tag
+  combination `XP:A:G XY:i:1 XZ:i:[23...]'. As in (3) but now a genome
+  multimapper. Unlike transcript multimappers, genome multimappers
+  must be from orthologous pieces of DNA.
+
+\item \textbf{Nonmappers.} These are candidates for
+  de-novo junction discovery or fusions. They may also be the result
+  of too many sequencing errors to map.
+
+\end{enumerate}
+
+All five of these categories can be output in separate SAM files if
+desired, using make targets \textbf{tx\_single}, \textbf{tx\_multi},
+\textbf{genome\_single}, \textbf{genome\_multi}, and
+\textbf{unmapped}. The main result file is the default target and
+includes all records.
+
+
+\section*{Example Usage}
+
+Usage:
+
+{\small
+\begin{verbatim}
+
+[hbigelow@ussf-papp-gau02 align_input]$ make -n -f ~/makefiles/hybrid_align.mk \
+     ebwt_dir=index bowtie_threads=26 read_tag=165_Melanocytes_all \
+     reads1=165_Melanocytes_1.fastq reads2=165_Melanocytes_2.fastq \
+     fa=hg19.fa gtf=GRCh37.60.filt.gtf genome_sam_header=hg19.header.sam cal_file=top_stratum.qcal
+
+echo -e "$(date '+%F %T'): transcriptome alignment first pass"
+
+bowtie --sam -q --un 165_Melanocytes_all.vs.hg19_to_GRCh37.60.filt.txome1.unmapped.fq \
+     --chunkmbs 1024 --fr -l 28 -n 3 -e 200 -k 50 -I 0 -X 500 -p 12 \
+	 index/hg19_to_GRCh37.60.filt \
+     -1 165_Melanocytes_1.fastq -2 165_Melanocytes_2.fastq \
+     165_Melanocytes_all.vs.hg19_to_GRCh37.60.filt.txome1.sam
+
+echo -e "$(date '+%F %T'): genome alignment first pass"
+
+bowtie --sam-nohead --sam -q --un 165_Melanocytes_all.vs.hg19.genome1.unmapped.fq \
+     --chunkmbs 1024 --fr -l 28 -n 3 -e 200 -k 50 -I 0 -X 500 -p 12 index/hg19 \
+     -1 165_Melanocytes_1.fastq -2 165_Melanocytes_2.fastq \
+     165_Melanocytes_all.vs.hg19.genome1.sam
+
+echo -e "$(date '+%F %T'): transcriptome alignment second pass"
+
+bowtie --sam -q --un 165_Melanocytes_all.vs.hg19_to_GRCh37.60.filt.txome2.unmapped.fq \
+     --chunkmbs 1024 --fr -y -l 24 -n 3 -e 400 -a -I 0 -X 500 -p 12 index/hg19_to_GRCh37.60.filt \
+     -1 165_Melanocytes_all.vs.hg19_to_GRCh37.60.filt.txome1.unmapped_1.fq \
+     -2 165_Melanocytes_all.vs.hg19_to_GRCh37.60.filt.txome1.unmapped_2.fq \
+     165_Melanocytes_all.vs.hg19_to_GRCh37.60.filt.txome2.sam
+
+cat 165_Melanocytes_all.vs.hg19_to_GRCh37.60.filt.txome1.sam > \
+     165_Melanocytes_all.vs.hg19_to_GRCh37.60.filt.txome.sam
+samtools view -S 165_Melanocytes_all.vs.hg19_to_GRCh37.60.filt.txome2.sam \
+     >> 165_Melanocytes_all.vs.hg19_to_GRCh37.60.filt.txome.sam
+
+echo -e "$(date '+%F %T'): sorting by alignment position"
+
+align_eval sort -s ALIGN -m 4294967296 165_Melanocytes_all.vs.hg19_to_GRCh37.60.filt.txome.sam \
+     165_Melanocytes_all.vs.hg19_to_GRCh37.60.filt.txome.asort.sam
+
+echo -e "$(date '+%F %T'): samutil tx2genome ..."
+
+samutil tx2genome -h hg19.header.sam hg19 GRCh37.60.filt.gtf \
+     165_Melanocytes_all.vs.hg19_to_GRCh37.60.filt.txome.asort.sam \
+     165_Melanocytes_all.vs.hg19.t2g.sam
+
+echo -e "$(date '+%F %T'): genome alignment second pass"
+
+bowtie --sam-nohead --sam -q --un 165_Melanocytes_all.vs.hg19.genome2.unmapped.fq \
+     --chunkmbs 1024 --fr -y -l 24 -n 3 -e 400 -a -I 0 -X 500 -p 12 index/hg19 \
+     -1 165_Melanocytes_all.vs.hg19.genome1.unmapped_1.fq \
+     -2 165_Melanocytes_all.vs.hg19.genome1.unmapped_2.fq \
+     165_Melanocytes_all.vs.hg19.genome2.sam
+
+cat 165_Melanocytes_all.vs.hg19.genome1.sam 165_Melanocytes_all.vs.hg19.genome2.sam \
+     > 165_Melanocytes_all.vs.hg19.genome.sam
+
+echo -e "$(date '+%F %T'): merging alignments ..."
+
+cat 165_Melanocytes_all.vs.hg19.t2g.sam 165_Melanocytes_all.vs.hg19.genome.sam \
+     > 165_Melanocytes_all.vs.hg19.merged.sam
+
+echo -e "$(date '+%F %T'): sorting by read id"
+
+align_eval sort -s READ_ID_FLAG -m 4294967296 165_Melanocytes_all.vs.hg19.merged.sam \
+     165_Melanocytes_all.vs.hg19.merged.rsort.sam
+
+echo -e "$(date '+%F %T'): merging duplicate genome-projected and genome alignments  ..."
+
+samutil merge_tg 165_Melanocytes_all.vs.hg19.merged.rsort.sam 165_Melanocytes_all.vs.hg19.tgmerged.sam
+
+echo -e "$(date '+%F %T'): sorting by read id"
+
+align_eval sort -s READ_ID_FLAG -m 4294967296 165_Melanocytes_all.vs.hg19.tgmerged.sam \
+     165_Melanocytes_all.vs.hg19.tgmerged.rsort.sam
+
+echo -e "$(date '+%F %T'): re-scoring mapq in final alignment"
+
+samutil score_mapq -l 0 -L 500  top_stratum.qcal 165_Melanocytes_all.vs.hg19.tgmerged.rsort.sam \
+     165_Melanocytes_all.vs.hg19.hybrid.sam
+
+echo -e "$(date '+%F %T'): sorting by read id"
+
+align_eval sort -s READ_ID_FLAG -m 4294967296 \
+     165_Melanocytes_all.vs.hg19_to_GRCh37.60.filt.txome.sam \
+     165_Melanocytes_all.vs.hg19_to_GRCh37.60.filt.txome.rsort.sam
+
+echo -e "$(date '+%F %T'): re-scoring mapq in final alignment"
+
+samutil score_mapq -l 0 -L 500  top_stratum.qcal \
+     165_Melanocytes_all.vs.hg19_to_GRCh37.60.filt.txome.rsort.sam \
+     165_Melanocytes_all.vs.hg19_to_GRCh37.60.filt.tx.sam
+
+rm 165_Melanocytes_all.vs.hg19_to_GRCh37.60.filt.txome.rsort.sam \
+     165_Melanocytes_all.vs.hg19_to_GRCh37.60.filt.txome2.sam \
+     165_Melanocytes_all.vs.hg19.tgmerged.rsort.sam \
+     165_Melanocytes_all.vs.hg19.t2g.sam \
+     165_Melanocytes_all.vs.hg19.genome.sam \
+     165_Melanocytes_all.vs.hg19.genome1.sam \
+     165_Melanocytes_all.vs.hg19.genome2.sam \
+     165_Melanocytes_all.vs.hg19_to_GRCh37.60.filt.txome.sam \
+     165_Melanocytes_all.vs.hg19.merged.sam \
+     165_Melanocytes_all.vs.hg19_to_GRCh37.60.filt.txome.asort.sam \
+     165_Melanocytes_all.vs.hg19_to_GRCh37.60.filt.txome1.sam \
+     165_Melanocytes_all.vs.hg19.tgmerged.sam
+\end{verbatim}
+}
+
+\end{document}

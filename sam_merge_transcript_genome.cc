@@ -7,12 +7,12 @@ int merge_tg_usage()
 {
     fprintf(stderr,
             "\nUsage:\n\n"
-            "samutil merge_tg [OPTIONS] hybrid_alignments.asort.sam hybrid_alignments.merged.asort.sam\n\n"
+            "samutil merge_tg [OPTIONS] hybrid_alignments.rsort.sam hybrid_alignments.merged.rsort.sam\n\n"
             "Options:\n\n"
             "\n"
-            "hybrid_alignments.asort.sam is the union of a set of unique genomic\n"
+            "hybrid_alignments.rsort.sam is the union of a set of unique genomic\n"
             "alignment records (no tag), and unique genome-projected transcript\n"
-            "alignments (tag XP:A:T), all sorted by alignment position\n"
+            "alignments (tag XP:A:T), all sorted by read id\n"
             "\n"
             "samutil merge_tg goes through, finding records that are duplicate alignments\n"
             "and outputs a single record with an updated tag XP:A:M\n\n"
@@ -51,14 +51,19 @@ int main_merge_tg(int argc, char ** argv)
     // basically, they are just payload, and unaffected by the transformation
     bool allow_absent_seq_qual = true;
 
-    bool numeric_start_fragment_ids = false; //do not assume we have numeric starting IDS
-    SamLine::SetGlobalFlags(numeric_start_fragment_ids);
 
     SamOrder input_sam_order(SAM_RID_POSITION, "READ_ID_FLAG");
+
+    SAM_QNAME_FORMAT input_qname_fmt = input_sam_order.InitFromFile(input_sam_fh);
     input_sam_order.AddHeaderContigStats(input_sam_fh);
+
+    SamLine::SetGlobalFlags(input_qname_fmt);
 
     SamBuffer input_buffer(&input_sam_order, paired_reads_are_same_stranded);
     SamLine * samline;
+    CONTIG_OFFSETS::const_iterator contig_iter = 
+        input_buffer.sam_order->contig_offsets.begin();
+
 
     char fake_samline[1024];
 
@@ -105,6 +110,7 @@ int main_merge_tg(int argc, char ** argv)
             }
             prev_pos_index = cur_pos_index;
 
+            samline->SetFlattenedPosition(input_buffer.sam_order->contig_offsets, &contig_iter);
             insert_result = input_buffer.insert(samline);
 
             if (insert_result.second)
@@ -133,11 +139,10 @@ int main_merge_tg(int argc, char ** argv)
             }
 
             assert(insert_result.first != NULL);
-            input_buffer.safe_advance_lowbound(insert_result.first);
-            input_buffer.purge(output_sam_fh, NULL, NULL, false);
+            input_buffer.purge(output_sam_fh, NULL, NULL, insert_result.first);
         }
     }
-    input_buffer.purge(output_sam_fh, NULL, NULL, true);
+    input_buffer.purge(output_sam_fh, NULL, NULL, NULL);
 
     fclose(input_sam_fh);
     fclose(output_sam_fh);

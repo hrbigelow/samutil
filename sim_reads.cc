@@ -37,8 +37,9 @@ int sim_reads_usage(char const* ddef, size_t ldef,
 {
     fprintf(stderr, 
             "\nUsage:\n\n"
-            "sim reads [OPTIONS] genome.dnas transcripts.gtf species transcripts.expr sim.sam\n"
-            "    sim.frag sim.read1.fastq [sim.read2.fastq]\n\n"
+            "sim reads [OPTIONS] genome.dnas transcripts.gtf species transcripts.expr \n"
+            "    genome.header.sam sim.sam sim.frag sim.read1.fastq [sim.read2.fastq]\n\n"
+
             "Options:\n\n"
             "-d  STRING   dna directory for finding pieces in genome_dna.fa file [%s]\n"
             "-l  INT      output read length [%Zu]\n"
@@ -61,6 +62,7 @@ int sim_reads_usage(char const* ddef, size_t ldef,
             "genome.dnas         dna index file generated from make_dnas_file and fasta2cisfasta\n"
             "transcripts.gtf     gtf-formatted annotation file defining all transcripts\n"
             "transcripts.expr    expression levels of transcripts, produced from 'sim expression'\n\n"
+            "genome.header.sam   header file defining contig ordering\n"
 
             "Output Files\n\n"
 
@@ -250,7 +252,7 @@ int main_sim_reads(int argc, char ** argv)
         }
     }
 
-    int min_req_args = 7;
+    int min_req_args = 8;
     int min_arg_count = optind + min_req_args;
 
     if ((argc != min_arg_count) && argc != (min_arg_count + 1))
@@ -269,9 +271,10 @@ int main_sim_reads(int argc, char ** argv)
     char * gtf_file = argv[optind + 1];
     char * species = argv[optind + 2];
     char * expression_file = argv[optind + 3];
-    char * output_sam_file = argv[optind + 4];
-    char * output_fragment_file = argv[optind + 5];
-    char * output_first_fastq_file = argv[optind + 6];
+    char * genome_sam_header_file = argv[optind + 4];
+    char * output_sam_file = argv[optind + 5];
+    char * output_fragment_file = argv[optind + 6];
+    char * output_first_fastq_file = argv[optind + 7];
     char output_second_fastq_file[1000] = "";
 
     if (argc == min_arg_count + 1)
@@ -290,6 +293,8 @@ int main_sim_reads(int argc, char ** argv)
     std::set<SequenceProjection> genome_to_tx = gtf_to_sequence_projection(gtf_file, species);
 
     std::map<std::string, std::string> transcript_gene_map = gtf_to_transcript_gene_map(gtf_file);
+
+    FILE * genome_sam_header_fh = open_or_die(genome_sam_header_file, "r", "Genome SAM Header file");
 
     std::set<SequenceProjection, LessSequenceProjectionTarget> tx_to_genome;
     std::pair<std::set<SequenceProjection, LessSequenceProjectionTarget>::iterator, bool> tx_ins;
@@ -375,6 +380,10 @@ int main_sim_reads(int argc, char ** argv)
     SamOrder sam_order((ignore_read_ids_for_uniqueness ? SAM_POSITION : SAM_POSITION_RID),
                        "MIN_ALIGN_GUIDE");
 
+    sam_order.AddHeaderContigStats(genome_sam_header_fh);
+
+    CONTIG_OFFSETS::const_iterator contig_iter = sam_order.contig_offsets.begin();
+
     LessSAMLinePair sam_pair_less_fcn(&sam_order);
 
     FILE * output_sam_fh = open_if_present(output_sam_file, "w");
@@ -383,7 +392,8 @@ int main_sim_reads(int argc, char ** argv)
     //and a transcript->reads.  When fused, this yields
     //genome->reads.  From this, we can retrieve the actual dna sequence
 
-    bool first_read_on_transcript = true;
+    bool new_transcript = true;
+    SamLine * low_bound = NULL;
 
     //print SAM header
     if (output_sam_fh != NULL)
@@ -440,7 +450,7 @@ int main_sim_reads(int argc, char ** argv)
                 somatic_mutation_end = somatic_mutations.upper_bound(high_test);
             }
 
-            std::pair<SamLine const*, SamLine const*> read_pair;
+            std::pair<SamLine *, SamLine *> read_pair;
 
             unique_transcript tx_from_projection(sp.target_dna.c_str(),
                                                  sp.source_dna.c_str(),
@@ -462,7 +472,7 @@ int main_sim_reads(int argc, char ** argv)
 
             fflush(stdout);
 
-            first_read_on_transcript = true;
+            new_transcript = true;
             size_t this_num_fragments = bounds.size();
 
             for (bounds_iter = bounds.begin(); bounds_iter != bounds.end(); ++bounds_iter)
@@ -475,9 +485,11 @@ int main_sim_reads(int argc, char ** argv)
                                                      do_simulate_errors,
                                                      do_sample_sense_strand);
                 
+                read_pair.first->SetFlattenedPosition(sam_buffer.sam_order->contig_offsets, & contig_iter);
                 std::pair<SamLine const*, bool> first_inserted = sam_buffer.insert(read_pair.first);
                 assert(first_inserted.second);
 
+                read_pair.second->SetFlattenedPosition(sam_buffer.sam_order->contig_offsets, & contig_iter);
                 std::pair<SamLine const*, bool> second_inserted = sam_buffer.insert(read_pair.second);
                 if (! second_inserted.second)
                 {
@@ -486,12 +498,15 @@ int main_sim_reads(int argc, char ** argv)
                 
                 else
                 {
-                    if (first_read_on_transcript)
+                    if (new_transcript)
                     {
-                        sam_buffer.safe_advance_lowbound(read_pair.first);
-                        first_read_on_transcript = false;
+                        if (low_bound != NULL)
+                        {
+                            delete low_bound;
+                        }
+                        low_bound = new SamLine(*read_pair.first);
+                        new_transcript = false;
                     }
-                    
                 }
                 
             }
@@ -509,26 +524,14 @@ int main_sim_reads(int argc, char ** argv)
             sam_buffer.purge(output_sam_fh, 
                              output_first_fastq_fh,
                              output_second_fastq_used_fh,
-                             false);
-
-            // purge_sam_buffer(sam_buffer, sam_buffer.begin(), sam_buffer.end(),
-            //                  flip_query_strand_flag,
-            //                  output_first_fastq_fh,
-            //                  output_second_fastq_used_fh,
-            //                  output_sam_fh);
+                             low_bound);
 
         }
 
         sam_buffer.purge(output_sam_fh, 
                          output_first_fastq_fh,
                          output_second_fastq_used_fh,
-                         true); //purge remainder
-
-        // purge_sam_buffer(sam_buffer, sam_buffer.begin(), sam_buffer.end(),
-        //                  flip_query_strand_flag,
-        //                  output_first_fastq_fh,
-        //                  output_second_fastq_used_fh,
-        //                  output_sam_fh);
+                         NULL); //purge remainder
 
     } // if (do_paired_end)
 
@@ -537,6 +540,7 @@ int main_sim_reads(int argc, char ** argv)
     close_if_present(output_first_fastq_fh);
     close_if_present(output_second_fastq_fh);
     close_if_present(output_fragment_fh);
+    fclose(genome_sam_header_fh);
 
     return 0;
 }

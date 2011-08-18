@@ -10,77 +10,58 @@
 
 #include <gsl/gsl_statistics_double.h>
 
-int score_mapq_usage(size_t fdef, float qdef, float Qdef, size_t ldef, size_t Ldef, size_t mdef)
+int score_mapq_usage(size_t ldef, size_t Ldef)
 {
     fprintf(stderr,
             "\n\nUsage:\n\n"
-            "samutil score_mapq [OPTIONS] calibration.qcal unscored.fragsort.sam scored.sam\n\n"
+            "samutil score_mapq [OPTIONS] calibration.qcal unscored.rsort.sam scored.rsort.sam\n\n"
             "Options:\n\n"
-            "-f     INT     # top-scoring fragments used for fragment-length distribution [%Zu]\n"
-            "-q     FLOAT   min quantile [0,0.5] for -f fragments to calc. min fragment size [%1.2f]\n"
-            "-Q     FLOAT   max quantile [0.5,1] for -f fragments to calc. max fragment size [%1.2f]\n"
             "-l     INT     min allowed fragment length for paired alignment [%Zu]\n"
             "-L     INT     max allowed fragment length for paired alignment [%Zu]\n"
-            "-n     FLAG    if set, assume numeric read ids (start with an integer) sorting\n"
-            "-m     INT     minimum mapq score required to avoid merging top alignments [%Zu]\n"
+            "-e     FLAG    if present, use equivalency mapq. if absent, use traditional [absent]\n"
             "\n\n"
             "calibration.qcal: a histogram over the set of alignment categories\n"
             "(top score, 2nd score, given score)\n"
             "tallying number of alignments that are correct or incorrect.\n\n"
 
-            "unscored_fragsort.sam: alignment file sorted by (read id / pair flag) and\n"
+            "unscored_rsort.sam: alignment file sorted by (read id / pair flag) and\n"
             "having alignment score tags given in option -s.\n\n"
 
-            "scored.sam:    output alignment file with mapq field updated.\n\n"
+            "scored.rsort.sam:    output alignment file sorted by (read id / pair flag)\n"
+            "with mapq field updated.\n"
             "mapq will reflect Phred-scaled probability of correct alignment.\n\n",
-            fdef, qdef, Qdef, ldef, Ldef, mdef
+            ldef, Ldef
             );
     return 1;
 }
 
-
-typedef std::map<size_t, int> TABLE;
-typedef std::map<std::pair<size_t, size_t>, TABLE> SCORE_CPD;
 
 
 int main_score_mapq(int argc, char ** argv)
 {
     char c;
 
-    size_t fdef = 100000;
-    float qdef = 0.05;
-    float Qdef = 0.95;
     size_t ldef = 0;
-    size_t Ldef = 1000000;
-    size_t mdef = 10;
+    size_t Ldef = 1000;
 
-    size_t num_top_fragments_used = fdef;
-    float frag_dist_low_quantile = qdef;
-    float frag_dist_high_quantile = Qdef;
-    size_t min_allowed_fragment_length = ldef;
-    size_t max_allowed_fragment_length = Ldef;
-    size_t min_mapq_for_not_merging = mdef;
+    size_t min_fragment_length = ldef;
+    size_t max_fragment_length = Ldef;
+    // bool equivalency_mapq = false;
 
-    bool numeric_read_ids = false;
-
-    while ((c = getopt(argc, argv, "f:q:Q:l:L:nm:")) >= 0)
+    while ((c = getopt(argc, argv, "l:L:")) >= 0)
     {
         switch(c)
         {
-        case 'f': num_top_fragments_used = static_cast<size_t>(atoi(optarg)); break;
-        case 'q': frag_dist_low_quantile = atof(optarg); break;
-        case 'Q': frag_dist_high_quantile = atof(optarg); break;
-        case 'l': min_allowed_fragment_length = static_cast<size_t>(atoi(optarg)); break;
-        case 'L': max_allowed_fragment_length = static_cast<size_t>(atoi(optarg)); break;
-        case 'n': numeric_read_ids = true; break;
-        case 'm': min_mapq_for_not_merging = static_cast<size_t>(atoi(optarg)); break;
-        default: return score_mapq_usage(fdef, qdef, Qdef, ldef, Ldef, mdef); break;
+        case 'l': min_fragment_length = static_cast<size_t>(atoi(optarg)); break;
+        case 'L': max_fragment_length = static_cast<size_t>(atoi(optarg)); break;
+        // case 'e': equivalency_mapq = true; break;
+        default: return score_mapq_usage(ldef, Ldef); break;
         }
     }
 
     if (argc != optind + 3)
     {
-        return score_mapq_usage(fdef, qdef, Qdef, ldef, Ldef, mdef);
+        return score_mapq_usage(ldef, Ldef);
     }
 
     char * score_calibration_file = argv[optind];
@@ -91,70 +72,20 @@ int main_score_mapq(int argc, char ** argv)
     FILE * unscored_sam_fh = open_or_die(unscored_sam_file, "r", "Input unscored sam file");
     FILE * scored_sam_fh = open_or_die(scored_sam_file, "w", "Output scored sam file");
 
-    //parse score calibration
-    int num_parsed;
-    size_t top_raw_score, sec_raw_score, given_raw_score, num_right, num_wrong;
+    char raw_score_tag[32];
+    bool larger_score_better;
 
-    double prob_of_correct_alignment;
+    int * score_cpd;
 
-    SCORE_CPD score_cpd;
-    SCORE_CPD::iterator cpd_iter;
+    CollapseScoreTriplet score_triplet =
+        ParseScoreCalibration(score_calibration_fh,
+                              raw_score_tag,
+                              &larger_score_better,
+                              score_cpd);
 
-    char larger_score_better_char;
+    RAW_SCORE_T max_valid_score = score_triplet.max_score - 1;
 
-    char score_tag[32];
-    size_t missing_default_score;
-
-
-    num_parsed = fscanf(score_calibration_fh, 
-                       "score_tag: %s\n"
-                       "missing_default_score: %zu\n"
-                       "larger_score_better: %c\n"
-                        score_tag,
-                        &missing_default_score,
-                        &larger_score_better_char);
-
-    if (num_parsed != 4)
-    {
-        fprintf(stderr, "Error: score calibration file %s doesn't have score_tag, "
-                "missing_default_score, or larger_is_better fields.\n"
-                "Please produce with 'samutil score_dist'\n",
-                score_calibration_file);
-        exit(1);
-    }
-
-    bool larger_score_better = larger_score_better_char == 'Y';
-
-    while (! feof(score_calibration_fh))
-    {
-        num_parsed = fscanf(score_calibration_fh, "%zu\t%zu\t%zu\t%zu\t%zu\n",
-                            &top_raw_score,
-                            &sec_raw_score,
-                            &given_raw_score,
-                            &num_right, &num_wrong);
-        
-        if (num_parsed != 5)
-        {
-            fprintf(stderr, "Error: score calibration file %s doesn't have five fields per line.\n",
-                    score_calibration_file);
-            exit(1);
-        }
-
-        cpd_iter = score_cpd.find(std::make_pair(top_raw_score, sec_raw_score));
-
-        if (cpd_iter == score_cpd.end())
-        {
-            cpd_iter = 
-                score_cpd.insert(std::make_pair(ScorePair(top_raw_score, sec_raw_score), TABLE())).first;
-        }
-        TABLE & table = (*cpd_iter).second;
-        prob_of_correct_alignment = 
-            static_cast<double>(num_right) /
-            static_cast<double>(num_right + num_wrong);
-
-        table[given_raw_score] = error_prob_to_quality(1.0 - prob_of_correct_alignment);
-    }
-    fclose (score_calibration_fh);
+    fclose(score_calibration_fh);
 
     //use as the 'less' comparator to consider better scores to be 'less'
     //Places the best scores at the beginning.
@@ -164,54 +95,20 @@ int main_score_mapq(int argc, char ** argv)
 
     std::vector<double> template_lengths;
 
-    SamLine::SetGlobalFlags(numeric_read_ids);
-
     SamOrder sam_order(SAM_RID_POSITION, "NONE");
+    SAM_QNAME_FORMAT qname_fmt = sam_order.InitFromFile(unscored_sam_fh);
     sam_order.AddHeaderContigStats(unscored_sam_fh);
+
+    SamLine::SetGlobalFlags(qname_fmt);
 
     bool paired_reads_are_same_stranded = false;
     bool allow_absent_seq_qual = true; // why not?
 
-    int new_mapq;
-
     bool new_fragment;
-    bool ignore_sambuffer_bound;
 
     SamBuffer tally_buffer(&sam_order, paired_reads_are_same_stranded);
 
-    //tally fragment length and raw score statistics
-    size_t min_fragment_length;
-    size_t max_fragment_length;
-
-    QuantileFragmentEstimate(min_allowed_fragment_length,
-                             max_allowed_fragment_length,
-                             frag_dist_low_quantile,
-                             frag_dist_high_quantile,
-                             &unscored_sam_fh, 
-                             score_order, 
-                             tally_buffer, 
-                             score_tag,
-                             missing_default_score,
-                             num_top_fragments_used,
-                             &min_fragment_length,
-                             &max_fragment_length);
-
-    fprintf(stderr, 
-            "Fragment length number top-scoring alignments used: %Zu\n"
-            "Fragment length quantiles used: %f - %f\n"
-            "Fragment length hard limits: %Zu - %Zu\n"
-            "Fragment length range determined as: %Zu - %Zu\n",
-            num_top_fragments_used,
-            frag_dist_low_quantile, frag_dist_high_quantile,
-            min_allowed_fragment_length, max_allowed_fragment_length,
-            min_fragment_length, max_fragment_length);
-
-    fflush(stderr);
-
     PAIRED_READ_SET::iterator pit;
-    TABLE::const_iterator table_iter;
-    TABLE const* table_ptr;
-    TABLE empty_table;
 
     PrintSAMHeader(&unscored_sam_fh, scored_sam_fh);
     fflush(scored_sam_fh);
@@ -221,12 +118,13 @@ int main_score_mapq(int argc, char ** argv)
     bool seen_a_read = false;
 
     SamBuffer cal_buffer(&sam_order, paired_reads_are_same_stranded);
-    
+
+    SamLine * low_bound = NULL;
+
     while (! feof(unscored_sam_fh))
     {
         NextLine(unscored_sam_fh, cal_buffer, allow_absent_seq_qual,
-                 &new_fragment, &ignore_sambuffer_bound,
-                 &seen_a_read, prev_qname, &prev_qid);
+                 &new_fragment, &seen_a_read, prev_qname, &prev_qid, &low_bound);
 
         if (new_fragment)
         {
@@ -234,11 +132,12 @@ int main_score_mapq(int argc, char ** argv)
                            min_fragment_length,
                            max_fragment_length,
                            raw_score_tag,
-                           missing_default_score,
-                           larger_raw_score_is_better,
-                           score_cpd);
+                           max_valid_score,
+                           larger_score_better,
+                           score_cpd,
+                           score_triplet);
             
-            cal_buffer.purge(scored_sam_fh, NULL, NULL, false);
+            cal_buffer.purge(scored_sam_fh, NULL, NULL, low_bound);
         }
         else
         {

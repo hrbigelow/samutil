@@ -122,12 +122,14 @@ void CigarFromSimSAMLine(char const* readname, bool first_in_pair,
             exit(1);
         }
         size_t num_fields =
-            sscanf(read1_str, "read1:%[^:]:%c:%zu:%[^:]", 
+            sscanf(read1_str, "read1:%[^:]:%c:%zu:%[^:]:%zu", 
                    guide_coords->contig, 
                    &strand, 
                    &guide_coords->position,
-                   guide_coords->cigar);
-        assert(num_fields == 4);
+                   guide_coords->cigar,
+                   &guide_coords->num_errors);
+
+        assert(num_fields == 5);
     }
     else
     {
@@ -140,12 +142,14 @@ void CigarFromSimSAMLine(char const* readname, bool first_in_pair,
         }
 
         size_t num_fields =
-            sscanf(read2_str, "read2:%[^:]:%c:%zu:%[^:]", 
+            sscanf(read2_str, "read2:%[^:]:%c:%zu:%[^:]:%zu", 
                    guide_coords->contig, 
                    &strand, 
                    &guide_coords->position,
-                   guide_coords->cigar);
-        assert(num_fields == 4);
+                   guide_coords->cigar,
+                   &guide_coords->num_errors);
+
+        assert(num_fields == 5);
     }
     char const* frag_str = strstr(readname, "fragment_size");
     if (frag_str == NULL)
@@ -278,6 +282,7 @@ int main_align_eval_raw(int argc, char ** argv)
 
     SamOrder sam_order(SAM_RID, "MIN_ALIGN_GUIDE"); // doesn't matter what the order is here.
 
+    sam_order.InitFromFile(alignment_sam_fh);
     sam_order.AddHeaderContigStats(alignment_sam_fh);
 
     SetToFirstDataLine(&alignment_sam_fh);

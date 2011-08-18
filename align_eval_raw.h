@@ -39,6 +39,7 @@ struct read_coords
     size_t position;
     char cigar[10000];
     size_t fragment_size;
+    size_t num_errors;
 };
 
 

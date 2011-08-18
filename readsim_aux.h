@@ -42,9 +42,11 @@ struct LessTX2Genome
 
 bool ApplyProjectionToSAM(SequenceProjection const& projection,
                           SequenceProjection const& mate_projection,
-                          char * alignment_space,
+                          char const* alignment_space,
                           SamLine * first,
-                          SamLine * second);
+                          SamLine * second,
+                          bool inserts_are_introns,
+                          bool add_cufflinks_xs_tag);
 
 SequenceProjection InvertProjection(SequenceProjection const& sp);
 
@@ -105,12 +107,12 @@ typedef double QUALSCORE_DIST[NUM_QUAL_SCORES][4][4];
 
 void fill_quality_distribution(QUALSCORE_DIST * qualscore_dist);
 
-void simulate_errors(char const* founder_read,
-                     char const* qual_string,
-                     QUALSCORE_DIST qualscore_dist,
-                     char zero_quality_code,
-                     gsl_rng * rand_gen,
-                     char * called_read);
+size_t simulate_errors(char const* founder_read,
+                       char const* qual_string,
+                       QUALSCORE_DIST qualscore_dist,
+                       char zero_quality_code,
+                       gsl_rng * rand_gen,
+                       char * called_read);
 
 
 enum ReadType {
@@ -184,7 +186,7 @@ class ReadSampler
 
     void Initialize();
 
-    std::pair<SamLine const*, SamLine const*>
+    std::pair<SamLine *, SamLine *>
         sample_pair(SequenceProjection const& transcript_proj,
                     cis::dna_t const* target_dna,
                     size_t transcript_start_pos,

@@ -137,6 +137,7 @@ int main_align_eval_sort(int argc, char ** argv)
 
     SamOrder sam_order(SAM_RID, sort_type);
 
+    sam_order.InitFromFile(alignment_sam_fh);
     sam_order.AddHeaderContigStats(used_header_fh);
 
     SetToFirstDataLine(&used_header_fh);

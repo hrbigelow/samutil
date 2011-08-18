@@ -120,7 +120,7 @@ class SamBuffer
  public:
 
     SamOrder const* sam_order;
-    SamLine const* low_bound;
+    /* SamLine const* low_bound; */
 
     PAIRED_READ_SET unique_entry_pairs;
     /* SINGLE_READ_SET single_entries_from_pairs; */
@@ -133,19 +133,18 @@ class SamBuffer
 
     SamBuffer(SamOrder const* sam_order, bool output_pairs_as_same_strand);
 
-    bool safe_advance_lowbound(SamLine const* _proposed_new_low_bound);
-
-    void update_lowbound(SamLine const* _low_bound);
+    /* bool safe_advance_lowbound(SamLine const* _proposed_new_low_bound); */
+    /* void update_lowbound(SamLine const* _low_bound); */
 
     //insert an entry, checking whether it is a duplicate.
     std::pair<SamLine const*, bool> insert(SamLine const* entry);
 
     //print entries preceding low_bound, and delete them from memory
-    //if 'ignore_bound' set, purge all remaining entries
+    //if low_bound == NULL, purge all remaining entries
     void purge(FILE * output_sam_fh, 
                FILE * output_first_fastq_fh, 
                FILE * output_second_fastq_fh, 
-               bool ignore_bound);
+               SamLine const* low_bound);
 
 };
 

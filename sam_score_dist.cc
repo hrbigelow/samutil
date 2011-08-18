@@ -38,12 +38,11 @@ int score_dist_usage(size_t fdef, float qdef, float Qdef, size_t ldef, size_t Ld
             "-c     FLOAT   fraction of correctly aligned bases to call an alignment 'correct' [%1.2f]\n"
             "-s     STRING  SAM tag representing the alignment score.  Must be \":i\" tag [%s]\n"
             "-i     FLAG    if present, consider a larger alignment score better [false]\n"
-            "-j     FLAG    consider GENOME alignment better. if absent, TRANSCRIPTOME is better.\n"
             "-m     INT     default alignment score assumed for SAM entries with missing tag [%Zu]\n"
-            "-n     FLAG    if present, expect read ids to start with an integer for sorting [false]\n"
+            "-e     FLAG    if set, alignment is 'correct' if given raw score is same as that of correct alignment [false]\n"
             "\n\n"
             "calibration.qcal: a histogram over the set of alignment categories\n"
-            "(top score, top space, 2nd score, 2nd space, given score, given space)\n"
+            "(top score, 2nd score, given score)\n"
             "tallying number of alignments that are correct or incorrect.\n"
             "space is currently one of 'G' (genome) or 'T' (transcriptome)\n\n"
 
@@ -58,22 +57,22 @@ int score_dist_usage(size_t fdef, float qdef, float Qdef, size_t ldef, size_t Ld
     
 struct ScoreCategory
 {
-    SpaceScore top_score;
-    SpaceScore sec_score;
-    SpaceScore given_score;
+    RAW_SCORE_T top_score;
+    RAW_SCORE_T sec_score;
+    RAW_SCORE_T given_score;
 
-    SpaceScore_better score_better;
+    RawScoreBetter score_better;
 
-    ScoreCategory(SpaceScore _t, SpaceScore _s, SpaceScore _g,
-                  bool _lsc, bool _lsp) : 
+    ScoreCategory(RAW_SCORE_T _t, RAW_SCORE_T _s, RAW_SCORE_T _g,
+                  bool _lsc) : 
         top_score(_t), sec_score(_s), given_score(_g),
-        score_better(_lsc, _lsp) { }
+        score_better(_lsc) { }
 
     ScoreCategory() : 
-        top_score(SpaceScore(0, GENOME)),
-        sec_score(SpaceScore(0, GENOME)),
-        given_score(SpaceScore(0, GENOME)),
-        score_better(true, true) { }
+        top_score(0),
+        sec_score(0),
+        given_score(0),
+        score_better(true) { }
 
     bool operator<(ScoreCategory const& b) const
     {
@@ -86,7 +85,7 @@ struct ScoreCategory
 };
 
 
-typedef std::map<ScoreCategory, std::pair<size_t, size_t> > RAW_HISTO;
+typedef std::map<ScoreCategory, std::pair<RAW_SCORE_T, size_t> > RAW_HISTO;
 
 int main_score_dist(int argc, char ** argv)
 {
@@ -106,13 +105,12 @@ int main_score_dist(int argc, char ** argv)
     size_t min_allowed_fragment_length = ldef;
     size_t max_allowed_fragment_length = Ldef;
     size_t min_fraction_correct_bases = cdef;
-    char const* score_tag = sdef;
+    char const* raw_score_tag = sdef;
     bool larger_score_better = false;
-    bool larger_space_better = false; // favors TRANSCRIPTOME over GENOME
-    size_t missing_default_score = mdef;
-    bool numeric_read_ids = false;
+    size_t max_valid_fragment_score = mdef;
+    bool equivalency_correctness = false;
 
-    while ((c = getopt(argc, argv, "f:q:Q:l:L:c:s:ijm:n")) >= 0)
+    while ((c = getopt(argc, argv, "f:q:Q:l:L:c:es:im:")) >= 0)
     {
         switch(c)
         {
@@ -122,11 +120,10 @@ int main_score_dist(int argc, char ** argv)
         case 'l': min_allowed_fragment_length = static_cast<size_t>(atoi(optarg)); break;
         case 'L': max_allowed_fragment_length = static_cast<size_t>(atoi(optarg)); break;
         case 'c': min_fraction_correct_bases = atof(optarg); break;
-        case 's': score_tag = optarg; break;
+        case 'e': equivalency_correctness = true; break;
+        case 's': raw_score_tag = optarg; break;
         case 'i': larger_score_better = true; break;
-        case 'j': larger_space_better = true; break;
-        case 'm': missing_default_score = static_cast<size_t>(atoi(optarg)); break;
-        case 'n': numeric_read_ids = true; break;
+        case 'm': max_valid_fragment_score = static_cast<size_t>(atoi(optarg)); break;
 
         default: return score_dist_usage(fdef, qdef, Qdef, ldef, Ldef, cdef, sdef, mdef); break;
         }
@@ -137,44 +134,26 @@ int main_score_dist(int argc, char ** argv)
         return score_dist_usage(fdef, qdef, Qdef, ldef, Ldef, cdef, sdef, mdef);
     }
 
-    if (min_allowed_fragment_length > max_allowed_fragment_length)
-    {
-        fprintf(stderr, "Minimum allowed fragment length (-n) (%Zu) is greater than Max length (-x) (%Zu)\n",
-                min_allowed_fragment_length, max_allowed_fragment_length);
-        exit(1);
-    }
-
-    if (frag_dist_low_quantile <= 0.0
-        || frag_dist_low_quantile >= 1.0
-        || frag_dist_high_quantile <= 0.0
-        || frag_dist_high_quantile >= 1.0
-        || frag_dist_low_quantile >= frag_dist_high_quantile)
-    {
-        fprintf(stderr, "Low quantile (-q) (%f) and high quantile (-Q) (%f) must be in (0,1) and low < high\n",
-                frag_dist_low_quantile, frag_dist_high_quantile);
-        exit(1);
-    }
-
-
     char * unscored_sam_file = argv[optind];
     char * score_calibration_file = argv[optind + 1];
 
     FILE * unscored_sam_fh = open_or_die(unscored_sam_file, "r", "Input unscored sam file");
     FILE * score_calibration_fh = open_or_die(score_calibration_file, "w", "Output score calibration file");
 
-    SamLine::SetGlobalFlags(numeric_read_ids);
-
     SamOrder sam_order(SAM_RID_POSITION, "NONE");
 
+    SAM_QNAME_FORMAT qname_fmt = sam_order.InitFromFile(unscored_sam_fh);
     sam_order.AddHeaderContigStats(unscored_sam_fh);
 
+    SamLine::SetGlobalFlags(qname_fmt);
+    
     //alignments from different physical fragments
     bool paired_reads_are_same_stranded = false;
     bool allow_absent_seq_qual = true; // why not?
 
     //sources, and take the unique subset of them
 
-    SpaceScore_better score_best_is_less(larger_score_better, larger_space_better);
+    RawScoreBetter score_order(larger_score_better);
 
     //tally / estimate fragment lengths from top-scoring fragment alignments
     SamBuffer tally_buffer(&sam_order, paired_reads_are_same_stranded);
@@ -187,47 +166,80 @@ int main_score_dist(int argc, char ** argv)
                              frag_dist_low_quantile,
                              frag_dist_high_quantile,
                              &unscored_sam_fh, 
-                             score_best_is_less, 
+                             score_order, 
                              tally_buffer, 
-                             score_tag,
-                             missing_default_score,
+                             raw_score_tag,
+                             max_valid_fragment_score,
                              num_top_fragments_used,
                              &min_fragment_length,
                              &max_fragment_length);
 
     bool new_fragment;
-    bool ignore_sambuffer_bound;
 
     SamBuffer sam_buffer(&sam_order, paired_reads_are_same_stranded);
 
     char prev_qname[1024] = "";
-    std::vector<SpaceScore> fragment_scores;
-    ScorePair score_pair;
+    std::vector<RAW_SCORE_T> packed_scores;
+
     RAW_HISTO score_cat_histo;
     read_coords first_guide_coords;
     read_coords second_guide_coords;
     bool seen_a_read = false;
     size_t prev_qid = 0;
 
+    RAW_SCORE_T top_raw_score;
+    RAW_SCORE_T sec_raw_score;
 
     bool guide_is_ones_based_pos = true;
+
+    SamLine * low_bound = NULL;
 
     while (! feof(unscored_sam_fh))
     {
         NextLine(unscored_sam_fh, sam_buffer, allow_absent_seq_qual,
-                 &new_fragment, &ignore_sambuffer_bound,
-                 &seen_a_read, prev_qname, &prev_qid);
+                 &new_fragment, &seen_a_read, prev_qname, &prev_qid, &low_bound);
 
         if (new_fragment)
         {
-            //find scores of top two fragments.
-            score_pair = FindTopTwoScores(sam_buffer,
-                                          min_fragment_length,
-                                          max_fragment_length,
-                                          score_tag, 
-                                          missing_default_score,
-                                          score_best_is_less,
-                                          &fragment_scores);
+            packed_scores = 
+                GetPackedScores(sam_buffer, 
+                                min_fragment_length,
+                                max_fragment_length,
+                                raw_score_tag, 
+                                max_valid_fragment_score);
+
+
+            //find top two scores
+            
+            std::vector<RAW_SCORE_T> fscopy(packed_scores.size());
+
+            for (size_t p = 0; p != packed_scores.size(); ++p)
+            {
+                fscopy[p] = UnpackScore(packed_scores[p], max_valid_fragment_score);
+            }
+
+            std::sort(fscopy.begin(), fscopy.end(), score_order);
+            std::vector<RAW_SCORE_T>::iterator new_end = 
+                std::unique(fscopy.begin(), fscopy.end());
+
+            size_t num_unique = std::distance(fscopy.begin(), new_end);
+            if (num_unique >= 2)
+            {
+                top_raw_score = fscopy[0];
+                sec_raw_score = fscopy[1];
+            }
+            else if (num_unique == 1)
+            {
+                top_raw_score = fscopy[0];
+                sec_raw_score = max_valid_fragment_score + 1;
+            }
+            else
+            {
+                //this is really unnecessary since it means the
+                //sam_buffer doesn't have any entries.
+                top_raw_score = max_valid_fragment_score + 1;
+                sec_raw_score = max_valid_fragment_score + 1;
+            }
 
             //then, for each fragment, evaluate whether it is correctly aligned,
             //and update the histogram
@@ -251,50 +263,74 @@ int main_score_dist(int argc, char ** argv)
                                     guide_is_ones_based_pos,
                                     &second_guide_coords);
                 
-                Cigar::CIGAR_VEC first_guide_cigar = 
-                    Cigar::FromString(first_guide_coords.cigar, first_guide_coords.position);
-                
-                std::multiset<std::pair<size_t, size_t> > first_guide_cigar_index =
-                    Cigar::ComputeOffsets(first_guide_cigar);
-                
-                Cigar::CIGAR_VEC second_guide_cigar = 
-                    Cigar::FromString(second_guide_coords.cigar, second_guide_coords.position);
-                
-                std::multiset<std::pair<size_t, size_t> > second_guide_cigar_index =
-                    Cigar::ComputeOffsets(second_guide_cigar);
+                //calculate whether the alignment is as good as the correct one.
+                RAW_SCORE_T fragment_score = 
+                    UnpackScore(packed_scores[frag_index], max_valid_fragment_score);
 
-                size_t first_num_guide, first_num_test;
-                size_t first_num_correct_bases = 
-                    CountCorrectBases(first, first_guide_coords,
-                                      first_guide_cigar,
-                                      first_guide_cigar_index,
-                                      &first_num_guide, &first_num_test);
-                
-                size_t second_num_guide, second_num_test;
-                size_t second_num_correct_bases = 
-                    CountCorrectBases(second, second_guide_coords,
-                                      second_guide_cigar,
-                                      second_guide_cigar_index,
-                                      &second_num_guide, &second_num_test);
-                
-                
-                size_t num_correct_bases = first_num_correct_bases + second_num_correct_bases;
-                size_t num_guide_bases = first_num_guide + second_num_guide;
-
-                float frac_correct_bases = num_correct_bases > 0
-                    ? static_cast<float>(num_correct_bases) / static_cast<float>(num_guide_bases)
-                    : 0.0;
-                
-                bool is_correct = frac_correct_bases >= min_fraction_correct_bases;
-
-                ScoreCategory score_cat(score_pair.top_score, score_pair.sec_score,
-                                        fragment_scores[frag_index++],
-                                        larger_score_better,
-                                        larger_space_better);
+                ScoreCategory score_cat(top_raw_score, sec_raw_score,
+                                        fragment_score,
+                                        larger_score_better);
 
                 if (score_cat_histo.find(score_cat) == score_cat_histo.end())
                 {
                     score_cat_histo[score_cat] = std::make_pair(0, 0);
+                }
+
+                bool is_correct;
+
+                if (equivalency_correctness)
+                {
+                    //consider fragment alignments 'correct' if the
+                    //aligner found the same or better raw alignment
+                    //score as the correct one.
+                    RAW_SCORE_T correct_fragment_score = 
+                    first_guide_coords.num_errors +
+                    second_guide_coords.num_errors;
+                    
+                    //correct if the correct fragment score is not better than the given one.
+                    is_correct = 
+                        (! score_order(correct_fragment_score, fragment_score));
+                }
+                else
+                {
+                    //use the traditional notion of alignment
+                    //correctness as that the aligner correctly placed
+                    //enough bases
+                    Cigar::CIGAR_VEC first_guide_cigar = 
+                        Cigar::FromString(first_guide_coords.cigar, first_guide_coords.position);
+                
+                    std::multiset<std::pair<size_t, size_t> > first_guide_cigar_index =
+                        Cigar::ComputeOffsets(first_guide_cigar);
+                
+                    Cigar::CIGAR_VEC second_guide_cigar = 
+                        Cigar::FromString(second_guide_coords.cigar, second_guide_coords.position);
+                
+                    std::multiset<std::pair<size_t, size_t> > second_guide_cigar_index =
+                        Cigar::ComputeOffsets(second_guide_cigar);
+
+                    size_t first_num_guide, first_num_test;
+                    size_t first_num_correct_bases = 
+                        CountCorrectBases(first, first_guide_coords,
+                                          first_guide_cigar,
+                                          first_guide_cigar_index,
+                                          &first_num_guide, &first_num_test);
+                
+                    size_t second_num_guide, second_num_test;
+                    size_t second_num_correct_bases = 
+                        CountCorrectBases(second, second_guide_coords,
+                                          second_guide_cigar,
+                                          second_guide_cigar_index,
+                                          &second_num_guide, &second_num_test);
+                
+                
+                    size_t num_correct_bases = first_num_correct_bases + second_num_correct_bases;
+                    size_t num_guide_bases = first_num_guide + second_num_guide;
+
+                    float frac_correct_bases = num_correct_bases > 0
+                        ? static_cast<float>(num_correct_bases) / static_cast<float>(num_guide_bases)
+                        : 0.0;
+
+                    is_correct = frac_correct_bases >= min_fraction_correct_bases;
                 }
 
                 if (is_correct)
@@ -305,17 +341,18 @@ int main_score_dist(int argc, char ** argv)
                 {
                     score_cat_histo[score_cat].second++;
                 }
+
+                ++frag_index;
             }
 
-            sam_buffer.purge(NULL, NULL, NULL, ignore_sambuffer_bound);
+            sam_buffer.purge(NULL, NULL, NULL, low_bound);
         }
     }
 
     RAW_HISTO::const_iterator rit;
-    fprintf(score_calibration_fh, "score_tag: %s\n", score_tag);
-    fprintf(score_calibration_fh, "missing_default_score: %zu\n", missing_default_score);
+    fprintf(score_calibration_fh, "score_tag: %s\n", raw_score_tag);
+    fprintf(score_calibration_fh, "max_valid_fragment_score: %zu\n", max_valid_fragment_score);
     fprintf(score_calibration_fh, "larger_score_better: %c\n", (larger_score_better ? 'Y' : 'N'));
-    fprintf(score_calibration_fh, "larger_space_better: %c\n", (larger_space_better ? 'Y' : 'N'));
 
     for (rit = score_cat_histo.begin(); rit != score_cat_histo.end(); ++rit)
     {
@@ -323,10 +360,10 @@ int main_score_dist(int argc, char ** argv)
         size_t num_right = (*rit).second.first;
         size_t num_wrong = (*rit).second.second;
 
-        fprintf(score_calibration_fh, "%Zu\t%c\t%Zu\t%c\t%Zu\t%c\t%Zu\t%Zu\n",
-                cat.top_score.score, PrintAlignmentSpace(cat.top_score.space),
-                cat.sec_score.score, PrintAlignmentSpace(cat.sec_score.space),
-                cat.given_score.score, PrintAlignmentSpace(cat.given_score.space),
+        fprintf(score_calibration_fh, "%i\t%i\t%i\t%Zu\t%Zu\n",
+                cat.top_score,
+                cat.sec_score,
+                cat.given_score,
                 num_right, num_wrong);
     }
 

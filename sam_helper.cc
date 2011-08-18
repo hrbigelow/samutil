@@ -2,6 +2,7 @@
 #include <stdint.h>
 
 #include "sam_helper.h"
+#include "sam_order.h"
 #include "cigar_ops.h"
 #include "file_utils.h"
 
@@ -32,11 +33,21 @@ namespace SamFlags
 //'line' variable, with null's terminating each one.  non-string data
 //will be stored separately
 
-bool SamLine::numeric_start_fragment_ids;
+SAM_QNAME_FORMAT SamLine::sam_qname_format;
+size_t (* SamLine::parse_fragment_id)(char const* qname) = &parse_fragment_id_zero;
 
-void SamLine::SetGlobalFlags(bool _numeric)
+
+
+void SamLine::SetGlobalFlags(SAM_QNAME_FORMAT _qname_format)
 {
-    SamLine::numeric_start_fragment_ids = _numeric;
+    SamLine::sam_qname_format = _qname_format;
+    switch(SamLine::sam_qname_format)
+    {
+    case SAM_NUMERIC: SamLine::parse_fragment_id = &parse_fragment_id_numeric; break;
+    case SAM_ILLUMINA: SamLine::parse_fragment_id = &parse_fragment_id_illumina; break;
+    case SAM_CASAVA18: SamLine::parse_fragment_id = &parse_fragment_id_casava_1_8; break;
+    case SAM_NON_INTERPRETED: SamLine::parse_fragment_id = &parse_fragment_id_zero; break;
+    }
 }
 
 
@@ -50,7 +61,8 @@ SamLine::SamLine(SAM_PARSE _parse_flag,
                  char const* _tag_string) :
     parse_flag(_parse_flag), flag(_flag), pos(_pos), 
     mapq(_mapq), mpos(_mpos), 
-    isize(_isize), extra(NULL), extra_tag(NULL)
+    isize(_isize), extra(NULL), extra_tag(NULL),
+    flattened_pos(0)
 {
     
     assert(strlen(_qual) < 10000);
@@ -100,16 +112,7 @@ SamLine::SamLine(SAM_PARSE _parse_flag,
         this->tag_string = NULL;
     }
 
-    if (SamLine::numeric_start_fragment_ids)
-    {
-        int nfields_read = sscanf(this->qname, "%zu", &this->qid);
-        if (nfields_read != 1)
-        {
-            fprintf(stderr, "SamLine: Error: numeric_start_fragment_ids set to true, but qname does not "
-                    "start with integer:\n%s", this->qname);
-            exit(1);
-        }
-    }
+    this->fragment_id = SamLine::parse_fragment_id(this->qname);
 }
 
 
@@ -117,9 +120,9 @@ SamLine::SamLine(SAM_PARSE _parse_flag,
 
 
 SamLine::SamLine(FILE * seqfile, bool allow_absent_seq_qual) :
-    bytes_in_line(0), line(NULL), qname(NULL), qid(0), rname(NULL), 
+    bytes_in_line(0), line(NULL), qname(NULL), fragment_id(0), rname(NULL), 
     cigar(NULL), mrnm(NULL), seq(NULL), qual(NULL), tag_string(NULL), extra(NULL),
-    extra_tag(NULL)
+    extra_tag(NULL), flattened_pos(0)
 {
     char buf[4096 + 1];
     if (fgets(buf, 4096, seqfile) == NULL)
@@ -133,10 +136,65 @@ SamLine::SamLine(FILE * seqfile, bool allow_absent_seq_qual) :
 
 
 SamLine::SamLine(char const* samline_string, bool allow_absent_seq_qual) :
-    qname(NULL), qid(0), rname(NULL), cigar(NULL), mrnm(NULL), 
-    seq(NULL), qual(NULL), tag_string(NULL), extra(NULL), extra_tag(NULL)
+    qname(NULL), fragment_id(0), rname(NULL), cigar(NULL), mrnm(NULL), 
+    seq(NULL), qual(NULL), tag_string(NULL), extra(NULL), extra_tag(NULL),
+    flattened_pos(0)
 {
     this->Init(samline_string, allow_absent_seq_qual);
+}
+
+
+//copy a SamLine according to the storage policy described in sam_helper.h
+SamLine::SamLine(SamLine const& s) :
+    bytes_in_line(s.bytes_in_line),
+    parse_flag(s.parse_flag),
+    fragment_id(s.fragment_id),
+    flag(s.flag),
+    pos(s.pos),
+    mapq(s.mapq),
+    mpos(s.mpos),
+    isize(s.isize),
+    flattened_pos(s.flattened_pos)
+{
+    this->line = new char[s.bytes_in_line];
+    memcpy(this->line, s.line, s.bytes_in_line);
+    this->qname = this->line + std::distance(s.line, s.qname);
+    this->rname = this->line + std::distance(s.line, s.rname);
+    this->mrnm = this->line + std::distance(s.line, s.mrnm);
+    this->seq = this->line + std::distance(s.line, s.seq);
+    this->qual = this->line + std::distance(s.line, s.qual);
+
+    if (s.cigar == s.extra)
+    {
+        this->extra = new char[strlen(s.extra + 1)];
+        strcpy(this->extra, s.extra);
+        this->cigar = this->extra;
+    }
+    else
+    {
+        this->extra = NULL;
+        this->cigar = this->line + std::distance(s.line, s.cigar);
+    }
+
+    if (s.tag_string == NULL && s.extra_tag == NULL)
+    {
+        this->tag_string = NULL;
+        this->extra_tag = NULL;
+    }
+    else if (s.tag_string != NULL && s.extra_tag == NULL)
+    {
+        this->extra_tag = NULL;
+        this->tag_string = this->line + std::distance(s.line, s.tag_string);
+    }
+    else
+    {
+        assert(s.tag_string == s.extra_tag);
+        assert(s.extra_tag != NULL);
+
+        this->extra_tag = new char[strlen(s.extra_tag + 1)];
+        strcpy(this->extra_tag, s.extra_tag);
+        this->tag_string = this->extra_tag;
+    }
 }
 
 
@@ -232,16 +290,7 @@ void SamLine::Init(char const* samline_string, bool allow_absent_seq_qual)
             --this->mpos;
         }            
 
-        if (SamLine::numeric_start_fragment_ids)
-        {
-            int nfields_read = sscanf(this->qname, "%zu", &this->qid);
-            if (nfields_read != 1)
-            {
-            fprintf(stderr, "SamLine: Error: numeric_start_fragment_ids set to true, but qname does not "
-                    "start with integer:\n%s", this->qname);
-            exit(1);
-            }
-        }
+        this->fragment_id = SamLine::parse_fragment_id(this->qname);
 
         if (was_error)
         {
@@ -253,6 +302,29 @@ void SamLine::Init(char const* samline_string, bool allow_absent_seq_qual)
         
         this->parse_flag = DATA_LINE;
     }
+}
+
+
+void SamLine::SetFlattenedPosition(CONTIG_OFFSETS const& contig_offsets,
+                                   CONTIG_OFFSETS::const_iterator * contig_iter)
+{
+    //assume contig_iter is valid
+    assert(*contig_iter != contig_offsets.end());
+    //memoize the lookup, since we anticipate same lookups
+
+    *contig_iter = strcmp((**contig_iter).first, this->rname) == 0
+        ? *contig_iter 
+        : contig_offsets.find(this->rname);
+    
+    if (*contig_iter == contig_offsets.end())
+    {
+        fprintf(stderr, "SetFlattenedPosition: error: rname %s (at %Zu) "
+                "does not exist in provided contig index\n",
+                this->rname, this->zero_based_pos());
+        exit(1);
+    }
+    
+    this->flattened_pos = (**contig_iter).second + this->zero_based_pos();
 }
 
 
@@ -286,13 +358,15 @@ void SamLine::print(FILE * seqfile, bool flip_query_strand_flag) const
         return;
     }
 
-    int offset = 1; // output is always ones-based in SAM file
     int flag_to_print = flip_query_strand_flag ? 
         (this->flag ^ SamFlags::QUERY_ON_NEG_STRAND) : this->flag;
-    
+
+    size_t reported_pos = this->query_unmapped() ? 0 : this->ones_based_pos();
+    size_t reported_mpos = this->mate_unmapped() ? 0 : this->mpos + 1;
+
     fprintf(seqfile, "%s\t%i\t%s\t%Zu\t%Zu\t%s\t%s\t%Zu\t%i",
-            this->qname, flag_to_print, this->rname, this->pos + offset,
-            this->mapq, this->cigar, this->mrnm, this->mpos + offset,
+            this->qname, flag_to_print, this->rname, reported_pos,
+            this->mapq, this->cigar, this->mrnm, reported_mpos,
             this->isize);
 
     if (this->seq != NULL)
@@ -417,7 +491,7 @@ void SamLine::add_tag(char const* tag_code, char type, char const* value_string)
 bool AreSequencedMatePairs(SamLine const& a, SamLine const& b)
 {
     return 
-        strcmp(a.qname, b.qname) == 0
+        a.fragment_id == b.fragment_id
         && (a.first_read_in_pair() != b.first_read_in_pair())
         && a.paired_in_sequencing()
         && b.paired_in_sequencing();
@@ -471,6 +545,7 @@ char const* strand_to_char(Strand strand)
 
 
 //3-way comparison operator for SAM by qname and flag
+/*
 int SAM_cmp_qname_flag(SamLine const& a, SamLine const& b)
 {
 
@@ -509,8 +584,10 @@ int SAM_cmp_qname_flag_aux(char const* qname1, int flag1,
         }
     }
 }
+*/
 
 
+/*
 void print_sam_line(FILE * sam_fh,
                     char const* qname, int flag, 
                     char const* rname, size_t pos,
@@ -533,7 +610,7 @@ void print_sam_line(FILE * sam_fh,
     }
     fprintf (sam_fh, "\n");
 }
-
+*/
 
 
 

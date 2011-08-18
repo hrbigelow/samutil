@@ -16,7 +16,28 @@ int usage()
             "samutil get_tx_sequence  Get transcript sequence from genomic sequence\n"
             "samutil score_dist       Generate raw score distribution statistics for 'score_mapq'\n"
             "samutil score_mapq       Score alignment mapping quality from fragment-sorted SAM file\n"
-            "\n"
+            "samutil gen_header       Generate a projection-order transcript header\n"      
+            "\n\n"
+            "Notes:\n\n"
+            "Read names may be in Illumina format, Casava 1.8 foramt, or 'numeric' format\n\n"
+
+            "To ensure that read IDS are truly unique within the set provided,\n"
+            "the input must be all of one format\n\n"
+
+            "Illumina format is, e.g.:\n"
+            "@HWI-ST630:1:1101:1209:2187#0/1\n"
+            "@<flowcell>:<lane>:<tile>:<xpos>:<ypos>[ignored_extra]\n"
+            "where all fields except flowcell are positive integers\n\n"
+
+            "Casava 1.8 format:\n"
+            "@GAII:1:HWI-ST630:1:1101:1209:2187 1:0:0:ACGGTA\n"
+            "@<instrument-name>:<run ID>:<flowcell ID>:<lane-number>:<tile-number>:<x-pos>:<y-pos>[space]\\\n"
+            "<read number>:<is filtered>:<control number>:<barcode sequence>\n\n"
+
+            "where all fields except instrument-name and flowcell are positive integers\n\n"
+
+            "numeric format is:\n"
+            "@<numeric_id>[ignored_extra]\n\n"
             );
     return 1;
 }
@@ -53,6 +74,10 @@ int main(int argc, char *argv[])
     else if (strcmp(argv[1], "score_mapq") == 0)
     {
         return main_score_mapq(argc - 1, argv + 1);
+    }
+    else if (strcmp(argv[1], "gen_header") == 0)
+    {
+        return main_generate_projection_header(argc - 1, argv + 1);
     }
     else
     {
