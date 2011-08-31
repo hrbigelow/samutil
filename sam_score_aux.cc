@@ -8,224 +8,361 @@
 #include <algorithm>
 #include <cstdio>
 #include <cmath>
+#include <climits>
 
-CollapseScoreTriplet::CollapseScoreTriplet(size_t _min, size_t _max) : 
-    min_score(_min), max_score(_max) 
-{ 
-    if (max_score <= min_score)
+
+
+size_t to_integer::operator()(char const* k) const
+{
+    size_t val = 0;
+    if (sscanf(k, "%*[^0-9]%zu", &val) == 1 || sscanf(k, "%zu", &val) == 1)
     {
-        fprintf(stderr, "Error: CollapseScoreTriplet: "
-                "max_score must be strictly larger than min_score\n");
+        return val;
+    }
+    return 0;
+}
+
+
+
+FragmentScore::~FragmentScore()
+{
+    if (this->space_ordering != NULL)
+    {
+        delete this->space_ordering;
+        this->space_ordering = NULL;
+    }
+
+    if (this->score_table != NULL)
+    {
+        delete this->score_table;
+        this->score_table = NULL;
+    }
+
+    for (CONTIG_SPACE::iterator it = this->contig_space.begin();
+         it != this->contig_space.end(); ++it)
+    {
+        delete (*it).first;
+    }
+}
+
+
+void FragmentScore::init(char const* score_cal_file, char const* contig_space_file)
+{
+    FILE * score_cal_fh = 
+        open_or_die(score_cal_file, "r", "Input score calibration file");
+
+    size_t num_parsed = 
+        fscanf(score_cal_fh, "score_tag: %s\n", this->raw_score_tag);
+
+    if (num_parsed != 1)
+    {
+        fprintf(stderr, 
+                "Error: score calibration file %s doesn't have score_tag field."
+                "Please produce with 'samutil score_dist'\n", score_cal_file);
         exit(1);
     }
-    this->shift_bits = static_cast<size_t>(ceilf(log2f(static_cast<float>(max_score - min_score))));
+
+
+    int top_raw_score, sec_raw_score, given_raw_score;
+    int mapq;
+
+    this->max_fragment_score = -INT_MAX;
+    this->min_fragment_score = INT_MAX;
+
+    while (! feof(score_cal_fh))
+    {
+        int num_parsed =
+            fscanf(score_cal_fh, "%i\t%i\t%i\t%*i%*[^\n]\n", &top_raw_score, &sec_raw_score, &given_raw_score);
+
+        if (num_parsed != 3)
+        {
+            fprintf(stderr, "Error: score calibration file %s has bad format.\n", score_cal_file);
+            exit(1);
+        }
+
+        this->max_fragment_score = std::max(this->max_fragment_score, top_raw_score);
+        this->min_fragment_score = std::min(this->min_fragment_score, given_raw_score);
+    }
+
+    this->table_shift_bits = 
+        static_cast<size_t>(ceilf(log2f(static_cast<float>(this->max_fragment_score - this->min_fragment_score))));
+
+    size_t max_index = this->score_table_index(this->max_fragment_score,
+                                               this->max_fragment_score,
+                                               this->max_fragment_score);
+
+    this->score_table = new int[max_index + 1];
+    std::fill(this->score_table, this->score_table + max_index, 0);
+
+    rewind(score_cal_fh);
+    fscanf(score_cal_fh, "score_tag: %*s\n");
+
+    while (! feof(score_cal_fh))
+    {
+        int num_parsed = 
+            fscanf(score_cal_fh, "%i\t%i\t%i\t%i%*[^\n]\n",
+                   &top_raw_score,
+                   &sec_raw_score,
+                   &given_raw_score,
+                   &mapq);
+
+        if (num_parsed != 4)
+        {
+            fprintf(stderr, "Error: score calibration file %s has bad format.\n", score_cal_file);
+            exit(1);
+        }
+
+        size_t index = this->score_table_index(top_raw_score, sec_raw_score, given_raw_score);
+        assert(index <= max_index);
+
+        this->score_table[index] = mapq;
+        this->larger_score_better = top_raw_score > sec_raw_score;
+    }
+    fclose(score_cal_fh);
+
+    this->worst_fragment_score = 
+        this->larger_score_better 
+        ? this->min_fragment_score 
+        : this->max_fragment_score;
+
+    this->raw_score_comp = RawScoreComp(this->larger_score_better);
+
+
+    FILE * contig_space_fh = 
+        open_or_die(contig_space_file, "r", "Input contig alignment space file");
+
+    char first_char;
+
+    while (! feof(contig_space_fh))
+    {
+        if ((first_char = fgetc(contig_space_fh)) == '#')
+        {
+            //ignore comment line
+            char * dummy = NULL;
+            size_t dummy_size;
+            getline(&dummy, &dummy_size, contig_space_fh);
+            delete dummy;
+        }
+        else
+        {
+            //actual data line
+            ungetc(first_char, contig_space_fh);
+            this->space_ordering = new char[256];
+            fscanf(contig_space_fh, "%s\n", this->space_ordering);
+            break;
+        }
+    }
+
+    char contig_name[256];
+    char space_code;
+    while (! feof(contig_space_fh))
+    {
+        fscanf(contig_space_fh, "%s\t%1c\n", contig_name, &space_code);
+        char * this_contig_name = new char[strlen(contig_name) + 1];
+        strcpy(this_contig_name, contig_name);
+        this->contig_space.insert(std::make_pair(this_contig_name, space_code));
+    }
+
+    fclose(contig_space_fh);
 }
 
-size_t CollapseScoreTriplet::operator()(size_t top, size_t sec, size_t given) const
-{
-    size_t result = top - this->min_score;
-    result = result<<this->shift_bits;
-    result += sec - this->min_score;
-    result = result<<this->shift_bits;
-    result += given - this->min_score;
-    return result;
-}
 
-
-/*
-  A packed score is equal to (fragment_score * 2) + 1 for genome alignments,
-  or (fragment_score * 2) for transcriptome alignments,
-  or default_missing for anything not aligned.
-
-  The packed score is used to stratify by the combination of
-  fragment_score X G/T space.
-
- */
-
-//Calculate raw fragment score as a simple sum of raw read scores, but
-//downgraded by one point if in the genome, and censored by a fragment
-//length range.  Warning: depends on the isize field, which is
-//incorrect for genome-projected transcript alignments.
-//Returns the packed raw score, where the 'default missing' value is equal
-//to the max valid score + 1
-RAW_SCORE_T PairedEndPackedScore(SamLine const* a,
-                                 SamLine const* b,
-                                 char const* raw_score_tag,
-                                 RAW_SCORE_T max_valid_fragment_score, /* numerically maximum */
-                                 size_t min_allowed_fragment_length,
-                                 size_t max_allowed_fragment_length)
+int FragmentScore::raw_score(SamLine const* a, SamLine const* b) const
 {
     bool a_has_score;
     bool b_has_score;
 
-    RAW_SCORE_T fragment_score;
+    int fragment_score;
 
-    RAW_SCORE_T a_raw_score = 
-        a->alignment_score(raw_score_tag, max_valid_fragment_score + 1, &a_has_score);
+    int a_raw_score = 
+        a->alignment_score(this->raw_score_tag, this->worst_fragment_score, &a_has_score);
 
-    RAW_SCORE_T b_raw_score = 
-        b->alignment_score(raw_score_tag, max_valid_fragment_score + 1, &b_has_score);
+    int b_raw_score = 
+        b->alignment_score(this->raw_score_tag, this->worst_fragment_score, &b_has_score);
 
     size_t fragment_length = static_cast<size_t>(a->isize);
 
     assert(a->isize >= 0);
-    char xp_tag[2];
-    char tag_type;
+    
+    int unqual_fragment_score = a_raw_score + b_raw_score;
 
-    if (fragment_length >= min_allowed_fragment_length
-        && fragment_length <= max_allowed_fragment_length
-        && (a_raw_score + b_raw_score) <= max_valid_fragment_score)
+    if (fragment_length >= this->min_fragment_length
+        && fragment_length <= this->max_fragment_length
+        && unqual_fragment_score >= this->min_fragment_score
+        && unqual_fragment_score <= this->max_fragment_score)
     {
-        
-        int add = (a->has_tag("XP", tag_type, xp_tag) && strcmp(xp_tag, "G") == 0)
-            ? 1 : 0;
-        fragment_score = (a_raw_score + b_raw_score) * 2 + add;
+        //fragment score is valid
+        fragment_score = unqual_fragment_score;
     }
     else
     {
-        fragment_score = max_valid_fragment_score + 1;
+        //outside the range.  give it the worst value
+        fragment_score = this->worst_fragment_score;
     }
 
     return fragment_score;
 }
 
-
-std::vector<RAW_SCORE_T> 
-GetPackedScores(SamBuffer const& sam_buffer, 
-                size_t min_allowed_fragment_length,
-                size_t max_allowed_fragment_length,
-                char const* raw_score_tag,
-                RAW_SCORE_T max_valid_fragment_score)
+char FragmentScore::alignment_space(SamLine const* a, SamLine const* /* b */) const
 {
-    std::vector<RAW_SCORE_T> packed_scores(sam_buffer.unique_entry_pairs.size());
-                                          
+    if (a->query_unmapped())
+    {
+        return this->space_ordering[0];
+    }
+
+    CONTIG_SPACE::const_iterator cs_iter;
+    cs_iter = this->contig_space.find(a->rname);
+    
+    if (cs_iter == this->contig_space.end())
+    {
+        fprintf(stderr, "Error: no Alignment Space definition "
+                "for this reference contig: %s\n",
+                a->rname);
+        exit(1);
+    }
+    return (*cs_iter).second;
+}
+
+
+//retrieve the index in the score table corresponding to the entry
+//packed in a single size_t by the offset
+size_t FragmentScore::score_table_index(int top_score, int sec_score, int given_score) const
+{
+    size_t index = top_score - this->min_fragment_score;
+    index = index<<this->table_shift_bits;
+    index += sec_score - this->min_fragment_score;
+    index = index<<this->table_shift_bits;
+    index += given_score - this->min_fragment_score;
+    return index;
+}
+
+
+//order by [raw_score, space]
+bool FragmentScore::operator()(ScoreSpace const& a, ScoreSpace const& b) const
+{
+    return this->raw_score_comp(a.raw_score, b.raw_score)
+        || (a.raw_score == b.raw_score
+            && (index(this->space_ordering, a.alignment_space) <
+                index(this->space_ordering, b.alignment_space)));
+}
+
+
+
+FragmentScoreWrap::FragmentScoreWrap(FragmentScore const* _fs) : fragment_score(_fs) { }
+
+bool FragmentScoreWrap::operator()(ScoreSpace const& a, ScoreSpace const& b) const
+{
+    return (*this->fragment_score)(a, b);
+}
+
+
+//Set mapq, primary alignment flag, XP, XY, and XZ tags
+void set_score_fields(SamBuffer const& sam_buffer, 
+                      FragmentScore const& fragment_scoring)
+{
+
     PAIRED_READ_SET::iterator pit;
 
-    size_t element_position = 0;
+    size_t N = sam_buffer.unique_entry_pairs.size();
+    int * raw_scores = new int[N];
+    int * raw_scores_copy = new int[N + 2];
+    char * spaces = new char[N];
+
+    FragmentScoreWrap fs_wrap(&fragment_scoring);
+
+    std::map<ScoreSpace, size_t, FragmentScoreWrap> stratum_hist(fs_wrap);
+    std::map<ScoreSpace, size_t, FragmentScoreWrap>::iterator sit;
+
+    size_t i = 0;
     for (pit = sam_buffer.unique_entry_pairs.begin();
-         pit != sam_buffer.unique_entry_pairs.end(); ++pit)
+         pit != sam_buffer.unique_entry_pairs.end(); ++pit, ++i)
     {
         SamLine const* first = ((*pit).first);
         SamLine const* second = ((*pit).second);
 
-        RAW_SCORE_T packed_score = 
-            PairedEndPackedScore(first, second, raw_score_tag, 
-                                 max_valid_fragment_score,
-                                 min_allowed_fragment_length,
-                                 max_allowed_fragment_length);
+        raw_scores[i] = fragment_scoring.raw_score(first, second);
+        spaces[i] = fragment_scoring.alignment_space(first, second);
         
-        packed_scores[element_position++] = packed_score;
-    }
-    return packed_scores;
-}
-
-
-RAW_SCORE_T UnpackScore(RAW_SCORE_T packed_score,
-                        RAW_SCORE_T max_valid_fragment_score)
-{
-    return packed_score == max_valid_fragment_score + 1 ? packed_score : packed_score>>1;
-}
-
-//assume sam_buffer has alignments of only one physical
-//fragment in its 'unique_entry_pairs' buffer.
-//calculate all fragment_scores, and return the top two
-
-
-/*
-1. load all fragment scores into the map of raw_score -> rank
-
-2. initialize map rank values in order.
-
-3. look up and cache mapq calibration sub-table based on top two
-ranking raw scores
-
-4. set all rank, primary flag, and mapq calibration from lookups
-*/
-void SetScoreFields(SamBuffer const& sam_buffer, 
-                    size_t min_fragment_length,
-                    size_t max_fragment_length,
-                    char const* raw_score_tag,
-                    RAW_SCORE_T max_valid_fragment_score,
-                    bool larger_raw_score_is_better,
-                    int const* score_cpd,
-                    CollapseScoreTriplet const& score_triplet)
-{
-                           
-    PAIRED_READ_SET::iterator pit;
-
-    RawScoreBetter score_order(larger_raw_score_is_better);
-    //rank, counts
-    std::map<RAW_SCORE_T, std::pair<size_t, size_t>, RawScoreBetter> strata(score_order);
-    std::map<RAW_SCORE_T, std::pair<size_t, size_t>, RawScoreBetter>::iterator mit;
-
-    //1. first traversal.  for each pair: load (if not exists)
-    //fragment score into the map of raw_score -> rank
-    std::vector<RAW_SCORE_T> packed_scores = 
-        GetPackedScores(sam_buffer,
-                        min_fragment_length,
-                        max_fragment_length,
-                        raw_score_tag,
-                        max_valid_fragment_score);
-    
-    size_t elem = 0;
-    for (elem = 0; elem != packed_scores.size(); ++elem)
-    {
-        mit = strata.find(packed_scores[elem]);
-        if (mit == strata.end())
+        ScoreSpace ss(raw_scores[i], spaces[i]);
+        sit = stratum_hist.find(ss);
+        if (sit == stratum_hist.end())
         {
-            mit = strata.insert(strata.end(), std::make_pair(packed_scores[elem], std::make_pair(0, 0)));
+            sit = stratum_hist.insert(std::make_pair(ss, 0)).first;
         }
-        //increment counts;
-        ++((*mit).second).second;
+        (*sit).second++;
     }
 
-    //2. initialize map rank values in order
-    size_t rank = 1;
-    for (mit = strata.begin(); mit != strata.end(); ++mit)
-    {
-        ((*mit).second).first = rank++;
-    }
+    std::copy(raw_scores, raw_scores + N, raw_scores_copy);
+    raw_scores_copy[N] = fragment_scoring.worst_fragment_score;
+    raw_scores_copy[N + 1] = fragment_scoring.worst_fragment_score;
 
-    //3. look up and cache mapq calibration sub-table based on top two
-    //ranking raw scores
-    RAW_SCORE_T top_fragment_score = 
-        strata.size() > 0 ? UnpackScore((*strata.begin()).first, max_valid_fragment_score) 
-        : max_valid_fragment_score + 1;
+    std::nth_element(raw_scores_copy, raw_scores_copy + N, 
+                     raw_scores_copy + N + 2, 
+                     fragment_scoring.raw_score_comp);
 
-    RAW_SCORE_T sec_fragment_score = 
-        strata.size() > 1 ? UnpackScore((*++strata.begin()).first, max_valid_fragment_score) 
-        : max_valid_fragment_score + 1;
+    std::sort(raw_scores_copy + N, raw_scores_copy + N + 2, fragment_scoring.raw_score_comp);
 
-    //4. Set all rank, primary flag, and mapq scores
-    elem = 0;
+    int new_mapq;
+    int top_fragment_score = raw_scores_copy[N + 1];
+    int sec_fragment_score = raw_scores_copy[N];
+    int fragment_score;
+    char fragment_space;
+    char space_string[2];
     char rank_tag_value[10];
     char size_tag_value[10];
 
-    size_t new_mapq;
+    size_t num_strata = stratum_hist.size();
+
     bool first_encountered_top_stratum = true;
-    size_t stratum_size;
-    
-    for (pit = sam_buffer.unique_entry_pairs.begin();
-         pit != sam_buffer.unique_entry_pairs.end(); ++pit)
+
+    for (i = 0, pit = sam_buffer.unique_entry_pairs.begin();
+         pit != sam_buffer.unique_entry_pairs.end(); ++pit, ++i)
     {
+        fragment_score = raw_scores[i];
+        fragment_space = spaces[i];
+
         SamLine * first = const_cast<SamLine *>((*pit).first);
         SamLine * second = const_cast<SamLine *>((*pit).second);
 
-        rank = strata[packed_scores[elem]].first;
-        sprintf(rank_tag_value, "%zu", rank);
+        size_t table_index = 
+            fragment_scoring.score_table_index(top_fragment_score, sec_fragment_score, fragment_score);
 
-        stratum_size = strata[packed_scores[elem]].second;
+        new_mapq = fragment_scoring.score_table[table_index];
+
+        bool mapq_correct = first->query_unmapped() ? (new_mapq == 0) : true;
+
+        assert(mapq_correct);
+
+        sit = stratum_hist.find(ScoreSpace(fragment_score, fragment_space));
+        assert(sit != stratum_hist.end());
+
+        size_t index = std::distance(stratum_hist.begin(), sit);
+        size_t stratum_size = (*sit).second;
+        size_t stratum_rank = num_strata - index + 1;
+
+        //set mapq
+        first->mapq = new_mapq;
+        second->mapq = new_mapq;
+
+        //set stratum data
+        space_string[0] = fragment_space;
+        space_string[1] = '\0';
+
+        sprintf(rank_tag_value, "%zu", stratum_rank);
         sprintf(size_tag_value, "%zu", stratum_size);
 
         //set rank tag
         first->add_tag("XY", 'i', rank_tag_value);
         first->add_tag("XZ", 'i', size_tag_value);
+        first->add_tag("XP", 'A', space_string);
 
         second->add_tag("XY", 'i', rank_tag_value);
         second->add_tag("XZ", 'i', size_tag_value);
+        second->add_tag("XP", 'A', space_string);
 
+        
         //set primary flag
-        if (rank == 1 && first->mapped_in_proper_pair() && first_encountered_top_stratum)
+        if (stratum_rank == 1 && first->mapped_in_proper_pair() && first_encountered_top_stratum)
         {
             //alignment is primary.
             first->flag &= ~SamFlags::ALIGNMENT_NOT_PRIMARY;
@@ -244,22 +381,12 @@ void SetScoreFields(SamBuffer const& sam_buffer,
             second->flag |= SamFlags::ALIGNMENT_NOT_PRIMARY;
         }
 
-        RAW_SCORE_T fragment_score = UnpackScore(packed_scores[elem], max_valid_fragment_score);
-
-        new_mapq = 
-            score_cpd[score_triplet(top_fragment_score, sec_fragment_score, fragment_score)];
-
-        bool mapq_correct = first->query_unmapped() ? (new_mapq == 0) : true;
-
-        assert(mapq_correct);
-
-        first->mapq = new_mapq;
-        second->mapq = new_mapq;
-
-        ++elem;
     }
+    
+    delete raw_scores;
+    delete raw_scores_copy;
+    delete spaces;
 }
-
 
 
 
@@ -391,19 +518,20 @@ void NextLine(FILE * unscored_sam_fh,
 }
 
 
-typedef std::map<RAW_SCORE_T, size_t> LENGTH_HISTO;
-typedef std::map<RAW_SCORE_T, size_t, RawScoreBetter> SCORE_HISTO;
-typedef std::map<RAW_SCORE_T, LENGTH_HISTO, RawScoreBetter> LENGTH_HISTO_BY_SCORE; // key: score, value: length histo
+// typedef std::map<int, size_t> LENGTH_HISTO;
+// typedef std::map<int, size_t, RawScoreBetter> SCORE_HISTO;
+// typedef std::map<int, LENGTH_HISTO, RawScoreBetter> LENGTH_HISTO_BY_SCORE; // key: score, value: length histo
 
 //initialize these so that the best scores are at the beginning.
 
 
+/*
 std::vector<size_t>
 TallyFragmentLengths(FILE ** sam_fh, 
                      RawScoreBetter const& score_order,
                      SamBuffer & tally_buffer,
                      char const* raw_score_tag,
-                     RAW_SCORE_T max_valid_fragment_score,
+                     int max_valid_fragment_score,
                      size_t num_frags_to_use)
 {
 
@@ -418,10 +546,10 @@ TallyFragmentLengths(FILE ** sam_fh,
     size_t template_length;
     size_t num_frags_used = 0;
 
-    std::vector<RAW_SCORE_T> packed_scores;
-    std::vector<RAW_SCORE_T>::iterator fit;
+    std::vector<int> packed_scores;
+    std::vector<int>::iterator fit;
 
-    RAW_SCORE_T top_score;
+    int top_score;
     SamLine const* top_fragment_entry;
     SamLine * low_bound = NULL;
 
@@ -503,7 +631,7 @@ void QuantileFragmentEstimate(size_t min_allowed_fragment_length,
                               RawScoreBetter const& score_order,
                               SamBuffer & tally_buffer,
                               char const* raw_score_tag,
-                              RAW_SCORE_T max_valid_fragment_score,
+                              int max_valid_fragment_score,
                               size_t num_top_scoring_frags_used,
                               size_t * min_est_fragment_length, 
                               size_t * max_est_fragment_length)
@@ -558,59 +686,4 @@ void QuantileFragmentEstimate(size_t min_allowed_fragment_length,
     }
 
 }
-
-
-//Parse and load a score calibration file as produced from 'score_dist'
-CollapseScoreTriplet 
-ParseScoreCalibration(FILE * score_cal_fh,
-                      char * raw_score_tag,
-                      bool * larger_score_is_better,
-                      int * & score_cpd)
-{
-
-    char larger_score_better_char;
-    int max_valid_score;
-
-    size_t num_parsed = fscanf(score_cal_fh, 
-                               "score_tag: %s\n"
-                               "max_valid_fragment_score: %i\n"
-                               "larger_score_better: %c\n",
-                               raw_score_tag,
-                               &max_valid_score,
-                               &larger_score_better_char);
-
-    if (num_parsed != 3)
-    {
-        fprintf(stderr, "Error: score calibration file doesn't have score_tag, "
-                "max_valid_fragment_score, or larger_is_better fields.\n"
-                "Please produce with 'samutil score_dist'\n");
-        exit(1);
-    }
-
-    *larger_score_is_better = larger_score_better_char == 'Y';
-
-    RAW_SCORE_T top_raw_score, sec_raw_score, given_raw_score;
-    int mapq;
-
-    CollapseScoreTriplet score_triplet(0, max_valid_score + 1);
-
-    size_t max_possible_joint = score_triplet(max_valid_score + 1,
-                                              max_valid_score + 1,
-                                              max_valid_score + 1);
-
-    score_cpd = new int[max_possible_joint + 1];
-    std::fill(score_cpd, score_cpd + max_possible_joint + 1, 0);
-
-    while (! feof(score_cal_fh))
-    {
-        fscanf(score_cal_fh, "%i\t%i\t%i\t%i%*[^\n]\n",
-               &top_raw_score,
-               &sec_raw_score,
-               &given_raw_score,
-               &mapq);
-
-        score_cpd[score_triplet(top_raw_score, sec_raw_score, given_raw_score)] = mapq;
-    }
-
-    return score_triplet;
-}
+*/

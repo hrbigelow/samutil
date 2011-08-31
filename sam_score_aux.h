@@ -4,69 +4,111 @@
 #include <map>
 #include <utility>
 
+#ifdef __GXX_EXPERIMENTAL_CXX0X__
+#include <unordered_map>
+#else
+#include <tr1/unordered_map>
+#endif
+
 #include "sam_buffer.h"
 #include "align_eval_raw.h"
 #include "cigar_ops.h"
 
 typedef int RAW_SCORE_T;
 
-struct RawScoreBetter
-{
-    bool larger_score_better;
-    RawScoreBetter(bool _lsb) : larger_score_better(_lsb) { }
 
-    //returns true if a is 'better' than b
-    bool operator()(RAW_SCORE_T a, RAW_SCORE_T b) const
+
+struct ScoreSpace
+{
+    int raw_score;
+    char alignment_space;
+public:
+    ScoreSpace(int _rs, char _as) : raw_score(_rs), alignment_space(_as) { }
+};
+
+
+struct eqstr
+{
+    bool operator()(const char* s1, const char* s2) const
     {
-        return this->larger_score_better ? a > b : a < b;
+        return strcmp(s1, s2) == 0;
     }
 };
 
 
-union RawScoreTriplet
+struct to_integer
 {
-    size_t data;
-    struct
+    size_t operator()(char const* k) const;
+};
+
+
+struct RawScoreComp
+{
+    bool larger_score_better;
+    RawScoreComp(bool _lsb = true) : larger_score_better(_lsb) { }
+
+    //returns true if a is worse than b
+    bool operator()(int a, int b) const
     {
-        unsigned int top_raw_score : 16;
-        unsigned int sec_raw_score : 16;
-        unsigned int given_raw_score : 16;
-        int pad : 16;
-    } f;
+        return this->larger_score_better ? a < b : a > b;
+    }
 };
 
+#ifdef __GXX_EXPERIMENTAL_CXX0X__
+typedef std::unordered_map<char const*, char, to_integer, eqstr> CONTIG_SPACE;
+#else
+typedef std::tr1::unordered_map<char const*, char, to_integer, eqstr> CONTIG_SPACE;
+#endif
 
-struct CollapseScoreTriplet
+
+
+class FragmentScore
 {
-    size_t min_score;
-    size_t max_score;
-    size_t shift_bits;
 
-    CollapseScoreTriplet(size_t _min, size_t _max);
-    size_t operator()(size_t top, size_t sec, size_t given) const;
+ public:
+    size_t min_fragment_length;
+    size_t max_fragment_length;
+    int min_fragment_score;
+    int max_fragment_score;
+    int worst_fragment_score; //min or max depending on logic
+    bool larger_score_better;
+    char raw_score_tag[10];
+    char * space_ordering; // ordering from best to worst
+    CONTIG_SPACE contig_space; //map def
+    int * score_table; //
+    size_t table_shift_bits; // for use with score_table_index
+
+    RawScoreComp raw_score_comp;
+
+    FragmentScore(size_t _minfrag, size_t _maxfrag) :
+        min_fragment_length(_minfrag),
+        max_fragment_length(_maxfrag),
+        space_ordering(NULL),
+        score_table(NULL) { }
+
+    ~FragmentScore();
+
+    void init(char const* qcal_file, char const* contig_space_file);
+
+    int raw_score(SamLine const* a, SamLine const* b) const;
+    char alignment_space(SamLine const* a, SamLine const* b) const;
+    size_t score_table_index(int top_score, int sec_score, int given_score) const;
+    bool operator()(ScoreSpace const& a, ScoreSpace const& b) const;
 };
 
 
+class FragmentScoreWrap
+{
+    FragmentScore const* fragment_score;
+public:
+    FragmentScoreWrap(FragmentScore const* fs);
+    bool operator()(ScoreSpace const& a, ScoreSpace const& b) const;
 
-std::vector<RAW_SCORE_T> 
-GetPackedScores(SamBuffer const& sam_buffer, 
-                size_t min_allowed_fragment_length,
-                size_t max_allowed_fragment_length,
-                char const* raw_score_tag,
-                RAW_SCORE_T missing_default_score);
+};
 
 
-RAW_SCORE_T UnpackScore(RAW_SCORE_T packed_score,
-                        RAW_SCORE_T max_valid_fragment_score);
-
-void SetScoreFields(SamBuffer const& sam_buffer, 
-                    size_t min_allowed_fragment_length,
-                    size_t max_allowed_fragment_length,
-                    char const* raw_score_tag,
-                    RAW_SCORE_T missing_default_score,
-                    bool larger_raw_score_is_better,
-                    int const* score_cpd,
-                    CollapseScoreTriplet const& score_triplet);
+void set_score_fields(SamBuffer const& sam_buffer, 
+                      FragmentScore const& fragment_scoring);
 
 
 size_t CountCorrectBases(SamLine const* samline, 
@@ -87,6 +129,7 @@ void NextLine(FILE * unnscored_sam_fh,
               SamLine ** low_bound);
 
 
+/*
 std::vector<size_t>
 TallyFragmentLengths(FILE ** sam_fh, 
                      RawScoreBetter const& score_order,
@@ -109,13 +152,7 @@ void QuantileFragmentEstimate(size_t min_allowed_fragment_length,
                               size_t num_top_scoring_frags_used,
                               size_t * min_est_fragment_length, 
                               size_t * max_est_fragment_length);
-
-
-CollapseScoreTriplet
-ParseScoreCalibration(FILE * score_cal_fh,
-                      char * raw_score_tag,
-                      bool * larger_score_is_better,
-                      int * & score_cpd);
+*/
 
 
 #endif // _SAM_RAW_SCORE_AUX_H
