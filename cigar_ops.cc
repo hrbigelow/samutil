@@ -91,19 +91,19 @@ std::string Cigar::ToString(Cigar::CIGAR_VEC const& cigar)
 
 size_t Cigar::UnitLength(Cigar::Unit const& unit, bool use_top_coord)
 {
-    //cigar ops: MIDNSHPT
-    int top_has_length[] = { 1, 0, 1, 1, 0, 1, 1, 1 };
-    int bot_has_length[] = { 1, 1, 0, 0, 1, 0, 1, 1 };
+    bool has_length =
+        use_top_coord 
+        ? Cigar::Structures[static_cast<size_t>(unit.op)].reference
+        : Cigar::Structures[static_cast<size_t>(unit.op)].template;
 
-    int * length_logic = use_top_coord ? top_has_length : bot_has_length;
+    return has_length ? unit.length
 
-    return length_logic[static_cast<int>(unit.op)] ? unit.length : 0;
 }
 
 
 int64_t Cigar::UnitOffset(Cigar::Unit const& unit, bool top_to_bottom)
 {
-    //cigar ops: MIDNSHP
+    //cigar ops: MIDNSHPT
     int offset_direction[] = { 0, -1, 1, 1, -1, 1, 0, 0 };
     int multiplier = top_to_bottom ? 1 : -1;
     return offset_direction[static_cast<int>(unit.op)] 
@@ -185,6 +185,7 @@ size_t Cigar::Length(Cigar::CIGAR_VEC::const_iterator cigar_start,
 }
 
 
+//return the 
 size_t Cigar::Overlap(Cigar::CIGAR_VEC::const_iterator cigar_start,
                       Cigar::CIGAR_VEC::const_iterator cigar_end)
 {

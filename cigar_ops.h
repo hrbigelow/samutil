@@ -9,6 +9,9 @@
 //class for applying coordinate transformation implied by CIGAR strings
 //
 
+
+
+
 namespace Cigar
 {
 
@@ -16,36 +19,42 @@ namespace Cigar
     {
         M = 0, I, D, N, S, H, P, T, None
         /*
-          M: Alignment match (can be a sequence match or mismatch)
-          I: Insertion to the reference
-          D: Deletion from the reference
-          N: Skipped region from the reference
-          S: Soft clip on the read (clipped sequence present in <seq>)
-          H: Hard clip on the read (clipped sequence NOT present in <seq>)
-          P: Padding (silent deletion from the padded reference sequence)
 
-          MP   blocks are positive length for both sequences (reference and read)
-          DN   blocks all are positive length for the top sequence (reference)
-          I    blocks positive length for bottom sequence (read)
-          SH   blocks are zero length for both sequences
-
-          The ops and inverses are:
-          ops:       MIDNSHP
-          inverses:  MDII??P
-         */
+          op   REF   TEMP   SEQ    interpretation
+          M      n      n     n    bases align
+          X      n      n     n    bases align and mismatch
+          =      n      n     n    bases align and match
+          I      0      n     n    insertion to the reference
+          D      n      0     0    deletion from reference due to mutation
+          N      n      0     0    deletion from reference due to splicing
+          S      0      n     n    non-aligned portion of template / read, restricted to ends of CIGAR
+          H      0      n     0    non-aligned portion of template / read, restricted to ends of CIGAR
+          P      0      0     0    n used only for display purposes
+          T      n      n     0    the proposed operation
+          
+        */
     };
 
-
-    enum OpComp 
+    //describes which three spans the length operator applies
+    struct StructurePresence
     {
-        MM = 8, MI, MD, MN, MS, MH, MP,
-        IM, II, ID, IN, IS, IH, IP,
-        DM, DI, DD, DN, DS, DH, DP,
-        NM, NI, ND, NN, NS, NH, NP,
-        SM, SI, SD, SN, SS, SH, SP,
-        HM, HI, HD, HN, HS, HH, HP,
-        PM, PI, PD, PN, PS, PH, PP
+        bool reference;
+        bool template;
+        bool segment;
+        char name;
     };
+
+    StructurePresence Structures[] =
+        { 
+            { true, true, true }, /* M */
+            { false, true, true }, /* I */
+            { true, false, false }, /* D */
+            { true, false, false }, /* N */
+            { false, true, true }, /* S */
+            { false, true, false }, /* H */
+            { false, false, false }, /* P */
+            { true, true, false } /* T */
+        };
 
     struct Unit
     {
