@@ -14,8 +14,8 @@ int usage()
             "samutil tx2genome        Expand reads-to-transcriptome alignments to reads-to-genome alignments\n"
             "samutil merge_tg         Merge duplicate genome-projected and direct genome alignments\n"
             "samutil get_tx_sequence  Get transcript sequence from genomic sequence\n"
-            "samutil score_dist       Generate raw score distribution statistics for 'score_mapq'\n"
-            "samutil score_mapq       Score alignment mapping quality from fragment-sorted SAM file\n"
+            "samutil gen_qcal         Generate qcal file for use with 'samutil score'\n"
+            "samutil score            Set mapq, XP, XY, XZ, and primary alignment flags from fragment-sorted SAM file\n"
             "samutil gen_header       Generate a projection-order transcript header\n"      
             "\n\n"
             "Notes:\n\n"
@@ -67,11 +67,11 @@ int main(int argc, char *argv[])
     {
         return main_get_tx_sequence(argc - 1, argv + 1);
     }
-    else if (strcmp(argv[1], "score_dist") == 0)
-    {
-        return main_score_dist(argc - 1, argv + 1);
-    }
-    else if (strcmp(argv[1], "score_mapq") == 0)
+    // else if (strcmp(argv[1], "score_dist") == 0)
+    // {
+    //     return main_score_dist(argc - 1, argv + 1);
+    // }
+    else if (strcmp(argv[1], "score") == 0)
     {
         return main_score_mapq(argc - 1, argv + 1);
     }

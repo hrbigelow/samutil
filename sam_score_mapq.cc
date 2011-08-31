@@ -14,15 +14,26 @@ int score_mapq_usage(size_t ldef, size_t Ldef)
 {
     fprintf(stderr,
             "\n\nUsage:\n\n"
-            "samutil score_mapq [OPTIONS] calibration.qcal unscored.rsort.sam scored.rsort.sam\n\n"
+            "samutil score [OPTIONS] calibration.qcal contig_space.txt unscored.rsort.sam scored.rsort.sam\n\n"
             "Options:\n\n"
             "-l     INT     min allowed fragment length for paired alignment [%Zu]\n"
             "-L     INT     max allowed fragment length for paired alignment [%Zu]\n"
-            "-e     FLAG    if present, use equivalency mapq. if absent, use traditional [absent]\n"
             "\n\n"
             "calibration.qcal: a histogram over the set of alignment categories\n"
             "(top score, 2nd score, given score)\n"
             "tallying number of alignments that are correct or incorrect.\n\n"
+
+            "contig_space.txt: defines contig alignment space for each contig in 'unscored.rsort.sam' file\n"
+            "Format:\n\n"
+
+            "# comments ...\n"
+            "TG\n"
+            "chr1<tab>G\n"
+            "chr2<tab>G\n"
+            "...\n"
+            "ENST000005299<tab>T\n"
+            "ENST899998402<tab>T\n"
+            "...\n\n"
 
             "unscored_rsort.sam: alignment file sorted by (read id / pair flag) and\n"
             "having alignment score tags given in option -s.\n\n"
@@ -59,41 +70,22 @@ int main_score_mapq(int argc, char ** argv)
         }
     }
 
-    if (argc != optind + 3)
+    if (argc != optind + 4)
     {
         return score_mapq_usage(ldef, Ldef);
     }
 
     char * score_calibration_file = argv[optind];
-    char * unscored_sam_file = argv[optind + 1];
-    char * scored_sam_file = argv[optind + 2];
+    char * contig_space_file = argv[optind + 1];
+    char * unscored_sam_file = argv[optind + 2];
+    char * scored_sam_file = argv[optind + 3];
 
-    FILE * score_calibration_fh = open_or_die(score_calibration_file, "r", "Input score calibration file");
     FILE * unscored_sam_fh = open_or_die(unscored_sam_file, "r", "Input unscored sam file");
     FILE * scored_sam_fh = open_or_die(scored_sam_file, "w", "Output scored sam file");
 
-    char raw_score_tag[32];
-    bool larger_score_better;
+    FragmentScore fragment_scoring(min_fragment_length, max_fragment_length);
+    fragment_scoring.init(score_calibration_file, contig_space_file);
 
-    int * score_cpd;
-
-    CollapseScoreTriplet score_triplet =
-        ParseScoreCalibration(score_calibration_fh,
-                              raw_score_tag,
-                              &larger_score_better,
-                              score_cpd);
-
-    RAW_SCORE_T max_valid_score = score_triplet.max_score - 1;
-
-    fclose(score_calibration_fh);
-
-    //use as the 'less' comparator to consider better scores to be 'less'
-    //Places the best scores at the beginning.
-    RawScoreBetter score_order(larger_score_better);
-
-    //key raw_score sum.  value:  histogram of template lengths
-
-    std::vector<double> template_lengths;
 
     SamOrder sam_order(SAM_RID_POSITION, "NONE");
     SAM_QNAME_FORMAT qname_fmt = sam_order.InitFromFile(unscored_sam_fh);
@@ -128,15 +120,7 @@ int main_score_mapq(int argc, char ** argv)
 
         if (new_fragment)
         {
-            SetScoreFields(cal_buffer,
-                           min_fragment_length,
-                           max_fragment_length,
-                           raw_score_tag,
-                           max_valid_score,
-                           larger_score_better,
-                           score_cpd,
-                           score_triplet);
-            
+            set_score_fields(cal_buffer, fragment_scoring);
             cal_buffer.purge(scored_sam_fh, NULL, NULL, low_bound);
         }
         else

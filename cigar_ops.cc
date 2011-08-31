@@ -13,7 +13,7 @@
 
 Cigar::Op Cigar::Char2Op(char op)
 {
-    char const* ops = "MIDNSHP";
+    char const* ops = "MIDNSHPT";
     char const* op_ptr = strchr(ops, op);
     return static_cast<Cigar::Op>(std::distance(ops, op_ptr));
 }
@@ -21,7 +21,7 @@ Cigar::Op Cigar::Char2Op(char op)
 
 char Cigar::Op2Char(Cigar::Op op)
 {
-    char const* ops = "MIDNSHP";
+    char const* ops = "MIDNSHPT";
     return ops[static_cast<int>(op)];
 }
 
@@ -30,7 +30,7 @@ Cigar::CIGAR_VEC Cigar::FromString(char const* cigar,
                                    int64_t top_to_bottom_offset)
 {
     Cigar::CIGAR_VEC cigar_vec;
-    char const* ops = "MIDNSHP";
+    char const* ops = "MIDNSHPT";
     char op;
     size_t oplength;
 
@@ -91,9 +91,9 @@ std::string Cigar::ToString(Cigar::CIGAR_VEC const& cigar)
 
 size_t Cigar::UnitLength(Cigar::Unit const& unit, bool use_top_coord)
 {
-    //cigar ops: MIDNSHP
-    int top_has_length[] = { 1, 0, 1, 1, 0, 1, 1 };
-    int bot_has_length[] = { 1, 1, 0, 0, 1, 0, 1 };
+    //cigar ops: MIDNSHPT
+    int top_has_length[] = { 1, 0, 1, 1, 0, 1, 1, 1 };
+    int bot_has_length[] = { 1, 1, 0, 0, 1, 0, 1, 1 };
 
     int * length_logic = use_top_coord ? top_has_length : bot_has_length;
 
@@ -104,36 +104,11 @@ size_t Cigar::UnitLength(Cigar::Unit const& unit, bool use_top_coord)
 int64_t Cigar::UnitOffset(Cigar::Unit const& unit, bool top_to_bottom)
 {
     //cigar ops: MIDNSHP
-    int offset_direction[] = { 0, -1, 1, 1, -1, 1, 0 };
+    int offset_direction[] = { 0, -1, 1, 1, -1, 1, 0, 0 };
     int multiplier = top_to_bottom ? 1 : -1;
     return offset_direction[static_cast<int>(unit.op)] 
         * static_cast<int64_t>(unit.length)
         * multiplier;
-}
-
-
-
-size_t Cigar::ReadLength(Cigar::CIGAR_VEC const& cigar)
-{
-    size_t read_length = 0;
-    for (size_t c = 0; c != cigar.size(); ++c)
-    {
-        switch(cigar[c].op)
-        {
-        case Cigar::M:
-        case Cigar::I:
-        case Cigar::S:
-        case Cigar::H:
-        case Cigar::P:
-            read_length += cigar[c].length;
-            break;
-        case Cigar::D:
-        case Cigar::N:
-        case Cigar::None:
-            break;
-        }
-    }
-    return read_length;
 }
 
 

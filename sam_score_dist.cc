@@ -161,18 +161,20 @@ int main_score_dist(int argc, char ** argv)
     size_t min_fragment_length;
     size_t max_fragment_length;
 
-    QuantileFragmentEstimate(min_allowed_fragment_length,
-                             max_allowed_fragment_length,
-                             frag_dist_low_quantile,
-                             frag_dist_high_quantile,
-                             &unscored_sam_fh, 
-                             score_order, 
-                             tally_buffer, 
-                             raw_score_tag,
-                             max_valid_fragment_score,
-                             num_top_fragments_used,
-                             &min_fragment_length,
-                             &max_fragment_length);
+    assert(false);
+    //This is currently broken.
+    // QuantileFragmentEstimate(min_allowed_fragment_length,
+    //                          max_allowed_fragment_length,
+    //                          frag_dist_low_quantile,
+    //                          frag_dist_high_quantile,
+    //                          &unscored_sam_fh, 
+    //                          score_order, 
+    //                          tally_buffer, 
+    //                          raw_score_tag,
+    //                          max_valid_fragment_score,
+    //                          num_top_fragments_used,
+    //                          &min_fragment_length,
+    //                          &max_fragment_length);
 
     bool new_fragment;
 
@@ -351,8 +353,6 @@ int main_score_dist(int argc, char ** argv)
 
     RAW_HISTO::const_iterator rit;
     fprintf(score_calibration_fh, "score_tag: %s\n", raw_score_tag);
-    fprintf(score_calibration_fh, "max_valid_fragment_score: %zu\n", max_valid_fragment_score);
-    fprintf(score_calibration_fh, "larger_score_better: %c\n", (larger_score_better ? 'Y' : 'N'));
 
     for (rit = score_cat_histo.begin(); rit != score_cat_histo.end(); ++rit)
     {

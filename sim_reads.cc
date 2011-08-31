@@ -141,39 +141,6 @@ fastq_sequence   : " " "
 
 *********************************************************/
 
-void purge_sam_buffer(PAIRED_READ_SET & buffer,
-                      PAIRED_READ_SET::iterator start,
-                      PAIRED_READ_SET::iterator end,
-                      bool flip_query_strand_flag,
-                      FILE * first_fastq_fh,
-                      FILE * second_fastq_fh,
-                      FILE * output_sam_fh)
-{
-    if (first_fastq_fh != NULL)
-    {
-        for (PAIRED_READ_SET::iterator it = start; it != end; ++it)
-        {
-            print_paired_fastq_entries(first_fastq_fh, second_fastq_fh,
-                                       (*it).first, (*it).second);
-        }
-    }
-    if (output_sam_fh != NULL)
-    {
-        for (PAIRED_READ_SET::iterator it = start; it != end; ++it)
-        {
-            (*it).first->print(output_sam_fh, flip_query_strand_flag);
-            (*it).second->print(output_sam_fh, flip_query_strand_flag);
-        }
-    }
-    for (PAIRED_READ_SET::iterator it = start; it != end; ++it)
-    {
-        delete (*it).first;
-        delete (*it).second;
-    }
-    buffer.erase(start, end);
-}
-
-
 int main_sim_reads(int argc, char ** argv)
 {
     char c;

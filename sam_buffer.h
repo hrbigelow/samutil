@@ -74,8 +74,10 @@ struct LessSAMLineFragmentIDPtr
 };
 
 
-typedef std::pair<SamLine const*, SamLine const*> SAMPTR_PAIR;
+// typedef std::pair<SamLine const*, SamLine const*> SAMPTR_PAIR;
 
+
+/*
 //sort on [rname1, pos1, strand1, cigar1, (and optionally) qname1, 
 //         rname2, pos2, strand2, cigar2, (and optionally) qname2]
 struct LessSAMLinePair
@@ -95,12 +97,12 @@ struct LessSAMLinePtrMatePair
     LessSAMLinePtrMatePair(SamOrder const* _so = NULL) : sam_order(_so) { }
     bool operator()(SamLine const* a, SamLine const* b);
 };
+*/
 
 
 
-
-typedef std::set<SAMPTR_PAIR, LessSAMLinePair> PAIRED_READ_SET;
-typedef std::pair<PAIRED_READ_SET::iterator, bool> PAIRED_READ_INS;
+// typedef std::set<SAMPTR_PAIR, LessSAMLinePair> PAIRED_READ_SET;
+// typedef std::pair<PAIRED_READ_SET::iterator, bool> PAIRED_READ_INS;
 
 typedef std::set<SamLine const*, LessSAMLinePtr> SINGLE_READ_SET;
 typedef std::pair<SINGLE_READ_SET::iterator, bool> SINGLE_READ_INS;
@@ -115,21 +117,21 @@ class SamBuffer
     //if known, this marks the lowest possible contig position that any 
     //new read will have
     LessSAMLinePtr less_ordering;
-    LessSAMLinePtrMatePair less_entry_matepair;
+    //LessSAMLinePtrMatePair less_entry_matepair;
 
  public:
 
     SamOrder const* sam_order;
     /* SamLine const* low_bound; */
 
-    PAIRED_READ_SET unique_entry_pairs;
+    SINGLE_READ_SET unique_entries;
     /* SINGLE_READ_SET single_entries_from_pairs; */
 
     //entries that are claimed to have a mapped mate, but we haven't seen it yet
-    SINGLE_READ_ID_MSET yet_unpaired_entries;
+    SINGLE_READ_ID_MSET incomplete_entries;
 
     //entries whose mate is unmapped
-    SINGLE_READ_SET unpaired_entries;
+    // SINGLE_READ_SET unpaired_entries;
 
     SamBuffer(SamOrder const* sam_order, bool output_pairs_as_same_strand);
 

@@ -14,7 +14,7 @@ namespace Cigar
 
     enum Op 
     {
-        M = 0, I, D, N, S, H, P, None
+        M = 0, I, D, N, S, H, P, T, None
         /*
           M: Alignment match (can be a sequence match or mismatch)
           I: Insertion to the reference

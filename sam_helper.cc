@@ -25,6 +25,10 @@ namespace SamFlags
     int const ALIGNMENT_NOT_PRIMARY = 0x0100;
     int const FAILED_QUALITY_CHECK = 0x0200;
     int const PCR_OR_OPTICAL_DUPLICATE = 0x0400;
+
+    //alternate rSAM definitions
+    int const TEMPLATE_ON_NEG_STRAND = 0x0010;
+
 };
 
 //extern char const* AlignSpaceTag;
@@ -198,6 +202,117 @@ SamLine::SamLine(SamLine const& s) :
 }
 
 
+
+//Merge two or more SAMlines that are part of the same fragment
+SamLine::SamLine(const* samlines[], size_t n_lines, char const* read_layout)
+    : parse_flag(samlines[0]->parse_flag),
+      fragment_id(samlines[0]->fragment_id),
+      flag(0),
+      pos(samlines[0]->pos),
+      mapq(samlines[0]->mapq),
+      mpos(0),
+      isize(0),
+      flattened_pos(samlines[0]->flattened_pos),
+{
+    //assume at least one line
+    assert(n_lines > 0);
+
+    SamLine const* sl = samlines[0];
+
+    //assume valid samlines, and that they are sorted by alignment position.
+    //1 determine total space needed to store (bytes_in_line)
+
+    // a. calculate sum of lengths of reads.
+    size_t total_seq_length = strlen(sl->seq);
+
+    // b. construct CIGAR with excess memory.  (simply catenate together with intervening 'H')
+    char *merged_cigar = new char[1024];
+    strcpy(merged_cigar, sl->cigar);
+
+    char cigar_op[16];
+    Cigar::CIGAR_VEC prev_cigar = Cigar::FromString(sl->cigar);
+
+    for (size_t i = 1; i != n_lines; ++i)
+    {
+        total_seq_length += strlen(samlines[i]->seq);
+        int64_t inter_seq_jump = 
+            static_cast<int64_t>(samlines[i]->pos) 
+            - (static_cast<int64_t>(samlines[i-1]->pos) 
+               + static_cast<int64_t>(Cigar::Length(prev_cigar, true)));
+
+        sprintf(cigar_op, "%ziH", inter_seq_jump);
+        strcat(merged_cigar, cigar_op);
+        strcat(merged_cigar, samlines[i]->cigar);
+    }
+
+
+    // c. merge tags appropriately (complicated!)  perhaps for now, we
+    // simply can catenate tag strings together in fragment alignment
+    // order. then, when printing, de-duplicate them...
+    
+    // d. with all data, calculate bytes_in_line and allocate
+    this->bytes_in_line = 
+        strlen(sl->qname)
+        + strlen(sl->rname)
+        + strlen(merged_cigar)
+        2 * total_seq_length
+        + strlen(read_layout)
+        + 7; // space for null terminators
+
+    this->line = new char[this->bytes_in_line];
+
+    //2 initialize all remaining fields and pointers
+
+    // a. copy qname, rname, cigar, all seqs, all quals, read layout, and tags to 'line'
+    this->qname = this->line;
+    strcpy(this->qname, sl->qname);
+
+    this->rname = this->qname + strlen(this->qname) + 1;
+    strcpy(this->rname, sl->rname);
+
+    this->cigar = this->rname + strlen(this->rname) + 1;
+    strcpy(this->cigar, merged_cigar);
+
+    this->seq = this->cigar + strlen(this->cigar) + 1;
+    this->seq[0] = '\0';
+    for (size_t i = 0; i != n_lines; ++i)
+    {
+        strcat(this->seq, samlines[i]->seq);
+    }    
+
+    this->qual = this->seq + strlen(this->seq) + 1;
+    this->qual[0] = '\0';
+    for (size_t i = 0; i != n_lines; ++i)
+    {
+        strcat(this->qual, samlines[i]->qual);
+    }    
+
+    this->read_layout = this->qual + strlen(this->qual) + 1;
+    strcpy(this->read_layout, read_layout);
+
+    this->flag = 0;
+    //these flags are dominant.  If they are set in any one of the
+    //reads, they should be set in the merged record
+    for (size_t i = 0; i != n_lines; ++i)
+    {
+        this->flag |= (samlines[i]->flag & SamFlags::FAILED_QUALITY_CHECK);
+        this->flag |= (samlines[i]->flag & SamFlags::PCR_OR_OPTICAL_DUPLICATE);
+    }    
+
+    // c. initialize flag. assume (but do not check) that these flags
+    // have the same values for all records on this template.
+    this->flag |=
+        (sl->flag-> & SamFlags::MAPPED_IN_PROPER_PAIR)
+        | (sl->flag-> & SamFlags::ALIGNMENT_NOT_PRIMARY);
+
+    // reinterpret 0x10 as 'fragment orientation'
+    // forward fragments will have left-most read be 'first-in-template'
+    sl->flag |= (samlines[0]->first_read_in_pair() ? 0 : SamFlags::QUERY_ON_NEG_STRAND);
+    
+    delete merged_cigar;
+}
+
+
 //samline_string must be terminated by newline
 void SamLine::Init(char const* samline_string, bool allow_absent_seq_qual)
 {
@@ -348,8 +463,8 @@ SamLine::~SamLine()
 }
 
 
-
-void SamLine::print(FILE * seqfile, bool flip_query_strand_flag) const
+// 
+void SamLine::print_sam(FILE * seqfile) const
 {
 
     if (this->parse_flag == HEADER)
@@ -358,22 +473,114 @@ void SamLine::print(FILE * seqfile, bool flip_query_strand_flag) const
         return;
     }
 
-    int flag_to_print = flip_query_strand_flag ? 
-        (this->flag ^ SamFlags::QUERY_ON_NEG_STRAND) : this->flag;
+    int64_t cur_read_start = this->pos;
+    int64_t pnext;
+    char rnext[2] = "=";
+    
+    CIGAR_VEC cigar_v = Cigar::FromString(this->cigar, 0);
+
+    CIGAR_ITER start = cigar_v.begin();
+    CIGAR_ITER end = cigar_v.begin();
+
+    size_t isize = Cigar::Length(cigar_v, false);
+
+    char cigar_substring[1024];
+
+    int flag = this->flag;
+
+    char const* this_read_layout = this->read_layout;
+    char const* next_read_layout = this->read_leyout;
+
+    //size_t num_reads = strlen(this->read_layout);
+
+    while (start != cigar_v.end())
+    {
+        while (end != cigar_v.end() && (*end).op != Cigar::T)
+        {
+            ++end;
+        }
+        //now 'end' points to the real end or to a 'T' operator
+        size_t read_length = Cigar::Length(start, end);
+
+        Cigar::ToString(start, end, cigar_substring);
+
+        if (end == cigar_v.end())
+        {
+            //we're at the end of the series of reads.
+            //set mpos to point back to the first pos
+            pnext = this->pos;
+            next_read_layout = this->read_layout;
+        }
+        else
+        {
+            //we've found a 'T' operator.  So, this is a multiple-fragment template.
+            int64_t t_oplen = (*end).length;
+            pnext = cur_read_start + read_length + t_oplen;
+            ++end;
+            flag ^= SamFlags::PAIRED_IN_SEQUENCING;
+            
+            if ((*this_read_layout == 'f') == this->template_on_pos_strand()) 
+            {
+                //
+                flag &= ~(SamFlags::QUERY_ON_NEG_STRAND);
+            }
+            else
+            {
+                flag |= SamFlags::QUERY_ON_NEG_STRAND;
+            }
+            if ((*next_read_layout == 'f') == this->template_on_pos_strand())
+            {
+                flag &= ~(SamFlags::MATE_ON_NEG_STRAND);
+            }
+            else
+            {
+                flag |= SamFlags::MATE_ON_NEG_STRAND;
+            }
+        }
+        start = end;
+
+        
+        fprintf(seqfile, "%s\t%i\t%s\t%Zu\t%Zu\t%s\t%s\t%Zu\t%i",
+                this->qname, flag, this->rname, cur_read_start,
+                this->mapq, cigar_substring, "=", pnext, isize);
+        
+        if (this->seq != NULL)
+        {
+            assert(this->qual != NULL);
+            fprintf(seqfile, "\t");
+            fwrite(this->seq, 1, read_length, seqfile);
+        }
+
+        //now about the tags.
+        if (this->tag_string != NULL)
+        {
+            fprintf(seqfile, "\t%s", this->tag_string);
+        }
+        fprintf (seqfile, "\n");
+
+        ++this_read_layout;
+        ++next_read_layout;
+    }
+
+}
+
+
+
+void SamLine::print_rsam(FILE * seqfile) const
+{
+
+    if (this->parse_flag == HEADER)
+    {
+        fprintf(seqfile, "%s\n", this->line);
+        return;
+    }
 
     size_t reported_pos = this->query_unmapped() ? 0 : this->ones_based_pos();
-    size_t reported_mpos = this->mate_unmapped() ? 0 : this->mpos + 1;
 
-    fprintf(seqfile, "%s\t%i\t%s\t%Zu\t%Zu\t%s\t%s\t%Zu\t%i",
-            this->qname, flag_to_print, this->rname, reported_pos,
-            this->mapq, this->cigar, this->mrnm, reported_mpos,
-            this->isize);
-
-    if (this->seq != NULL)
-    {
-        assert(this->qual != NULL);
-        fprintf(seqfile, "\t%s\t%s", this->seq, this->qual);
-    }
+    fprintf(seqfile, "%s\t%i\t%s\t%Zu\t%Zu\t%s\t%s\t%s\t%s",
+            this->qname, this->flag, this->rname, reported_pos,
+            this->mapq, this->cigar, this->read_layout,
+            this->seq, this->qual);
 
     if (this->tag_string != NULL)
     {
@@ -381,6 +588,7 @@ void SamLine::print(FILE * seqfile, bool flip_query_strand_flag) const
     }
     fprintf (seqfile, "\n");
 }
+
 
 
 
@@ -455,12 +663,13 @@ void SamLine::add_tag(char const* tag_code, char type, char const* value_string)
         if (tag_start != NULL)
         {
             //construct the new string in parts:
+            size_t n_before = std::distance(this->tag_string, tag_start);
 
             //1. everything before the start of the old tag (includes trailing space)
-            strncpy(new_extra_tag, this->tag_string, std::distance(this->tag_string, tag_start));
+            strncpy(new_extra_tag, this->tag_string, n_before);
 
             //2. the new tag
-            strcat(new_extra_tag, tag_and_value);
+            strcpy(new_extra_tag + n_before, tag_and_value);
 
             //3. everything after the end of the old tag
             if (old_tag_length > 0)
@@ -660,4 +869,6 @@ void PrintSAMHeader(FILE ** input_sam_fh, FILE * output_fh)
     delete header_buf;
     fflush(output_fh);
 }
+
+
 

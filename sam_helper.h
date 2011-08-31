@@ -51,13 +51,6 @@ struct less_char_ptr
     }
 };
 
-struct eqstr
-{
-  bool operator()(const char* s1, const char* s2) const
-  {
-    return strcmp(s1, s2) == 0;
-  }
-};
 
 
 typedef std::map<char const*, size_t, less_char_ptr> CONTIG_OFFSETS;
@@ -94,8 +87,6 @@ V parse_sam_tag(char const* tag_string,
 }
 
 
-//typedef std::unordered_map<char const*, size_t, std::hash<char const*>, eqstr> CONTIG_OFFSETS;
-
 /*
   Storage policy:
   line, extra, and extra_tag own the memory they point to.
@@ -124,6 +115,7 @@ public:
     int isize;
     char * seq;
     char * qual;
+    char * read_layout;
     char * tag_string;
     char * extra;
     char * extra_tag;
@@ -143,6 +135,8 @@ public:
 
     SamLine(SamLine const& s);
 
+    SamLine(SamLine const* samlines[], size_t n_lines, char const* read_layout);
+
     void Init(char const* samline_string, bool allow_absent_seq_qual);
     void SetFlattenedPosition(CONTIG_OFFSETS const& contig_offsets,
                               CONTIG_OFFSETS::const_iterator * contig_iter);
@@ -161,7 +155,8 @@ public:
 
     SAM_PARSE load(FILE * seqfile);
 
-    void print(FILE * samfile, bool flip_query_strand_flag) const;
+    void print_sam(FILE * samfile) const;
+    voud print_rsam(FILE * samfile) const;
 
     void print_fastq(FILE * fastq_fh) const;
 
@@ -187,6 +182,7 @@ public:
     bool mate_unmapped() const { return (this->flag & SamFlags::MATE_UNMAPPED) != 0; }
 
     //strandedness flags are nonzero for the negative strand.
+    bool template_on_pos_strand() const { return (this->flag & SamFlags::TEMPLATE_ON_NEG_STRAND) == 0; }
     bool query_on_pos_strand() const { return (this->flag & SamFlags::QUERY_ON_NEG_STRAND) == 0; }
     bool mate_on_pos_strand() const { return (this->flag & SamFlags::MATE_ON_NEG_STRAND) == 0; }
 
