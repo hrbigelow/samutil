@@ -11,7 +11,6 @@
 
 
 
-
 namespace Cigar
 {
 
@@ -38,9 +37,9 @@ namespace Cigar
     //describes which three spans the length operator applies
     struct StructurePresence
     {
-        bool reference;
-        bool template;
-        bool segment;
+        bool ref; //whether there is any
+        bool temp;
+        bool seq;
         char name;
     };
 

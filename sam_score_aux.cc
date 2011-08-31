@@ -338,7 +338,7 @@ void set_score_fields(SamBuffer const& sam_buffer,
 
         size_t index = std::distance(stratum_hist.begin(), sit);
         size_t stratum_size = (*sit).second;
-        size_t stratum_rank = num_strata - index + 1;
+        size_t stratum_rank = num_strata - index;
 
         //set mapq
         first->mapq = new_mapq;
