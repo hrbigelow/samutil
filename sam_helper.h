@@ -51,13 +51,6 @@ struct less_char_ptr
     }
 };
 
-struct eqstr
-{
-  bool operator()(const char* s1, const char* s2) const
-  {
-    return strcmp(s1, s2) == 0;
-  }
-};
 
 
 typedef std::map<char const*, size_t, less_char_ptr> CONTIG_OFFSETS;

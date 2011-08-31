@@ -455,17 +455,17 @@ void SamLine::add_tag(char const* tag_code, char type, char const* value_string)
         if (tag_start != NULL)
         {
             //construct the new string in parts:
-
+            size_t nbytes = std::distance(this->tag_string, tag_start);
+            
             //1. everything before the start of the old tag (includes trailing space)
-            strncpy(new_extra_tag, this->tag_string, std::distance(this->tag_string, tag_start));
+            strncpy(new_extra_tag, this->tag_string, nbytes);
 
-            //2. the new tag
-            strcat(new_extra_tag, tag_and_value);
+            //2. the new tag (null-terminated)
+            strcpy(new_extra_tag + nbytes, tag_and_value);
 
-            //3. everything after the end of the old tag
+            //3. everything after the end of the old tag plus trailing tab.
             if (old_tag_length > 0)
             {
-                strcat(new_extra_tag, "\t");
                 strcat(new_extra_tag, tag_start + old_tag_length);
             }
         }
