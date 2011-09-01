@@ -266,7 +266,6 @@ void set_score_fields(SamBuffer const& sam_buffer,
     size_t N = sam_buffer.unique_entry_pairs.size();
     int * raw_scores = new int[N];
     int * raw_scores_copy = new int[N + 2];
-    char * spaces = new char[N];
 
     FragmentScoreWrap fs_wrap(&fragment_scoring);
 
@@ -277,13 +276,25 @@ void set_score_fields(SamBuffer const& sam_buffer,
     for (pit = sam_buffer.unique_entry_pairs.begin();
          pit != sam_buffer.unique_entry_pairs.end(); ++pit, ++i)
     {
-        SamLine const* first = ((*pit).first);
-        SamLine const* second = ((*pit).second);
+        SamLine * first = const_cast<SamLine *>((*pit).first);
+        SamLine * second = const_cast<SamLine *>((*pit).second);
 
         raw_scores[i] = fragment_scoring.raw_score(first, second);
-        spaces[i] = fragment_scoring.alignment_space(first, second);
+
+        if (first->alignment_space == AlignSpaceMissing)
+        {
+            char as = fragment_scoring.alignment_space(first, second);
+            first->alignment_space = as;
+            second->alignment_space = as;
+            char space_string[] = "-";
+            space_string[0] = as;
+
+            first->add_tag("XP", 'A', space_string);
+            second->add_tag("XP", 'A', space_string);
+        }
+
         
-        ScoreSpace ss(raw_scores[i], spaces[i]);
+        ScoreSpace ss(raw_scores[i], first->alignment_space);
         sit = stratum_hist.find(ss);
         if (sit == stratum_hist.end())
         {
@@ -307,7 +318,6 @@ void set_score_fields(SamBuffer const& sam_buffer,
     int sec_fragment_score = raw_scores_copy[N];
     int fragment_score;
     char fragment_space;
-    char space_string[2];
     char rank_tag_value[10];
     char size_tag_value[10];
 
@@ -318,11 +328,11 @@ void set_score_fields(SamBuffer const& sam_buffer,
     for (i = 0, pit = sam_buffer.unique_entry_pairs.begin();
          pit != sam_buffer.unique_entry_pairs.end(); ++pit, ++i)
     {
-        fragment_score = raw_scores[i];
-        fragment_space = spaces[i];
-
         SamLine * first = const_cast<SamLine *>((*pit).first);
         SamLine * second = const_cast<SamLine *>((*pit).second);
+
+        fragment_score = raw_scores[i];
+        fragment_space = first->alignment_space;
 
         size_t table_index = 
             fragment_scoring.score_table_index(top_fragment_score, sec_fragment_score, fragment_score);
@@ -344,21 +354,15 @@ void set_score_fields(SamBuffer const& sam_buffer,
         first->mapq = new_mapq;
         second->mapq = new_mapq;
 
-        //set stratum data
-        space_string[0] = fragment_space;
-        space_string[1] = '\0';
-
         sprintf(rank_tag_value, "%zu", stratum_rank);
         sprintf(size_tag_value, "%zu", stratum_size);
 
         //set rank tag
         first->add_tag("XY", 'i', rank_tag_value);
         first->add_tag("XZ", 'i', size_tag_value);
-        first->add_tag("XP", 'A', space_string);
 
         second->add_tag("XY", 'i', rank_tag_value);
         second->add_tag("XZ", 'i', size_tag_value);
-        second->add_tag("XP", 'A', space_string);
 
         
         //set primary flag
@@ -385,7 +389,6 @@ void set_score_fields(SamBuffer const& sam_buffer,
     
     delete raw_scores;
     delete raw_scores_copy;
-    delete spaces;
 }
 
 

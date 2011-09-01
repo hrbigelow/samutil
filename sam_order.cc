@@ -232,8 +232,11 @@ bool SamOrder::less_position(SamLine const& a, SamLine const& b) const
            (strcmp(a.cigar, b.cigar) < 0 ||
             (strcmp(a.cigar, b.cigar) == 0 &&
              (icmp(this->flattened_position_mate(&a, &dummy),
-                    this->flattened_position_mate(&b, &dummy)) < 0))))));
-    
+                   this->flattened_position_mate(&b, &dummy)) < 0 ||
+              (icmp(this->flattened_position_mate(&a, &dummy),
+                    this->flattened_position_mate(&b, &dummy)) == 0 &&
+               a.alignment_space < b.alignment_space)))))));
+        
 }
 
 //[rname, pos, query_strand, cigar, mrnm, mpos]
@@ -245,7 +248,8 @@ bool SamOrder::equal_position(SamLine const& a, SamLine const& b) const
         a.flattened_pos == b.flattened_pos &&
         a.query_on_pos_strand() == b.query_on_pos_strand() &&
         strcmp(a.cigar, b.cigar) == 0 &&
-        flattened_position_mate(&a, &dummy) == flattened_position_mate(&b, &dummy);
+        flattened_position_mate(&a, &dummy) == flattened_position_mate(&b, &dummy) &&
+        a.alignment_space == b.alignment_space;
 
         // flattened_position(&a, &dummy) == flattened_position(&b, &dummy) &&
         // a.query_on_pos_strand() == b.query_on_pos_strand() &&

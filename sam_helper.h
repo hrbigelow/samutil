@@ -59,6 +59,7 @@ typedef CONTIG_OFFSETS::const_iterator OFFSETS_ITER;
 
 #define AlignSpaceTag "XP"
 #define AlignSpaceType 'A'
+#define AlignSpaceMissing '-'
 
 template<typename V>
 V parse_sam_tag(char const* tag_string, 
@@ -121,6 +122,7 @@ public:
     char * extra;
     char * extra_tag;
     size_t flattened_pos; //position along a virtual concatenated meta-contig.
+    char alignment_space;
 
     SamLine(SAM_PARSE _parse_flag,
             char const* _qname, int _flag, 
@@ -159,12 +161,11 @@ public:
     void print_fastq(FILE * fastq_fh) const;
 
     int alignment_score(char const* tag, int default_if_missing, bool * has_score) const;
-    char alignment_space(char default_if_missing, bool * has_space) const;
+    //char alignment_space(char default_if_missing, bool * has_space) const;
 
     //queries the samline for the desired tag code, loading type and value_string if found.
     //returns whether the tag was found
     bool has_tag(char const* tag_code, char & type, char * value_string) const;
-
 
     //adds the desired tag. 
     void add_tag(char const* tag_code, char type, char const* value_string);
