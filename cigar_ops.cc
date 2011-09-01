@@ -11,33 +11,18 @@
 
 
 
-Cigar::Op Cigar::Char2Op(char op)
-{
-    char const* ops = "MIDNSHPT";
-    char const* op_ptr = strchr(ops, op);
-    return static_cast<Cigar::Op>(std::distance(ops, op_ptr));
-}
-
-
-char Cigar::Op2Char(Cigar::Op op)
-{
-    char const* ops = "MIDNSHPT";
-    return ops[static_cast<int>(op)];
-}
-
 //parse a cigar string into a vector of cigar units
 Cigar::CIGAR_VEC Cigar::FromString(char const* cigar, 
                                    int64_t top_to_bottom_offset)
 {
     Cigar::CIGAR_VEC cigar_vec;
-    char const* ops = "MIDNSHPT";
-    char op;
-    size_t oplength;
+    char opname;
+    int64_t oplength;
 
     if (top_to_bottom_offset != 0)
     {
-        Cigar::Op first_op = top_to_bottom_offset > 0 ? Cigar::D : Cigar::I;
-        size_t first_length = labs(top_to_bottom_offset);
+        Cigar::Op first_op = top_to_bottom_offset > 0 ? Cigar::Ops[Cigar::D] : Cigar::Ops[Cigar::I];
+        int64_t first_length = labs(top_to_bottom_offset);
         Cigar::Unit unit(first_op, first_length);
         cigar_vec.push_back(unit);
     }
@@ -45,13 +30,18 @@ Cigar::CIGAR_VEC Cigar::FromString(char const* cigar,
     char const* chunk = cigar;
     while (*chunk != '\0')
     {
-        size_t num_fields = sscanf(chunk, "%zu%c", &oplength, &op);
+        size_t num_fields = sscanf(chunk, "%z%c", &oplength, &opname);
         assert(num_fields == 2);
-        Cigar::Unit unit(Char2Op(op), oplength);
+
+        size_t op_ind = std::distance(Cigar::OpName, strchr(Cigar::OpName, opname));
+        Cigar::Unit unit(Cigar::Ops[op_ind], oplength);
+
         cigar_vec.push_back(unit);
-        chunk = strpbrk(chunk, ops) + 1;
+
+        chunk = strchr(chunk, opname) + 1;
         assert(chunk != NULL);
     }
+
     assert(cigar_vec.size() != 0);
     return Cigar::Consolidate(cigar_vec);
 }
@@ -63,12 +53,12 @@ void Cigar::ToString(Cigar::CIGAR_VEC::const_iterator cigar_start,
 {
     Cigar::CIGAR_VEC::const_iterator iter;
     cigar_string[0] = '\0';
-    char op_string[100];
+    char op_string[32];
     op_string[1] = '\0';
     
     for (iter = cigar_start; iter != cigar_end; ++iter)
     {
-        sprintf(op_string, "%zu%c", (*iter).length, Cigar::Op2Char((*iter).op));
+        sprintf(op_string, "%z%c", (*iter).length, (*iter).op.name);
         strcat(cigar_string, op_string);
     }
 }
@@ -82,7 +72,7 @@ std::string Cigar::ToString(Cigar::CIGAR_VEC const& cigar)
     for (Cigar::CIGAR_VEC::const_iterator iter = cigar.begin(); 
          iter != cigar.end(); ++iter)
     {
-        sprintf(op_string, "%zu%c", (*iter).length, Cigar::Op2Char((*iter).op));
+        sprintf(op_string, "%u%c", (*iter).length, (*iter).op.name);
         cigar_string += op_string;
     }
     return cigar_string;
@@ -91,24 +81,17 @@ std::string Cigar::ToString(Cigar::CIGAR_VEC const& cigar)
 
 size_t Cigar::UnitLength(Cigar::Unit const& unit, bool use_top_coord)
 {
-    bool has_length =
-        use_top_coord 
-        ? Cigar::Structures[static_cast<size_t>(unit.op)].reference
-        : Cigar::Structures[static_cast<size_t>(unit.op)].template;
-
-    return has_length ? unit.length
+    return use_top_coord 
+        ? unit.op.ref * unit.length
+        : unit.op.temp * unit.length;
 
 }
 
 
 int64_t Cigar::UnitOffset(Cigar::Unit const& unit, bool top_to_bottom)
 {
-    //cigar ops: MIDNSHPT
-    int offset_direction[] = { 0, -1, 1, 1, -1, 1, 0, 0 };
     int multiplier = top_to_bottom ? 1 : -1;
-    return offset_direction[static_cast<int>(unit.op)] 
-        * static_cast<int64_t>(unit.length)
-        * multiplier;
+    return (unit.op.ref - unit.op.temp) * unit.length * multiplier;
 }
 
 
@@ -206,7 +189,9 @@ size_t Cigar::Overlap(Cigar::CIGAR_VEC::const_iterator cigar_start,
 
 void UpdateOffset(Cigar::Unit const& unit, int64_t * current_offset)
 {
-    switch(unit.op)
+    current_offset
+
+    switch(unit.op.code)
     {
     case Cigar::I:
     case Cigar::S:
@@ -234,13 +219,14 @@ int64_t Cigar::LeftOffset(CIGAR_VEC const& cigar, bool top_start_to_bottom_start
     int64_t offset = 0;
     for (unit_iter = cigar.begin(); unit_iter != cigar.end(); ++unit_iter)
     {
-        if ((*unit_iter).op == Cigar::M)
+        Unit const& u = (*unit_iter);
+        if (u.op.code == Cigar::M)
         {
             break;
         }
         else
         {
-            UpdateOffset(*unit_iter, & offset);
+            offset += (u.op.ref - u.op.temp) * u.op.length;
         }
     }
     return offset * sense;
@@ -255,13 +241,14 @@ int64_t Cigar::RightOffset(CIGAR_VEC const& cigar, bool top_end_to_bottom_end)
     int64_t offset = 0;
     for (unit_iter = cigar.rbegin(); unit_iter != cigar.rend(); ++unit_iter)
     {
-        if ((*unit_iter).op == Cigar::M)
+        Unit const& u = (*unit_iter);
+        if (u.op.code == Cigar::M)
         {
             break;
         }
         else
         {
-            UpdateOffset(*unit_iter, & offset);
+            offset += (u.op.ref - u.op.temp) * u.op.length;
         }
     }
     return offset * sense;

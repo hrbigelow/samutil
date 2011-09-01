@@ -9,100 +9,75 @@
 //class for applying coordinate transformation implied by CIGAR strings
 //
 
+/*
+
+  op   REF   TEMP   SEQ    interpretation
+
+  P      0      0     0    n used only for display purposes
+
+  -      0      0     n    NOT IMPLEMENTED (impossible to generate SEQ from no template)
+
+  H      0      n     0    non-aligned portion of template / read, restricted to ends of CIGAR
+
+  I      0      n     n    insertion to the reference
+  S      0      n     n    non-aligned portion of template / read, restricted to ends of CIGAR
+
+  D      n      0     0    deletion from reference due to mutation
+  N      n      0     0    deletion from reference due to splicing
+
+  -      n      0     n    NOT IMPLEMENTED (impossible to generate SEQ from no template)
+
+  T      n      n     0    unsequenced (or re-sequenced) bases align
+
+  X      n      n     n    bases align and mismatch
+  =      n      n     n    bases align and match
+  M      n      n     n    bases align
+          
+*/
+
 
 
 namespace Cigar
 {
 
-    enum Op 
+    enum OpCode
     {
-        M = 0, I, D, N, S, H, P, T, None
-        /*
-
-          op   REF   TEMP   SEQ    interpretation
-          M      n      n     n    bases align
-          X      n      n     n    bases align and mismatch
-          =      n      n     n    bases align and match
-          I      0      n     n    insertion to the reference
-          D      n      0     0    deletion from reference due to mutation
-          N      n      0     0    deletion from reference due to splicing
-          S      0      n     n    non-aligned portion of template / read, restricted to ends of CIGAR
-          H      0      n     0    non-aligned portion of template / read, restricted to ends of CIGAR
-          P      0      0     0    n used only for display purposes
-          T      n      n     0    the proposed operation
-          
-        */
+        M = 0, I, D, N, S, H, P, T
     };
+
+    char OpName[] = "MIDNSHPT";
 
     //describes which three spans the length operator applies
-    struct StructurePresence
+    struct Op
     {
-        bool ref; //whether there is any
-        bool temp;
-        bool seq;
+        OpCode code;
         char name;
+        int ref; //whether the op takes up length in the reference
+        int temp; 
+        int seq;
     };
 
-    StructurePresence Structures[] =
+    Op Ops[] =
         { 
-            { true, true, true }, /* M */
-            { false, true, true }, /* I */
-            { true, false, false }, /* D */
-            { true, false, false }, /* N */
-            { false, true, true }, /* S */
-            { false, true, false }, /* H */
-            { false, false, false }, /* P */
-            { true, true, false } /* T */
+            { M, 'M', 1, 1, 1 },
+            { I, 'I', 0, 1, 1 },
+            { D, 'D', 1, 0, 0 },
+            { N, 'N', 1, 0, 0 },
+            { S, 'S', 0, 1, 1 },
+            { H, 'H', 0, 1, 0 },
+            { P, 'P', 0, 0, 0 },
+            { T, 'T', 1, 1, 0 }
         };
 
     struct Unit
     {
         Cigar::Op op;
-        size_t length;
+        int64_t length;
         Unit(Cigar::Op const& _op, size_t _l) : op(_op), length(_l) {}
-        Unit() : op(Cigar::M), length(0) { }
-        /* Unit(Unit const& u) : op(u.op), length(u.length) { */
-        /*     fprintf(stdout, "Unit(Unit const& u)\n"); */
-        /* } */
-        /* Unit(Unit & u) : op(u.op), length(u.length) {  */
-        /*     fprintf(stdout, "Unit(Unit & u)\n"); */
-        /* } */
-        /* ~Unit() {  */
-        /*     fprintf(stdout, "~Unit()\n"); */
-        /* } */
-
-        /* Unit & operator=(Unit const& u) { */
-        /*     fprintf(stdout, "Unit & operator=(Unit const& u)\n"); */
-        /*     this->op = u.op; */
-        /*     this->length = u.length; */
-        /*     return *this; */
-        /* } */
-
+    Unit() : op(Cigar::Ops[Cigar::M]), length(0) { }
 
     };
 
-
-    struct CompareSingle
-    {
-        Cigar::Op guide_op;
-        Cigar::Op test_op;
-        int64_t offset;
-    };
-
-
-    struct UnitComparison
-    {
-        Cigar::OpComp op_pair;
-        Cigar::Op guide_op;
-        Cigar::Op test_op;
-        size_t length;
-        int64_t offset;
-    };
-
-
-    Cigar::Op Char2Op(char op);
-
-    char Op2Char(Cigar::Op op);
 
     typedef std::vector<Unit> CIGAR_VEC;
     typedef std::vector<Unit>::const_iterator CIGAR_ITER;
