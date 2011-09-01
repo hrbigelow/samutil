@@ -66,7 +66,7 @@ SamLine::SamLine(SAM_PARSE _parse_flag,
     parse_flag(_parse_flag), flag(_flag), pos(_pos), 
     mapq(_mapq), mpos(_mpos), 
     isize(_isize), extra(NULL), extra_tag(NULL),
-    flattened_pos(0)
+    flattened_pos(0), alignment_space(AlignSpaceMissing)
 {
     
     assert(strlen(_qual) < 10000);
@@ -117,6 +117,13 @@ SamLine::SamLine(SAM_PARSE _parse_flag,
     }
 
     this->fragment_id = SamLine::parse_fragment_id(this->qname);
+
+    char as_tag[10];
+    char as_type;
+    if (this->has_tag(AlignSpaceTag, as_type, as_tag))
+    {
+        this->alignment_space = as_tag[0];
+    }
 }
 
 
@@ -126,7 +133,7 @@ SamLine::SamLine(SAM_PARSE _parse_flag,
 SamLine::SamLine(FILE * seqfile, bool allow_absent_seq_qual) :
     bytes_in_line(0), line(NULL), qname(NULL), fragment_id(0), rname(NULL), 
     cigar(NULL), mrnm(NULL), seq(NULL), qual(NULL), tag_string(NULL), extra(NULL),
-    extra_tag(NULL), flattened_pos(0)
+    extra_tag(NULL), flattened_pos(0), alignment_space(AlignSpaceMissing)
 {
     char buf[4096 + 1];
     if (fgets(buf, 4096, seqfile) == NULL)
@@ -142,7 +149,7 @@ SamLine::SamLine(FILE * seqfile, bool allow_absent_seq_qual) :
 SamLine::SamLine(char const* samline_string, bool allow_absent_seq_qual) :
     qname(NULL), fragment_id(0), rname(NULL), cigar(NULL), mrnm(NULL), 
     seq(NULL), qual(NULL), tag_string(NULL), extra(NULL), extra_tag(NULL),
-    flattened_pos(0)
+    flattened_pos(0), alignment_space(AlignSpaceMissing)
 {
     this->Init(samline_string, allow_absent_seq_qual);
 }
@@ -158,7 +165,8 @@ SamLine::SamLine(SamLine const& s) :
     mapq(s.mapq),
     mpos(s.mpos),
     isize(s.isize),
-    flattened_pos(s.flattened_pos)
+    flattened_pos(s.flattened_pos),
+    alignment_space(s.alignment_space)
 {
     this->line = new char[s.bytes_in_line];
     memcpy(this->line, s.line, s.bytes_in_line);
@@ -416,6 +424,13 @@ void SamLine::Init(char const* samline_string, bool allow_absent_seq_qual)
         }
         
         this->parse_flag = DATA_LINE;
+
+        char as_tag[10];
+        char as_type;
+        if (this->has_tag(AlignSpaceTag, as_type, as_tag))
+        {
+            this->alignment_space = as_tag[0];
+        }
     }
 }
 
@@ -606,18 +621,20 @@ int SamLine::alignment_score(char const* tag, int default_if_missing, bool * has
 }
 
 
+/*
 char SamLine::alignment_space(char default_if_missing, bool * has_space) const
 {
     return parse_sam_tag(this->tag_string, AlignSpaceTag, ":%c", default_if_missing, has_space);
 }
-
+*/
 
 
 bool SamLine::has_tag(char const* tag_code, char & type, char * value_string) const
 {
 
     char const* tag_start;
-    if ((tag_start = strstr(this->tag_string, tag_code)) == NULL)
+    if (this->tag_string == NULL
+        || (tag_start = strstr(this->tag_string, tag_code)) == NULL)
     {
         return false;
     }
@@ -653,7 +670,7 @@ void SamLine::add_tag(char const* tag_code, char type, char const* value_string)
     if (old_tag_length == new_tag_length)
     {
         //copy new value_string in place
-        strcpy(tag_start, tag_and_value);
+        strncpy(tag_start, tag_and_value, new_tag_length);
     }
     else
     {

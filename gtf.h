@@ -34,7 +34,7 @@ class GTFEntry
     void print(FILE * gtf_fh);
     void clear_record();
 
-inline size_t start_bound() const { return this->start - 1; }
+    inline size_t start_bound() const { return this->start - 1; }
     inline size_t end_bound() const { return this->end; }
     inline size_t length() const { return this->end - this->start + 1; }
 };
