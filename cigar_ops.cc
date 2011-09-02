@@ -30,7 +30,7 @@ Cigar::CIGAR_VEC Cigar::FromString(char const* cigar,
     char const* chunk = cigar;
     while (*chunk != '\0')
     {
-        size_t num_fields = sscanf(chunk, "%z%c", &oplength, &opname);
+        size_t num_fields = sscanf(chunk, "%zi%c", &oplength, &opname);
         assert(num_fields == 2);
 
         size_t op_ind = std::distance(Cigar::OpName, strchr(Cigar::OpName, opname));
@@ -58,7 +58,7 @@ void Cigar::ToString(Cigar::CIGAR_VEC::const_iterator cigar_start,
     
     for (iter = cigar_start; iter != cigar_end; ++iter)
     {
-        sprintf(op_string, "%z%c", (*iter).length, (*iter).op.name);
+        sprintf(op_string, "%zi%c", (*iter).length, (*iter).op.name);
         strcat(cigar_string, op_string);
     }
 }
@@ -72,7 +72,7 @@ std::string Cigar::ToString(Cigar::CIGAR_VEC const& cigar)
     for (Cigar::CIGAR_VEC::const_iterator iter = cigar.begin(); 
          iter != cigar.end(); ++iter)
     {
-        sprintf(op_string, "%u%c", (*iter).length, (*iter).op.name);
+        sprintf(op_string, "%zi%c", (*iter).length, (*iter).op.name);
         cigar_string += op_string;
     }
     return cigar_string;
@@ -177,7 +177,7 @@ size_t Cigar::Overlap(Cigar::CIGAR_VEC::const_iterator cigar_start,
     
     for (unit_iter = cigar_start; unit_iter != cigar_end; ++unit_iter)
     {
-        if ((*unit_iter).op == Cigar::M)
+        if ((*unit_iter).op.code == Cigar::M)
         {
             length += (*unit_iter).length;
         }
@@ -189,8 +189,6 @@ size_t Cigar::Overlap(Cigar::CIGAR_VEC::const_iterator cigar_start,
 
 void UpdateOffset(Cigar::Unit const& unit, int64_t * current_offset)
 {
-    current_offset
-
     switch(unit.op.code)
     {
     case Cigar::I:
@@ -226,7 +224,7 @@ int64_t Cigar::LeftOffset(CIGAR_VEC const& cigar, bool top_start_to_bottom_start
         }
         else
         {
-            offset += (u.op.ref - u.op.temp) * u.op.length;
+            offset += (u.op.ref - u.op.temp) * u.length;
         }
     }
     return offset * sense;
@@ -248,7 +246,7 @@ int64_t Cigar::RightOffset(CIGAR_VEC const& cigar, bool top_end_to_bottom_end)
         }
         else
         {
-            offset += (u.op.ref - u.op.temp) * u.op.length;
+            offset += (u.op.ref - u.op.temp) * u.length;
         }
     }
     return offset * sense;
@@ -308,10 +306,70 @@ std::multiset<std::pair<size_t, size_t> > Cigar::ComputeOffsets(Cigar::CIGAR_VEC
 }
 
 
+Cigar::CIGAR_VEC
+Cigar::Expand(std::map<size_t, block_offsets> const& blocks,
+              Cigar::CIGAR_VEC const& cigar,
+              bool use_N_as_insert)
+{
+    Cigar::CIGAR_VEC result;
+
+    if (cigar.empty())
+    {
+        return result;
+    }
+    
+    assert(! blocks.empty());
+
+    Cigar::Op ins = use_N_as_insert ? Ops[Cigar::N] : Ops[Cigar::D];
+
+    //initialize
+    std::map<size_t, block_offsets>::const_iterator cur_block = blocks.begin();
+    CIGAR_VEC::const_iterator cur_op = cigar.begin();
+
+    size_t op_remain = (*cur_op).length;
+    size_t block_remain = (*cur_block).second.length;
+    
+    while (1)
+    {
+        if (cur_block == blocks.end())
+        {
+            //while we are in the loop, there must be at least one
+            //block left to define the cigar projection
+            fprintf(stderr, "Error: Cigar::Expand: Ran out of blocks to expand this CIGAR\n");
+            exit(1);
+        }
+        
+        if (op_remain <= block_remain)
+        {
+            //Remaining piece of op
+            result.push_back(*cur_op);
+            block_remain -= (*cur_op).length;
+            if (++cur_op == cigar.end())
+            {
+                break;
+            }
+            op_remain = (*cur_op).length;
+        }
+        else
+        {
+            //CIGAR op is broken up into two pieces
+            result.push_back(Cigar::Unit((*cur_op).op, block_remain));
+            result.push_back(Cigar::Unit(ins, (*cur_block).second.jump));
+            ++cur_block;
+            block_remain = (*cur_block).second.length;
+        }
+    }
+    return result;
+}
+
+
+
 //returns the cigar relationship CIGAR(first, second) from CIGAR(ref,
 //first) and CIGAR(ref, second).  The 'cigar1' may in general be long
 //representing an entire transcriptome on one contig, for example.
 //It must be indexed, allowing efficient merging of first and second.
+
+/*
 Cigar::CIGAR_VEC 
 Cigar::TransitiveMerge(Cigar::CIGAR_VEC const& cigar1,
                        std::multiset<std::pair<size_t, size_t> > const& cigar_index1,
@@ -367,12 +425,12 @@ Cigar::TransitiveMerge(Cigar::CIGAR_VEC const& cigar1,
         //we want to have the cumulative distances up to the point before this
         --index_iter;
         
-        /* now index_iter points to the index element that tells us
-          the part of the transformation falling entirely in the first
-          test 'D' state.  The net deleted in the transform up to this
-          point, if padding is enabled, should be added to the
-          padding.
-        */
+        //   now index_iter points to the index element that tells us
+        //   the part of the transformation falling entirely in the first
+        //   test 'D' state.  The net deleted in the transform up to this
+        //   point, if padding is enabled, should be added to the
+        //   padding.
+
         if (add_padding)
         {
             size_t pad = (*index_iter).first - (*index_iter).second;
@@ -557,7 +615,7 @@ Cigar::TransitiveMerge(Cigar::CIGAR_VEC const& cigar1,
     return Cigar::Consolidate(cigar_trans);
 
 }
-
+*/
 
 
 //Used for discovering the agreeing subset of two very similar alignments.
@@ -567,6 +625,7 @@ Cigar::TransitiveMerge(Cigar::CIGAR_VEC const& cigar1,
 //'M' states that are the intersection of cigar1 and cigar2
 //are retained in tcigar, the remaining states are converted to 'S'
 
+ /*
 Cigar::CIGAR_VEC 
 Cigar::TransitiveTrim(Cigar::CIGAR_VEC const& cigar1,
                       Cigar::CIGAR_VEC const& cigar2,
@@ -736,7 +795,7 @@ Cigar::TransitiveTrim(Cigar::CIGAR_VEC const& cigar1,
 //now consolidate consecutive like-states in the CIGAR vector
 return Cigar::Consolidate(cigar_trans);
 }
-
+*/
 
 
 
@@ -747,8 +806,8 @@ size_t Cigar::ProjectCoord(Cigar::CIGAR_VEC const& transformation,
                            bool * projection_applied)
 {
 
-    Cigar::CIGAR_VEC source_cigar(1, Cigar::Unit(Cigar::D, source_coord));
-    source_cigar.push_back(Cigar::Unit(Cigar::M, 1));
+    Cigar::CIGAR_VEC source_cigar(1, Cigar::Unit(Cigar::Ops[Cigar::D], source_coord));
+    source_cigar.push_back(Cigar::Unit(Cigar::Ops[Cigar::M], 1));
 
     Cigar::CIGAR_VEC source_proj = 
         Cigar::TransitiveMerge(transformation, trans_index, source_cigar, false, false);

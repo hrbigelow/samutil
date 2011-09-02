@@ -25,6 +25,8 @@ namespace SamFlags
     extern int const ALIGNMENT_NOT_PRIMARY;
     extern int const FAILED_QUALITY_CHECK;
     extern int const PCR_OR_OPTICAL_DUPLICATE;
+    
+    extern int const TEMPLATE_ON_NEG_STRAND;
 };
 
 enum SAM_PARSE
@@ -158,7 +160,7 @@ public:
     SAM_PARSE load(FILE * seqfile);
 
     void print_sam(FILE * samfile) const;
-    voud print_rsam(FILE * samfile) const;
+    void print_rsam(FILE * samfile) const;
 
     void print_fastq(FILE * fastq_fh) const;
 

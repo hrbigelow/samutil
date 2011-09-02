@@ -5,6 +5,8 @@
 #include <string>
 #include <stdint.h>
 #include <set>
+#include <map>
+
 
 //class for applying coordinate transformation implied by CIGAR strings
 //
@@ -35,6 +37,12 @@
           
 */
 
+
+struct block_offsets
+{
+    size_t jump;
+    size_t length;
+};
 
 
 namespace Cigar
@@ -120,6 +128,12 @@ namespace Cigar
     //if 'top_end_to_bottom_end' is true, otherwise the negative of this.
     int64_t RightOffset(CIGAR_VEC const& cigar, bool top_end_to_bottom_end);
 
+    //projects a cigar from (typically) transcriptome space to genome space,
+    //using 'blocks' as the projection definition
+    CIGAR_VEC Expand(std::map<size_t, block_offsets> const& blocks,
+                     CIGAR_VEC const& cigar,
+                     bool use_N_as_insert);
+    
     //returns the cigar relationship CIGAR(first, second) from
     //CIGAR(ref, first) and CIGAR(ref, second).
     CIGAR_VEC 
