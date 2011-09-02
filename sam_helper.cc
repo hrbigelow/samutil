@@ -27,6 +27,23 @@ namespace SamFlags
     int const PCR_OR_OPTICAL_DUPLICATE = 0x0400;
 };
 
+
+bool eqstr::operator()(const char* s1, const char* s2) const
+{
+    return strcmp(s1, s2) == 0;
+}
+
+
+size_t to_integer::operator()(char const* k) const
+{
+    size_t val = 0;
+    if (sscanf(k, "%*[^0-9]%zu", &val) == 1 || sscanf(k, "%zu", &val) == 1)
+    {
+        return val;
+    }
+    return 0;
+}
+
 //extern char const* AlignSpaceTag;
 
 //serialize the data in a line.  string data will be packed in the

@@ -12,16 +12,6 @@
 
 
 
-size_t to_integer::operator()(char const* k) const
-{
-    size_t val = 0;
-    if (sscanf(k, "%*[^0-9]%zu", &val) == 1 || sscanf(k, "%zu", &val) == 1)
-    {
-        return val;
-    }
-    return 0;
-}
-
 
 
 FragmentScore::~FragmentScore()
