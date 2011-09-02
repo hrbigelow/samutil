@@ -8,8 +8,11 @@
 #include <cassert>
 #include <map>
 
-
-//#include <unordered_map>
+#ifdef __GXX_EXPERIMENTAL_CXX0X__
+#include <unordered_map>
+#else
+#include <tr1/unordered_map>
+#endif
 
 //flag masks.  When set, these flags proclaim their name
 namespace SamFlags
@@ -54,8 +57,26 @@ struct less_char_ptr
 };
 
 
+struct eqstr
+{
+    bool operator()(const char* s1, const char* s2) const;
+};
 
-typedef std::map<char const*, size_t, less_char_ptr> CONTIG_OFFSETS;
+
+struct to_integer
+{
+    size_t operator()(char const* k) const;
+};
+
+
+#ifdef __GXX_EXPERIMENTAL_CXX0X__
+typedef std::unordered_map<char const*, char, to_integer, eqstr> CONTIG_SPACE;
+typedef std::unordered_map<char const*, size_t, to_integer, eqstr> CONTIG_OFFSETS;
+#else
+typedef std::tr1::unordered_map<char const*, char, to_integer, eqstr> CONTIG_SPACE;
+typedef std::tr1::unordered_map<char const*, size_t, to_integer, eqstr> CONTIG_OFFSETS;
+#endif
+
 typedef CONTIG_OFFSETS::const_iterator OFFSETS_ITER;
 
 

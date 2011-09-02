@@ -4,13 +4,8 @@
 #include <map>
 #include <utility>
 
-#ifdef __GXX_EXPERIMENTAL_CXX0X__
-#include <unordered_map>
-#else
-#include <tr1/unordered_map>
-#endif
-
 #include "sam_buffer.h"
+#include "sam_helper.h"
 #include "align_eval_raw.h"
 #include "cigar_ops.h"
 
@@ -27,21 +22,6 @@ public:
 };
 
 
-struct eqstr
-{
-    bool operator()(const char* s1, const char* s2) const
-    {
-        return strcmp(s1, s2) == 0;
-    }
-};
-
-
-struct to_integer
-{
-    size_t operator()(char const* k) const;
-};
-
-
 struct RawScoreComp
 {
     bool larger_score_better;
@@ -53,12 +33,6 @@ struct RawScoreComp
         return this->larger_score_better ? a < b : a > b;
     }
 };
-
-#ifdef __GXX_EXPERIMENTAL_CXX0X__
-typedef std::unordered_map<char const*, char, to_integer, eqstr> CONTIG_SPACE;
-#else
-typedef std::tr1::unordered_map<char const*, char, to_integer, eqstr> CONTIG_SPACE;
-#endif
 
 
 
