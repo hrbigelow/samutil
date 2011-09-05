@@ -90,8 +90,8 @@ int main_pretty_plot_gtf_sam(int argc, char **argv)
         assert(meta_gene.meta_exon.find(gtf_entry.seqname) !=
                meta_gene.meta_exon.end());
 
-        Cigar::CIGAR_VEC gtf_cigar(1, Cigar::Unit(Cigar::D, gtf_entry.start_bound()));
-        gtf_cigar.push_back(Cigar::Unit(Cigar::M, gtf_entry.length()));
+        Cigar::CIGAR_VEC gtf_cigar(1, Cigar::Unit(Cigar::Ops[Cigar::D], gtf_entry.start_bound()));
+        gtf_cigar.push_back(Cigar::Unit(Cigar::Ops[Cigar::M], gtf_entry.length()));
 
         Cigar::CIGAR_VEC projected =
             Cigar::TransitiveMerge(meta_gene.meta_exon[gtf_entry.seqname],

@@ -13,6 +13,12 @@
 #include "sam_helper.h"
 #include "sam_score_aux.h"
 
+#ifdef __GXX_EXPERIMENTAL_CXX0X__
+#include <unordered_map>
+#else
+#include <tr1/unordered_map>
+#endif
+
 
 /*
 
@@ -23,7 +29,7 @@ transcript -> genome, transcript -> read :    genome -> read
 NEEDED: 
 
 1. tx_to_genome  (projections of transcripts to the genome)
-2. tx_name_to_projection.  (tx names pointing to tx_to_genome iterators)
+2. tx_projections.  (tx names pointing to tx_to_genome iterators)
 
 0.  source = transcript, target = genome
 1.  parse a samline
@@ -43,6 +49,7 @@ int transcript_to_genome_usage()
             "-h     STRING   input genome SAM header file\n"
             "-n     FLAG     If present, use CIGAR 'N' to represent introns.  Otherwise use 'D'\n"
             "-x     FLAG     If present, add Cufflinks XS:A: tag (+/-) denotes source RNA strand.\n"
+            "-r     FLAG     If present, print in rSAM format. Otherwise, print traditional SAM\n"
             "-t     INT      Number of threads to use\n"
             "\n"
             "Only one of each group of identical fragment alignments is output.\n"
@@ -57,7 +64,15 @@ int transcript_to_genome_usage()
 }
 
 typedef std::set<SequenceProjection>::const_iterator SP_ITER;
-typedef std::map<char const*, SP_ITER, less_char_ptr> PROJ_MAP;
+
+
+
+#ifdef __GXX_EXPERIMENTAL_CXX0X__
+typedef std::unordered_map<char const*, SP_ITER, to_integer, eqstr> PROJ_MAP;
+#else
+typedef std::tr1::unordered_map<char const*, SP_ITER, to_integer, eqstr> PROJ_MAP;
+#endif
+
 typedef PROJ_MAP::const_iterator NP_ITER;
 
 
@@ -65,10 +80,9 @@ typedef PROJ_MAP::const_iterator NP_ITER;
 struct project_aux_data
 {
     project_aux_data(char const* _p,     
-                     PAIRED_READ_SET::const_iterator _start,
-                     PAIRED_READ_SET::const_iterator _stop,
-                     SP_ITER _f,
-                     SP_ITER _s,
+                     SINGLE_READ_SET::const_iterator _start,
+                     SINGLE_READ_SET::const_iterator _stop,
+                     SP_ITER _proj,
                      PROJ_MAP const* _t,
                      NP_ITER const* _n,
                      bool _i,
@@ -78,9 +92,8 @@ struct project_aux_data
         prev_rname(_p),
         start(_start),
         stop(_stop),
-        first_seq_proj(_f),
-        second_seq_proj(_s),
-        tx_name_to_projection(_t),
+        seq_proj(_proj),
+        tx_projections(_t),
         name_to_proj(_n),
         inserts_are_introns(_i),
         add_cufflinks_xs_tag(_ac),
@@ -90,11 +103,10 @@ struct project_aux_data
     project_aux_data() { }
 
     char const* prev_rname;
-    PAIRED_READ_SET::const_iterator start;
-    PAIRED_READ_SET::const_iterator stop;
-    SP_ITER first_seq_proj; //defines the transcript-to-genome sequence projection
-    SP_ITER second_seq_proj;
-    PROJ_MAP const* tx_name_to_projection;
+    SINGLE_READ_SET::const_iterator start;
+    SINGLE_READ_SET::const_iterator stop;
+    SP_ITER seq_proj; //defines the transcript-to-genome sequence projection
+    PROJ_MAP const* tx_projections;
     NP_ITER const* name_to_proj; //shortcut for lookup of second projection in PROJ_MAP
     bool inserts_are_introns;
     bool add_cufflinks_xs_tag;
@@ -108,40 +120,20 @@ void * project_transcript_entries_aux(void * data)
 {
     project_aux_data & p = *static_cast<project_aux_data *>(data);
 
-    for (PAIRED_READ_SET::const_iterator pit = p.start; pit != p.stop; ++pit)
+    for (SINGLE_READ_SET::const_iterator pit = p.start; pit != p.stop; ++pit)
     {
-        SamLine * first = const_cast<SamLine *>((*pit).first);
-        SamLine * second = const_cast<SamLine *>((*pit).second);
+        SamLine * samline = const_cast<SamLine *>(*pit);
 
-        assert(strcmp(p.prev_rname, first->rname) == 0);
+        assert(strcmp(p.prev_rname, samline->rname) == 0);
 
-        //but, their mates may not be
-        NP_ITER nit_mate = strcmp(first->rname, first->mate_ref_name()) == 0 ? *p.name_to_proj
-            : p.tx_name_to_projection->find(first->mate_ref_name());
-                    
-        if (nit_mate == p.tx_name_to_projection->end())
-        {
-            fprintf(stderr, "Error: couldn't find transcript %s in projections "
-                    "derived from GTF file\n", first->mate_ref_name());
-            exit(1);
-        }
-        else
-        {
-            p.second_seq_proj = (*nit_mate).second;
-        }
-                    
         bool projection_applied = 
-            ApplyProjectionToSAM(*p.first_seq_proj, *p.second_seq_proj, "T", 
-                                 first, second, 
+            ApplyProjectionToSAM(*p.seq_proj, "T", samline, 
                                  p.inserts_are_introns,
                                  p.add_cufflinks_xs_tag);
                         
         assert(projection_applied);
 
-        assert(AreMappedMatePairs(*first, *second));
-
-        first->SetFlattenedPosition(p.record_ordering->contig_offsets, &p.contig_iter);
-        second->SetFlattenedPosition(p.record_ordering->contig_offsets, &p.contig_iter);
+        samline->SetFlattenedPosition(p.record_ordering->contig_offsets, &p.contig_iter);
     }
     pthread_exit(0);
 }
@@ -150,11 +142,13 @@ void * project_transcript_entries_aux(void * data)
 //call at the end of loading the input_buffer with all alignments to a
 //given transcript.
 
+
+
 //find projection by name.  assume all unique entry pairs in input
 //buffer are on the same transcript, namely 'prev_rname'. Project them
 //to the output buffer, and update the lowbound for the output buffer
 //to the minimum position on the genome of the transcript being processed.
-void ProjectTranscriptEntries(PROJ_MAP const& tx_name_to_projection, 
+void ProjectTranscriptEntries(PROJ_MAP const& tx_projections, 
                               SamBuffer & input_buffer, 
                               SamBuffer & output_buffer,
                               char const* prev_rname,
@@ -164,17 +158,17 @@ void ProjectTranscriptEntries(PROJ_MAP const& tx_name_to_projection,
                               size_t num_threads,
                               project_aux_data * thread_data_array)
 {
-    if (input_buffer.unique_entry_pairs.empty())
+    if (input_buffer.unique_entries.empty())
     {
         return;
     }
 
     std::pair<SamLine const*, bool> insert_result;
 
-    SP_ITER first_proj;
-    SP_ITER second_proj;
-    NP_ITER nit = tx_name_to_projection.find(prev_rname);
-    if (nit == tx_name_to_projection.end())
+    SP_ITER seq_proj;
+
+    NP_ITER nit = tx_projections.find(prev_rname);
+    if (nit == tx_projections.end())
     {
         fprintf(stderr, "Error: couldn't find transcript %s in projections "
                 "derived from GTF file\n", prev_rname);
@@ -182,7 +176,7 @@ void ProjectTranscriptEntries(PROJ_MAP const& tx_name_to_projection,
     }
     else
     {
-        first_proj = (*nit).second;
+        seq_proj = (*nit).second;
     }
 
     CONTIG_OFFSETS::const_iterator contig_iter = 
@@ -190,12 +184,12 @@ void ProjectTranscriptEntries(PROJ_MAP const& tx_name_to_projection,
 
     //now, 
 
-    size_t small_chunk_size = input_buffer.unique_entry_pairs.size() / num_threads;
-    size_t num_plus_one_threads = input_buffer.unique_entry_pairs.size() % num_threads;
+    size_t small_chunk_size = input_buffer.unique_entries.size() / num_threads;
+    size_t num_plus_one_threads = input_buffer.unique_entries.size() % num_threads;
     size_t num_nonzero_threads = small_chunk_size == 0 ? num_plus_one_threads : num_threads;
 
-    PAIRED_READ_SET::iterator start = input_buffer.unique_entry_pairs.begin();
-    PAIRED_READ_SET::iterator stop = start;
+    SINGLE_READ_SET::iterator start = input_buffer.unique_entries.begin();
+    SINGLE_READ_SET::iterator stop = start;
 
     int * thread_retval = new int[num_threads];
     pthread_t * thread_ids = new pthread_t[num_threads];
@@ -212,8 +206,7 @@ void ProjectTranscriptEntries(PROJ_MAP const& tx_name_to_projection,
         p->prev_rname = prev_rname;
         p->start = start;
         p->stop = stop;
-        p->first_seq_proj = first_proj;
-        p->second_seq_proj = second_proj;
+        p->seq_proj = seq_proj;
         p->name_to_proj = &nit;
         p->contig_iter = contig_iter;
 
@@ -233,19 +226,18 @@ void ProjectTranscriptEntries(PROJ_MAP const& tx_name_to_projection,
     delete thread_ids;
 
     //parallelize this with a fork.  How?
-    for (PAIRED_READ_SET::iterator pit = input_buffer.unique_entry_pairs.begin();
-         pit != input_buffer.unique_entry_pairs.end(); ++pit)
+    for (SINGLE_READ_SET::iterator pit = input_buffer.unique_entries.begin();
+         pit != input_buffer.unique_entries.end(); ++pit)
     {
-
-        insert_result = output_buffer.insert((*pit).first);
-        insert_result = output_buffer.insert((*pit).second);
-
+        insert_result = output_buffer.insert((*pit));
     }
-    input_buffer.unique_entry_pairs.clear();
+    input_buffer.unique_entries.clear();
                 
     //at this point, the low bound
-    char const* target_contig = (*first_proj).target_dna.c_str();
-    size_t target_min_pos = (*first_proj).cigar[0].length;
+    char const* target_contig = (*seq_proj).target_dna.c_str();
+    assert(false);
+    // !!! check this logic.  what is 'target_min_pos'?
+    size_t target_min_pos = (*seq_proj).transformation[0].jump_length;
 
     
     strcpy(low_bound->rname, target_contig);
@@ -283,10 +275,9 @@ bool CheckProjectionOrder(CONTIG_OFFSETS const& genome_contig_order,
             exit(1);
         }
         size_t genome_contig_offset = (*oit).second;
-        size_t tx_local_offset = Cigar::LeftOffset((*pit).cigar, false);
+        assert(false); // !!! so that we check the integrity of this edit.
+        size_t tx_local_offset = (*pit).transformation[0].jump_length;
 
-        //assert(tx_implied_genomic_offsets.find() == tx_implied_genomic_offsets.end());
-        
         tx_implied_genomic_offsets.insert(std::make_pair(genome_contig_offset + tx_local_offset, tx_contig));
     }
 
@@ -345,15 +336,18 @@ int main_transcript_to_genome(int argc, char ** argv)
     char const* input_genome_sam_header_file = "";
     bool inserts_are_introns = false;
     bool add_cufflinks_xs_tag = false;
+    bool print_rsam = false;
+
     size_t num_threads = 1;
 
-    while ((c = getopt(argc, argv, "h:nxt:")) >= 0)
+    while ((c = getopt(argc, argv, "h:nxrt:")) >= 0)
     {
         switch(c)
         {
         case 'h': input_genome_sam_header_file = optarg; break;
         case 'n': inserts_are_introns = true; break;
         case 'x': add_cufflinks_xs_tag = true; break;
+        case 'r': print_rsam = true; break;
         case 't': num_threads = static_cast<size_t>(atof(optarg)); break;
         default: return transcript_to_genome_usage(); break;
         }
@@ -402,66 +396,30 @@ int main_transcript_to_genome(int argc, char ** argv)
 
     char const* species = "dummy";
 
-    std::set<SequenceProjection> genome_to_tx = 
+    std::set<SequenceProjection> tx_to_genome = 
         gtf_to_sequence_projection(gtf_file, species);
 
-    //needed if we are expanding reads that are originally mapped to a
-    //transcript to genomic coordinates
-    std::set<SequenceProjection> tx_to_genome;
-
-    // std::set<cis::dna_t> contigs;
-
-    // typedef std::set<cis::dna_t>::const_iterator DNAS_ITER;
-    // DNAS_ITER dnas_iter;
-
-    // for (SP_ITER gt_iter = genome_to_tx.begin();
-    //      gt_iter != genome_to_tx.end(); ++gt_iter)
-    // {
-    //     contigs.insert(cis::dna_t((*gt_iter).species, (*gt_iter).source_dna,
-    //                               0, INT64_MAX));
-    // }
-
-
-    //this maps tx_extent regions to sequence projections.  when in
-    //expansion mode, the sequence projection will be
-    //transcript->genome 't2g', and be iterators into tx_to_genome.
-    //otherwise, these will be iterators into genome_to_tx
-    
-    PROJ_MAP tx_name_to_projection;
-    
-
-    std::map<cis::region const*, SP_ITER> tx_extent_to_projection;
-    typedef std::map<cis::region const*, SP_ITER>::const_iterator MP_ITER;
-
-    typedef std::pair<cis::REGIONS_MULTI::iterator, bool> REG_INS;
+    PROJ_MAP tx_projections;
 
     // 1. tx_to_genome  (projections of transcripts to the genome)
-    // 2. tx_name_to_projection.  (tx names pointing to tx_to_genome iterators)
-    for (SP_ITER gt_iter = genome_to_tx.begin();
-         gt_iter != genome_to_tx.end(); ++gt_iter)
+    // 2. tx_projections.  (tx names pointing to tx_to_genome iterators)
+    for (SP_ITER t = tx_to_genome.begin(); t != tx_to_genome.end(); ++t)
     {
-        SP_ITER tg_iter = tx_to_genome.insert(tx_to_genome.begin(), 
-                                              InvertProjection((*gt_iter)));
-        
-        //transcript-to-genome projection for this transcript
-        SequenceProjection const& tx_t2g_projection = *tg_iter;
-        
-        char * tx_name = new char[tx_t2g_projection.source_dna.size() + 1];
-        strcpy(tx_name, tx_t2g_projection.source_dna.c_str());
-        std::pair<NP_ITER, bool> ins = 
-            tx_name_to_projection.insert(std::make_pair(tx_name, tg_iter));
+        char * tx_name = new char[(*t).source_dna.size() + 1];
+        strcpy(tx_name, (*t).source_dna.c_str());
+        std::pair<NP_ITER, bool> ins = tx_projections.insert(std::make_pair(tx_name, t));
 
         if (! ins.second)
         {
             SequenceProjection const& p1 = *(*ins.first).second;
-            SequenceProjection const& p2 = (*tg_iter);
+            SequenceProjection const& p2 = (*t);
 
             fprintf(stderr, "Error: duplicate transcript named %s encountered.\n"
-                    "First instance: %s\t%s\t%s\n"
-                    "Second instance: %s\t%s\t%s\n", 
+                    "First instance: %s\t%s\n"
+                    "Second instance: %s\t%ss\n", 
                     tx_name,
-                    p1.source_dna.c_str(), (p1.same_strand ? "+" : "-"), Cigar::ToString(p1.cigar).c_str(),
-                    p2.source_dna.c_str(), (p2.same_strand ? "+" : "-"), Cigar::ToString(p2.cigar).c_str());
+                    p1.source_dna.c_str(), (p1.same_strand ? "+" : "-"),
+                    p2.source_dna.c_str(), (p2.same_strand ? "+" : "-"));
             exit(1);
         }
     }
@@ -478,10 +436,6 @@ int main_transcript_to_genome(int argc, char ** argv)
         fprintf(stderr, "Cannot continue.\n");
         exit(1);
     }
-
-
-    // SP_ITER first_proj = tx_to_genome.end();
-    // SP_ITER second_proj = tx_to_genome.end();
 
     char prev_rname[1024] = "";
 
@@ -516,7 +470,7 @@ int main_transcript_to_genome(int argc, char ** argv)
     {
         project_aux_data * p = & thread_data_array[c];
 
-        p->tx_name_to_projection = &tx_name_to_projection;
+        p->tx_projections = &tx_projections;
         p->inserts_are_introns = inserts_are_introns;
         p->add_cufflinks_xs_tag = add_cufflinks_xs_tag;
         p->record_ordering = output_buffer.sam_order;
@@ -533,7 +487,7 @@ int main_transcript_to_genome(int argc, char ** argv)
         {
         case END_OF_FILE: 
             delete samline;
-            ProjectTranscriptEntries(tx_name_to_projection, input_buffer,
+            ProjectTranscriptEntries(tx_projections, input_buffer,
                                      output_buffer, prev_rname,
                                      &output_lowbound,
                                      inserts_are_introns,
@@ -564,9 +518,9 @@ int main_transcript_to_genome(int argc, char ** argv)
             }
             prev_pos_index = cur_pos_index;
 
-            if (samline->query_unmapped())
+            if (samline->this_fragment_unmapped())
             {
-                samline->print(output_genome_sam_fh, true);
+                samline->print(output_genome_sam_fh, print_rsam);
                 delete samline;
                 insert_result.second = false;
             }
@@ -580,7 +534,7 @@ int main_transcript_to_genome(int argc, char ** argv)
             if (insert_result.second && strcmp(prev_rname, samline->rname) != 0)
             {
 
-                ProjectTranscriptEntries(tx_name_to_projection, input_buffer,
+                ProjectTranscriptEntries(tx_projections, input_buffer,
                                          output_buffer, prev_rname,
                                          &output_lowbound,
                                          inserts_are_introns,
@@ -589,29 +543,22 @@ int main_transcript_to_genome(int argc, char ** argv)
                                          thread_data_array);
 
                 strcpy(prev_rname, samline->rname);
-                output_buffer.purge(output_genome_sam_fh, NULL, NULL, &output_lowbound);
+                output_buffer.purge(output_genome_sam_fh, NULL, NULL, print_rsam, &output_lowbound);
             } // if on new contig
             
         }
     }
-    output_buffer.purge(output_genome_sam_fh, NULL, NULL, NULL);
+    output_buffer.purge(output_genome_sam_fh, NULL, NULL, print_rsam, NULL);
 
     fclose(input_tx_sam_fh);
     fclose(output_genome_sam_fh);
 
     delete thread_data_array;
 
-    for (NP_ITER tn = tx_name_to_projection.begin();
-         tn != tx_name_to_projection.end(); ++tn)
+    for (NP_ITER tn = tx_projections.begin(); tn != tx_projections.end(); ++tn)
     {
         delete (*tn).first;
     }
     
-    for (MP_ITER tex = tx_extent_to_projection.begin();
-         tex != tx_extent_to_projection.end(); ++tex)
-    {
-        delete (*tex).first;
-    }
-
     return 0;
 }

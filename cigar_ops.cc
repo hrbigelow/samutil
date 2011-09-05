@@ -10,6 +10,25 @@
 #include <cassert>
 
 
+namespace Cigar
+{
+    char const* OpName = "MIDNSHPTU";
+
+    Op Ops[] = 
+        { 
+            { M, 'M', 1, 1, 1 },
+            { I, 'I', 0, 1, 1 },
+            { D, 'D', 1, 0, 0 },
+            { N, 'N', 1, 0, 0 },
+            { S, 'S', 0, 1, 1 },
+            { H, 'H', 0, 1, 0 },
+            { P, 'P', 0, 0, 0 },
+            { T, 'T', 1, 1, 0 },
+            { U, 'U', 0, 1, 0 }
+        };
+    
+};
+
 
 //parse a cigar string into a vector of cigar units
 Cigar::CIGAR_VEC Cigar::FromString(char const* cigar, 
@@ -186,29 +205,9 @@ size_t Cigar::Overlap(Cigar::CIGAR_VEC::const_iterator cigar_start,
 }
 
                       
-
-void UpdateOffset(Cigar::Unit const& unit, int64_t * current_offset)
-{
-    switch(unit.op.code)
-    {
-    case Cigar::I:
-    case Cigar::S:
-        *current_offset -= unit.length;
-        break;
-    case Cigar::D:
-    case Cigar::N:
-    case Cigar::H:
-        *current_offset += unit.length;
-        break;
-        
-    case Cigar::M:
-    case Cigar::P:
-    default:
-        break;
-    }
-
-}
-
+//returns the displacement (offset) from the starts of one sequence to the other.
+//if 'top_start_to_bottom_start' is true, offset will be positive iff top < bottom,
+//for example.
 int64_t Cigar::LeftOffset(CIGAR_VEC const& cigar, bool top_start_to_bottom_start)
 {
     Cigar::CIGAR_VEC::const_iterator unit_iter;
@@ -307,7 +306,7 @@ std::multiset<std::pair<size_t, size_t> > Cigar::ComputeOffsets(Cigar::CIGAR_VEC
 
 
 Cigar::CIGAR_VEC
-Cigar::Expand(std::map<size_t, block_offsets> const& blocks,
+Cigar::Expand(std::vector<block_offsets> const& blocks,
               Cigar::CIGAR_VEC const& cigar,
               bool use_N_as_insert)
 {
@@ -323,11 +322,11 @@ Cigar::Expand(std::map<size_t, block_offsets> const& blocks,
     Cigar::Op ins = use_N_as_insert ? Ops[Cigar::N] : Ops[Cigar::D];
 
     //initialize
-    std::map<size_t, block_offsets>::const_iterator cur_block = blocks.begin();
+    std::vector<block_offsets>::const_iterator cur_block = blocks.begin();
     CIGAR_VEC::const_iterator cur_op = cigar.begin();
 
     size_t op_remain = (*cur_op).length;
-    size_t block_remain = (*cur_block).second.length;
+    size_t block_remain = (*cur_block).block_length;
     
     while (1)
     {
@@ -354,14 +353,103 @@ Cigar::Expand(std::map<size_t, block_offsets> const& blocks,
         {
             //CIGAR op is broken up into two pieces
             result.push_back(Cigar::Unit((*cur_op).op, block_remain));
-            result.push_back(Cigar::Unit(ins, (*cur_block).second.jump));
+            result.push_back(Cigar::Unit(ins, (*cur_block).jump_length));
             ++cur_block;
-            block_remain = (*cur_block).second.length;
+            block_remain = (*cur_block).block_length;
         }
     }
     return result;
 }
 
+
+//condenses cigar according to the expansion described in 'blocks'
+//unlike with 'Cigar::Expand', here the jumps in 'blocks' are applied
+//to the cigar to remove the jumped-over part.
+Cigar::CIGAR_VEC
+Cigar::Condense(std::vector<block_offsets> const& blocks,
+                Cigar::CIGAR_VEC const& cigar)
+{
+    Cigar::CIGAR_VEC result;
+
+    if (cigar.empty())
+    {
+        return result;
+    }
+    
+    assert(! blocks.empty());
+
+    //initialize
+    std::vector<block_offsets>::const_iterator cur_block = blocks.begin();
+    CIGAR_VEC::const_iterator cur_op = cigar.begin();
+
+    size_t op_remain = (*cur_op).length;
+    size_t block_remain = (*cur_block).block_length;
+    size_t jump_remain = (*cur_block).jump_length;
+    
+    while (1)
+    {
+        if (jump_remain > 0)
+        {
+            //condensing logic.
+            //M -> I
+            //T -> U
+            //else -> nothing.
+            size_t min_length = std::min(jump_remain, op_remain);
+            
+            if ((*cur_op).op.code == Cigar::M)
+            {
+                result.push_back(Cigar::Unit(Cigar::Ops[Cigar::I], min_length));
+            }
+            else if ((*cur_op).op.code == Cigar::T)
+            {
+                result.push_back(Cigar::Unit(Cigar::Ops[Cigar::U], min_length));
+            }
+            else
+            {
+                //do nothing.
+            }
+            jump_remain -= min_length;
+            op_remain -= min_length;
+        }
+        else
+        {
+            //matching logic
+            //merely regurgitate the current op with its remaining length
+            size_t min_length = std::min(block_remain, op_remain);
+            result.push_back(Cigar::Unit((*cur_op).op, min_length));
+            block_remain -= min_length;
+            op_remain -= min_length;
+        }
+
+        if (block_remain == 0)
+        {
+            if (++cur_block == blocks.end())
+            {
+                break;
+            }
+            jump_remain = (*cur_block).jump_length;
+            block_remain = (*cur_block).block_length;
+        }
+        if (op_remain == 0)
+        {
+            if (++cur_op == cigar.end())
+            {
+                break;
+            }
+            op_remain = (*cur_op).length;
+        }
+    }
+    if (cur_op != cigar.end())
+    {
+        //while we are in the loop, there must be at least one
+        //block left to define the cigar projection
+        fprintf(stderr, "Error: Cigar::Condense: Ran out of blocks to condense this CIGAR\n");
+        exit(1);
+    }
+
+    return result;
+
+}
 
 
 //returns the cigar relationship CIGAR(first, second) from CIGAR(ref,
@@ -798,11 +886,11 @@ return Cigar::Consolidate(cigar_trans);
 */
 
 
-
-//how to tell if this is a valid projection?
-size_t Cigar::ProjectCoord(Cigar::CIGAR_VEC const& transformation,
-                           std::multiset<std::pair<size_t, size_t> > const& trans_index,
-                           size_t source_coord,
+  /*
+  //how to tell if this is a valid projection?
+  size_t Cigar::ProjectCoord(Cigar::CIGAR_VEC const& transformation,
+  std::multiset<std::pair<size_t, size_t> > const& trans_index,
+  size_t source_coord,
                            bool * projection_applied)
 {
 
@@ -821,7 +909,7 @@ size_t Cigar::ProjectCoord(Cigar::CIGAR_VEC const& transformation,
 
     return Cigar::LeftOffset(source_proj, true);
 }
-
+*/
 
 
 Cigar::CIGAR_VEC Cigar::Consolidate(Cigar::CIGAR_VEC const& source)
@@ -838,7 +926,7 @@ Cigar::CIGAR_VEC Cigar::Consolidate(Cigar::CIGAR_VEC const& source)
 
     for (size_t s = 1; s != source.size(); ++s)
     {
-        if (source[s].op == prev_op)
+        if (source[s].op.code == prev_op.code)
         {
             (*condensed.rbegin()).length += source[s].length;
         }
@@ -889,7 +977,7 @@ Cigar::CIGAR_VEC Cigar::Trim(Cigar::CIGAR_VEC const& source,
 }
 
 
-
+/*
 Cigar::CIGAR_VEC Cigar::Invert(Cigar::CIGAR_VEC const& source, size_t position)
 {
     Cigar::CIGAR_VEC invert;
@@ -910,6 +998,7 @@ Cigar::CIGAR_VEC Cigar::Invert(Cigar::CIGAR_VEC const& source, size_t position)
     }
     return invert;
 }
+*/
 
 
 //count the number of correctly aligned positions, represented by a
@@ -929,7 +1018,7 @@ size_t Cigar::CountAlignedPositions(Cigar::CIGAR_VEC const& merged,
                 
         Cigar::Unit const& unit = *mi;
 
-        switch(unit.op)
+        switch(unit.op.code)
         {
         case Cigar::M:
             if (test_read_pos == guide_read_pos)
@@ -945,10 +1034,11 @@ size_t Cigar::CountAlignedPositions(Cigar::CIGAR_VEC const& merged,
             break;
 
         case Cigar::I:
+        case Cigar::U:
             //present in test but not in guide.  test is erroneously placed
             test_read_pos += unit.length;
             break;
-
+            
         case Cigar::D:
         case Cigar::N:
             guide_read_pos += unit.length;
@@ -962,10 +1052,15 @@ size_t Cigar::CountAlignedPositions(Cigar::CIGAR_VEC const& merged,
             break;
 
         case Cigar::S:
-        case Cigar::None:
             //this shouldn't happen since we're dealing with a merged CIGAR
             assert(false);
             break;
+
+        case Cigar::T:
+            guide_read_pos += unit.length;
+            test_read_pos += unit.length;
+            break;
+
         }
     }
     *total_bases_top = guide_read_pos;

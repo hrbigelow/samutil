@@ -18,6 +18,7 @@ int score_mapq_usage(size_t ldef, size_t Ldef)
             "Options:\n\n"
             "-l     INT     min allowed fragment length for paired alignment [%Zu]\n"
             "-L     INT     max allowed fragment length for paired alignment [%Zu]\n"
+            "-r     FLAG    If present, print in rSAM format. Otherwise, print traditional SAM [false]\n"
             "\n\n"
             "calibration.qcal: a histogram over the set of alignment categories\n"
             "(top score, 2nd score, given score)\n"
@@ -57,6 +58,8 @@ int main_score_mapq(int argc, char ** argv)
 
     size_t min_fragment_length = ldef;
     size_t max_fragment_length = Ldef;
+    bool print_rsam = false;
+
     // bool equivalency_mapq = false;
 
     while ((c = getopt(argc, argv, "l:L:")) >= 0)
@@ -65,6 +68,7 @@ int main_score_mapq(int argc, char ** argv)
         {
         case 'l': min_fragment_length = static_cast<size_t>(atoi(optarg)); break;
         case 'L': max_fragment_length = static_cast<size_t>(atoi(optarg)); break;
+        case 'r': print_rsam = true; break;
         // case 'e': equivalency_mapq = true; break;
         default: return score_mapq_usage(ldef, Ldef); break;
         }
@@ -100,8 +104,6 @@ int main_score_mapq(int argc, char ** argv)
 
     SamBuffer tally_buffer(&sam_order, paired_reads_are_same_stranded);
 
-    PAIRED_READ_SET::iterator pit;
-
     PrintSAMHeader(&unscored_sam_fh, scored_sam_fh);
     fflush(scored_sam_fh);
 
@@ -121,7 +123,7 @@ int main_score_mapq(int argc, char ** argv)
         if (new_fragment)
         {
             set_score_fields(cal_buffer, fragment_scoring);
-            cal_buffer.purge(scored_sam_fh, NULL, NULL, low_bound);
+            cal_buffer.purge(scored_sam_fh, NULL, NULL, print_rsam, low_bound);
         }
         else
         {

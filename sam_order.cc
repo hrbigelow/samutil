@@ -208,7 +208,7 @@ size_t SamOrder::flattened_position_mate(SamLine const* a,
                                          CONTIG_OFFSETS::const_iterator * contig_iter) const
 {
     
-    return flattened_position_aux(a->mate_ref_name(), a->mpos,
+    return flattened_position_aux(a->next_fragment_ref_name(), a->pnext,
                                   this->contig_offsets,
                                   contig_iter);
 }
@@ -217,7 +217,7 @@ size_t SamOrder::flattened_position_mate(SamLine const* a,
 
 
 //for distinguishing SamLines by alignment position,
-//[rname, pos, query_strand, cigar, mrnm, mpos]
+//[rname, pos, query_strand, cigar, rnext, pnext]
 bool SamOrder::less_position(SamLine const& a, SamLine const& b) const
 {
     CONTIG_OFFSETS::const_iterator dummy;
@@ -227,8 +227,8 @@ bool SamOrder::less_position(SamLine const& a, SamLine const& b) const
 
     return flattened_cmp < 0 || 
         (flattened_cmp == 0 && 
-         (a.query_on_pos_strand() < b.query_on_pos_strand() ||
-          (a.query_on_pos_strand() == b.query_on_pos_strand() &&
+         (a.this_fragment_on_pos_strand() < b.this_fragment_on_pos_strand() ||
+          (a.this_fragment_on_pos_strand() == b.this_fragment_on_pos_strand() &&
            (strcmp(a.cigar, b.cigar) < 0 ||
             (strcmp(a.cigar, b.cigar) == 0 &&
              (icmp(this->flattened_position_mate(&a, &dummy),
@@ -239,37 +239,37 @@ bool SamOrder::less_position(SamLine const& a, SamLine const& b) const
         
 }
 
-//[rname, pos, query_strand, cigar, mrnm, mpos]
+//[rname, pos, query_strand, cigar, rnext, pnext]
 bool SamOrder::equal_position(SamLine const& a, SamLine const& b) const
 {
     CONTIG_OFFSETS::const_iterator dummy;
 
     return 
         a.flattened_pos == b.flattened_pos &&
-        a.query_on_pos_strand() == b.query_on_pos_strand() &&
+        a.this_fragment_on_pos_strand() == b.this_fragment_on_pos_strand() &&
         strcmp(a.cigar, b.cigar) == 0 &&
         flattened_position_mate(&a, &dummy) == flattened_position_mate(&b, &dummy) &&
         a.alignment_space == b.alignment_space;
 
         // flattened_position(&a, &dummy) == flattened_position(&b, &dummy) &&
-        // a.query_on_pos_strand() == b.query_on_pos_strand() &&
+        // a.this_fragment_on_pos_strand() == b.this_fragment_on_pos_strand() &&
         // strcmp(a.cigar, b.cigar) == 0 &&
         // flattened_position_mate(&a, &dummy) == flattened_position_mate(&b, &dummy);
 }
 
 
 //for distinguishing SamLines by fragment alignment position
-//[rname, pos, query_strand, cigar, mrnm, mpos]
+//[rname, pos, query_strand, cigar, rnext, pnext]
 bool SamOrder::less_fposition(SamLine const& a, SamLine const& b) const
 {
     CONTIG_OFFSETS::const_iterator dummy;
 
-    size_t a_fragment_pos = a.mapped_in_proper_pair()
+    size_t a_fragment_pos = a.all_fragments_mapped()
         ? std::min(a.flattened_pos,
                    this->flattened_position_mate(&a, &dummy))
         : a.flattened_pos;
 
-    size_t b_fragment_pos = b.mapped_in_proper_pair()
+    size_t b_fragment_pos = b.all_fragments_mapped()
         ? std::min(b.flattened_pos,
                    this->flattened_position_mate(&b, &dummy))
         : b.flattened_pos;
@@ -278,8 +278,8 @@ bool SamOrder::less_fposition(SamLine const& a, SamLine const& b) const
 
     return flattened_cmp < 0 || 
         (flattened_cmp == 0 && 
-         (a.query_on_pos_strand() < b.query_on_pos_strand() ||
-          (a.query_on_pos_strand() == b.query_on_pos_strand() &&
+         (a.this_fragment_on_pos_strand() < b.this_fragment_on_pos_strand() ||
+          (a.this_fragment_on_pos_strand() == b.this_fragment_on_pos_strand() &&
            (strcmp(a.cigar, b.cigar) < 0))));
 
 }
@@ -291,7 +291,7 @@ bool SamOrder::less_rid(SamLine const& a, SamLine const& b) const
     int qname_cmp = fragment_id_aux(a, b);
     return qname_cmp < 0 
         || (qname_cmp == 0
-            && (a.first_read_in_pair() < b.first_read_in_pair()));
+            && (a.first_fragment_in_template() < b.first_fragment_in_template()));
 }
 
 
@@ -300,32 +300,32 @@ bool SamOrder::equal_rid(SamLine const& a, SamLine const& b) const
 {
     int qname_cmp = fragment_id_aux(a, b);
     return qname_cmp == 0
-        && (a.first_read_in_pair() == b.first_read_in_pair());
+        && (a.first_fragment_in_template() == b.first_fragment_in_template());
 }
 
 
-//[qname, pair, rname, pos, query_strand, cigar, mrnm, mpos]
+//[qname, pair, rname, pos, query_strand, cigar, rnext, pnext]
 bool SamOrder::less_rid_position(SamLine const& a, SamLine const& b) const
 {
     return less_rid(a, b) ||
         (equal_rid(a, b) && less_position(a, b));
 }
 
-//[qname, pair, rname, pos, query_strand, cigar, mrnm, mpos]
+//[qname, pair, rname, pos, query_strand, cigar, rnext, pnext]
 bool SamOrder::equal_rid_position(SamLine const& a, SamLine const& b) const
 {
     return equal_rid(a, b) && equal_position(a, b);
 }
 
 
-//[rname, pos, query_strand, cigar, mrnm, mpos, qname, pair]
+//[rname, pos, query_strand, cigar, rnext, pnext, qname, pair]
 bool SamOrder::less_position_rid(SamLine const& a, SamLine const& b) const
 {
     return less_position(a, b) ||
         (equal_position(a, b) && less_rid(a, b));
 }
 
-//[rname, pos, query_strand, cigar, mrnm, mpos, qname, pair]
+//[rname, pos, query_strand, cigar, rnext, pnext, qname, pair]
 bool SamOrder::equal_position_rid(SamLine const& a, SamLine const& b) const
 {
     return equal_position(a, b) && equal_rid(a, b);
@@ -412,6 +412,24 @@ void SamOrder::AddHeaderContigStats(FILE * sam_fh)
         exit(1);
     }
 
+    this->contig_offsets.rehash(this->contig_offsets.size() * 10);
+
+    fprintf(stderr, "size()=%zu, bucket_count()=%zu, load_factor()=%f\n", 
+            this->contig_offsets.size(),
+            this->contig_offsets.bucket_count(),
+            this->contig_offsets.load_factor());
+    std::map<size_t, size_t> bucket_hist;
+    for (size_t i = 0; i != this->contig_offsets.bucket_count(); ++i)
+    {
+        bucket_hist[this->contig_offsets.bucket_size(i)]++;
+    }
+    for (std::map<size_t, size_t>::const_iterator it = bucket_hist.begin();
+         it != bucket_hist.end(); ++it)
+    {
+        fprintf(stderr, "size %zu buckets: %zu\n",
+                (*it).first, (*it).second);
+    }
+
 }
 
 
@@ -435,7 +453,7 @@ size_t SamOrder::samline_read_id(char const* samline) const
     char qname[1024];
     size_t flag;
 
-    // qname flag rname pos mapq cigar mrnm mpos isize seq qual tags...
+    // qname flag rname pos mapq cigar rnext pnext isize seq qual tags...
     int nfields_read = sscanf(samline, "%s\t%zu", qname, &flag);
     if (nfields_read != 2)
     {
@@ -448,7 +466,7 @@ size_t SamOrder::samline_read_id(char const* samline) const
     size_t read_id = this->parse_fragment_id(qname);
 
     read_id = read_id<<1;
-    int read_num = ((flag & SamFlags::FIRST_READ_IN_PAIR) != 0) ? 0 : 1;
+    int read_num = ((flag & SamFlags::FIRST_FRAGMENT_IN_TEMPLATE) != 0) ? 0 : 1;
     read_id += read_num;
 
     return read_id;
@@ -476,7 +494,7 @@ size_t SamOrder::samline_position_min_align_guide(char const* samline) const
            &read_num_right, guide_chrom_right, &guide_pos_right,
            &flag, align_chrom, &align_pos);
     
-    int read_num = ((flag & SamFlags::FIRST_READ_IN_PAIR) != 0) ? 1 : 2;
+    int read_num = ((flag & SamFlags::FIRST_FRAGMENT_IN_TEMPLATE) != 0) ? 1 : 2;
 
     char * guide_chrom = read_num == read_num_left ? guide_chrom_left : guide_chrom_right;
     size_t guide_pos = read_num == read_num_left ? guide_pos_left : guide_pos_right;
@@ -530,8 +548,8 @@ void GenerateProjectionHeader(CONTIG_OFFSETS const& genome_contig_order,
             exit(1);
         }
         size_t genome_contig_offset = (*oit).second;
-        size_t tx_local_offset = Cigar::LeftOffset((*pit).cigar, false);
-        size_t tx_length = Cigar::Length((*pit).cigar, true);
+        size_t tx_local_offset = (*pit).transformation.empty() ? 0 : (*pit).transformation[0].jump_length;
+        size_t tx_length = (*pit).total_block_length;
 
         flat_genome_start.insert(std::make_pair(genome_contig_offset + tx_local_offset, tx_contig));
         lengths.insert(std::make_pair(tx_contig, tx_length));

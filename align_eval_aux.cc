@@ -45,6 +45,9 @@ build_index(char const* sam_file,
     *num_chunks = chunk_lengths.size();
 
     size_t current_offset = header_length;
+    fprintf(stderr, "chunks [0-%zu] ", *num_chunks - 1);
+    fflush(stderr);
+
     for (size_t chunk = 0; chunk != *num_chunks; ++chunk)
     {
         size_t nbytes_read = fread(chunk_buffer, 1, chunk_lengths[chunk], sam_fh);
@@ -68,7 +71,8 @@ build_index(char const* sam_file,
             line_index.push_back(LineIndex(index, current_offset, line_length));
             current_offset += line_length;
         }
-
+        fprintf(stderr, "%zu ", chunk);
+        fflush(stderr);
     }
     fclose(sam_fh);
 

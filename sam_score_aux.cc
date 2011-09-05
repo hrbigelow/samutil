@@ -157,32 +157,23 @@ void FragmentScore::init(char const* score_cal_file, char const* contig_space_fi
 }
 
 
-int FragmentScore::raw_score(SamLine const* a, SamLine const* b) const
+int FragmentScore::raw_score(SamLine const* samline) const
 {
-    bool a_has_score;
-    bool b_has_score;
-
+    bool has_score;
     int fragment_score;
 
-    int a_raw_score = 
-        a->alignment_score(this->raw_score_tag, this->worst_fragment_score, &a_has_score);
+    int unqual_score = 
+        samline->alignment_score(this->raw_score_tag, this->worst_fragment_score, &has_score);
 
-    int b_raw_score = 
-        b->alignment_score(this->raw_score_tag, this->worst_fragment_score, &b_has_score);
-
-    size_t fragment_length = static_cast<size_t>(a->isize);
-
-    assert(a->isize >= 0);
-    
-    int unqual_fragment_score = a_raw_score + b_raw_score;
+    size_t fragment_length = Cigar::Length(Cigar::FromString(samline->cigar, 0), false);
 
     if (fragment_length >= this->min_fragment_length
         && fragment_length <= this->max_fragment_length
-        && unqual_fragment_score >= this->min_fragment_score
-        && unqual_fragment_score <= this->max_fragment_score)
+        && unqual_score >= this->min_fragment_score
+        && unqual_score <= this->max_fragment_score)
     {
         //fragment score is valid
-        fragment_score = unqual_fragment_score;
+        fragment_score = unqual_score;
     }
     else
     {
@@ -193,9 +184,9 @@ int FragmentScore::raw_score(SamLine const* a, SamLine const* b) const
     return fragment_score;
 }
 
-char FragmentScore::alignment_space(SamLine const* a, SamLine const* /* b */) const
+char FragmentScore::alignment_space(SamLine const* a) const
 {
-    if (a->query_unmapped())
+    if (a->this_fragment_unmapped())
     {
         return this->space_ordering[0];
     }
@@ -251,9 +242,9 @@ void set_score_fields(SamBuffer const& sam_buffer,
                       FragmentScore const& fragment_scoring)
 {
 
-    PAIRED_READ_SET::iterator pit;
+    SINGLE_READ_SET::iterator pit;
 
-    size_t N = sam_buffer.unique_entry_pairs.size();
+    size_t N = sam_buffer.unique_entries.size();
     int * raw_scores = new int[N];
     int * raw_scores_copy = new int[N + 2];
 
@@ -263,28 +254,25 @@ void set_score_fields(SamBuffer const& sam_buffer,
     std::map<ScoreSpace, size_t, FragmentScoreWrap>::iterator sit;
 
     size_t i = 0;
-    for (pit = sam_buffer.unique_entry_pairs.begin();
-         pit != sam_buffer.unique_entry_pairs.end(); ++pit, ++i)
+    for (pit = sam_buffer.unique_entries.begin();
+         pit != sam_buffer.unique_entries.end(); ++pit, ++i)
     {
-        SamLine * first = const_cast<SamLine *>((*pit).first);
-        SamLine * second = const_cast<SamLine *>((*pit).second);
+        SamLine * samline = const_cast<SamLine *>((*pit));
 
-        raw_scores[i] = fragment_scoring.raw_score(first, second);
+        raw_scores[i] = fragment_scoring.raw_score(samline);
 
-        if (first->alignment_space == AlignSpaceMissing)
+        if (samline->alignment_space == AlignSpaceMissing)
         {
-            char as = fragment_scoring.alignment_space(first, second);
-            first->alignment_space = as;
-            second->alignment_space = as;
+            char as = fragment_scoring.alignment_space(samline);
+            samline->alignment_space = as;
             char space_string[] = "-";
             space_string[0] = as;
 
-            first->add_tag("XP", 'A', space_string);
-            second->add_tag("XP", 'A', space_string);
+            samline->add_tag("XP", 'A', space_string);
         }
 
         
-        ScoreSpace ss(raw_scores[i], first->alignment_space);
+        ScoreSpace ss(raw_scores[i], samline->alignment_space);
         sit = stratum_hist.find(ss);
         if (sit == stratum_hist.end())
         {
@@ -315,21 +303,20 @@ void set_score_fields(SamBuffer const& sam_buffer,
 
     bool first_encountered_top_stratum = true;
 
-    for (i = 0, pit = sam_buffer.unique_entry_pairs.begin();
-         pit != sam_buffer.unique_entry_pairs.end(); ++pit, ++i)
+    for (i = 0, pit = sam_buffer.unique_entries.begin();
+         pit != sam_buffer.unique_entries.end(); ++pit, ++i)
     {
-        SamLine * first = const_cast<SamLine *>((*pit).first);
-        SamLine * second = const_cast<SamLine *>((*pit).second);
+        SamLine * samline = const_cast<SamLine *>((*pit));
 
         fragment_score = raw_scores[i];
-        fragment_space = first->alignment_space;
+        fragment_space = samline->alignment_space;
 
         size_t table_index = 
             fragment_scoring.score_table_index(top_fragment_score, sec_fragment_score, fragment_score);
 
         new_mapq = fragment_scoring.score_table[table_index];
 
-        bool mapq_correct = first->query_unmapped() ? (new_mapq == 0) : true;
+        bool mapq_correct = samline->this_fragment_unmapped() ? (new_mapq == 0) : true;
 
         assert(mapq_correct);
 
@@ -341,38 +328,31 @@ void set_score_fields(SamBuffer const& sam_buffer,
         size_t stratum_rank = num_strata - index;
 
         //set mapq
-        first->mapq = new_mapq;
-        second->mapq = new_mapq;
+        samline->mapq = new_mapq;
 
         sprintf(rank_tag_value, "%zu", stratum_rank);
         sprintf(size_tag_value, "%zu", stratum_size);
 
         //set rank tag
-        first->add_tag("XY", 'i', rank_tag_value);
-        first->add_tag("XZ", 'i', size_tag_value);
-
-        second->add_tag("XY", 'i', rank_tag_value);
-        second->add_tag("XZ", 'i', size_tag_value);
+        samline->add_tag("XY", 'i', rank_tag_value);
+        samline->add_tag("XZ", 'i', size_tag_value);
 
         
         //set primary flag
-        if (stratum_rank == 1 && first->mapped_in_proper_pair() && first_encountered_top_stratum)
+        if (stratum_rank == 1 && samline->all_fragments_mapped() && first_encountered_top_stratum)
         {
             //alignment is primary.
-            first->flag &= ~SamFlags::ALIGNMENT_NOT_PRIMARY;
-            second->flag &= ~SamFlags::ALIGNMENT_NOT_PRIMARY;
+            samline->flag &= ~SamFlags::ALIGNMENT_NOT_PRIMARY;
             first_encountered_top_stratum = false;
         }
-        else if (first->query_unmapped())
+        else if (samline->this_fragment_unmapped())
         {
             //alignment is 'primary' per downstream weird interpretations
-            first->flag &= ~SamFlags::ALIGNMENT_NOT_PRIMARY;
-            second->flag &= ~SamFlags::ALIGNMENT_NOT_PRIMARY;
+            samline->flag &= ~SamFlags::ALIGNMENT_NOT_PRIMARY;
         }
         else
         {
-            first->flag |= SamFlags::ALIGNMENT_NOT_PRIMARY;
-            second->flag |= SamFlags::ALIGNMENT_NOT_PRIMARY;
+            samline->flag |= SamFlags::ALIGNMENT_NOT_PRIMARY;
         }
 
     }
@@ -399,7 +379,7 @@ size_t CountCorrectBases(SamLine const* samline,
     *num_bases_test = 0;
 
     if (strcmp(samline->rname, guide_coords.contig) == 0
-        && samline->query_on_pos_strand() == guide_coords.pos_stranded)
+        && samline->this_fragment_on_pos_strand() == guide_coords.pos_stranded)
     {
         //proceed to measure actual base overlap
         Cigar::CIGAR_VEC test_cigar = Cigar::FromString(samline->cigar, samline->zero_based_pos());
@@ -440,12 +420,12 @@ void NextLine(FILE * unscored_sam_fh,
         }
 
         *new_fragment = true;
-        if (! sam_buffer.yet_unpaired_entries.empty())
+        if (! sam_buffer.incomplete_entries.empty())
         {
             //all entries should be properly paired when we encounter a new fragment.  violation.
             fprintf(stderr, "Error: Reached end of file, yet this entry is paired in sequencing"
                     " but as yet have not found its mate:\n");
-            (*sam_buffer.yet_unpaired_entries.begin())->print(stderr, true);
+            (*sam_buffer.incomplete_entries.begin())->print_sam(stderr);
             exit(1);
         }
         break;
@@ -464,14 +444,14 @@ void NextLine(FILE * unscored_sam_fh,
     case DATA_LINE:
         *new_fragment = *prev_fragment_id != samline->fragment_id && *seen_a_read;
         
-        if (*new_fragment && ! sam_buffer.yet_unpaired_entries.empty())
+        if (*new_fragment && ! sam_buffer.incomplete_entries.empty())
         {
             //all entries should be properly paired when we encounter a new fragment.  violation.
             fprintf(stderr, "Error: input SAM buffer not sorted by read_id, fragment pair\n"
-                    "This entry is paired in sequencing but as yet have not found its mate:\n");
-            (*sam_buffer.yet_unpaired_entries.begin())->print(stderr, true);
+                    "This entry is incomplete:\n");
+            (*sam_buffer.incomplete_entries.begin())->print_sam(stderr);
             fprintf(stderr, "\nand this entry, on a different fragment, was found, violating the ordering\n");
-            samline->print(stderr, true);
+            samline->print_sam(stderr);
                 
             exit(1);
         }
@@ -568,7 +548,7 @@ TallyFragmentLengths(FILE ** sam_fh,
 
             top_score = UnpackScore(*fit, max_valid_fragment_score);
 
-            PAIRED_READ_SET::const_iterator mpit = tally_buffer.unique_entry_pairs.begin();
+            PAIRED_READ_SET::const_iterator mpit = tally_buffer.unique_entries.begin();
             std::advance(mpit, std::distance(packed_scores.begin(), fit));
             top_fragment_entry = (*mpit).first;
             

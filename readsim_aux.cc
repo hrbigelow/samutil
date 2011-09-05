@@ -12,132 +12,11 @@
 #include "dep/stats_tools.h"
 
 
-//apply a partial projection to one sam entry in a pair
-//this is a helper function for ApplyProjectionToSAM
-//returns true if projection successfully applied
-bool apply_projection_aux(SequenceProjection const& projection,
-                          SequenceProjection const& mate_projection,
-                          SamLine * samline,
-                          bool inserts_are_introns)
-{
-    bool add_padding = true;
-
-    if (samline->query_unmapped())
-    {
-        return false;
-    }
-
-    Cigar::CIGAR_VEC source_to_read = 
-        Cigar::FromString(samline->cigar, samline->pos);
-
-    if (! projection.same_strand)
-    {
-        //reverse alignment if necessary.
-        int64_t right_offset = 
-            Cigar::Length(projection.cigar, true) 
-            - Cigar::Length(source_to_read, true);
-
-        assert(right_offset >= 0);
-        source_to_read.push_back(Cigar::Unit(Cigar::D, static_cast<size_t>(right_offset)));
-        std::reverse(source_to_read.begin(), source_to_read.end());
-        int strand_mask = (SamFlags::QUERY_ON_NEG_STRAND | SamFlags::MATE_ON_NEG_STRAND);
-        samline->flag = samline->flag ^ strand_mask;
-        samline->isize = - samline->isize;
-    }
-
-    Cigar::CIGAR_VEC target_to_read =
-        Cigar::TransitiveMerge(projection.cigar, 
-                               projection.cigar_index, source_to_read, 
-                               ! add_padding, 
-                               inserts_are_introns);
-
-    Cigar::CIGAR_ITER trimmed_left, trimmed_right;
-    Cigar::Trim(target_to_read, false, &trimmed_left, &trimmed_right);
-
-    size_t overlap = Cigar::Overlap(trimmed_left, trimmed_right);
-
-    if (overlap > 0)
-    {
-        char bufstring[1024];
-        Cigar::ToString(trimmed_left, trimmed_right, bufstring);
-        assert(samline->extra == NULL);
-        assert(strlen(bufstring) < 1024);
-
-        size_t new_field_size = 
-            strlen(bufstring) 
-            + projection.target_dna.size()
-            + mate_projection.target_dna.size()
-            + 3;
-
-        samline->extra = new char[new_field_size];
-        samline->cigar = samline->extra;
-        samline->rname = samline->extra + strlen(bufstring) + 1;
-        samline->mrnm = samline->rname + mate_projection.target_dna.size() + 1;
-
-        strcpy(samline->cigar, bufstring);
-        samline->pos = Cigar::LeftOffset(target_to_read, true);
-        strcpy(samline->rname, projection.target_dna.c_str());
-        strcpy(samline->mrnm, mate_projection.target_dna.c_str());
-    }
-    return overlap > 0;
-
-}
-
-
-//modify 'samline's coordinates (pos, rname, cigar, mrnm, mpos)
-//does not handle cases in which mrnm != rname
-
-bool ApplyProjectionToSAM(SequenceProjection const& projection,
-                          SequenceProjection const& mate_projection,
-                          char const* alignment_space,
-                          SamLine * first,
-                          SamLine * second,
-                          bool inserts_are_introns,
-                          bool add_cufflinks_xs_tag)
-{
-    if (AreMappedMatePairs(*first, *second))
-    {
-        bool first_projected = 
-            apply_projection_aux(projection, mate_projection, first, inserts_are_introns);
-
-        bool second_projected = 
-            apply_projection_aux(mate_projection, projection, second, inserts_are_introns);
-        
-        first->mpos = second->pos;
-        second->mpos = first->pos;
-
-        first->add_tag(AlignSpaceTag, AlignSpaceType, alignment_space);
-        second->add_tag(AlignSpaceTag, AlignSpaceType, alignment_space);
-
-        if (add_cufflinks_xs_tag)
-        {
-            //Did this fragment originate from the sense or antisense
-            //DNA from the transcript in question.
-            // char const* sense = 
-            //     (first->first_read_in_pair() == (first->query_on_pos_strand() == projection.same_strand)) ?
-            //     "+" : "-";
-
-            char const* sense = projection.same_strand ? "+" : "-";
-
-            first->add_tag("XS", 'A', sense);
-            second->add_tag("XS", 'A', sense);
-        }
-        return first_projected && second_projected;
-    }
-    else if (AreUnmappedMatePairs(*first, *second))
-    {
-        return false;
-    }
-    else
-    {
-        fprintf(stderr, "Error: ApplyProjectionToSAM: not mate pairs\n");
-        return false;
-    }
-}
 
 
 
 
+/*
 SequenceProjection InvertProjection(SequenceProjection const& sp)
 {
     char inv_cigar_string[10240];
@@ -154,6 +33,7 @@ SequenceProjection InvertProjection(SequenceProjection const& sp)
                               strand_string,
                               0, inv_cigar_string);
 }
+*/
 
 
 bool operator<(Locus const& a, Locus const& b)
@@ -200,44 +80,6 @@ bool operator<(Locus const& a, Locus const& b)
         non-overlapping
 
   */
-
-
-std::set<SequenceProjection> 
-load_sequence_projection(char const* coord_transform_file)
-{
-    std::set<SequenceProjection> sequence_expansion;
-    std::set<SequenceProjection>::const_iterator expansion_iter;
-
-    FILE * coord_transform_fh = open_if_present(coord_transform_file, "r");
-    if (coord_transform_fh == NULL)
-    {
-        fprintf(stderr, "Error: couldn't open coordinate transformation file '%s' "
-                "or none provided\n", coord_transform_file);
-        exit(1);
-    }
-    while (! feof(coord_transform_fh))
-    {
-        char species[1000];
-        char transcript_dna[1000];
-        char genome_dna[1000];
-        char strand_string[10];
-        size_t start_on_genome;
-        char cigar_string[100000];
-        fscanf(coord_transform_fh, "%s\t%s\t%s\t%s\t%zu\t%s\n",
-               species, genome_dna, transcript_dna, strand_string, 
-               &start_on_genome, cigar_string);
-
-        SequenceProjection 
-            sp(species, genome_dna, transcript_dna,
-               strand_string, start_on_genome, cigar_string);
-
-        sequence_expansion.insert(sequence_expansion.end(), sp);
-        
-    }
-    fclose(coord_transform_fh);
-
-    return sequence_expansion;
-}
 
 
 LOCUS_SET parse_somatic_mutations(char const* somatic_mutation_file)
@@ -427,7 +269,7 @@ void get_transformed_sequence(cis::dna_t const* dna,
     for (Cigar::CIGAR_VEC::const_iterator it = genome2read.begin();
          it != genome2read.end(); ++it)
     {
-        if ((*it).op == Cigar::M)
+        if ((*it).op.code == Cigar::M)
         {
             dna->sequence(genome_pos, genome_pos + (*it).length, 
                           read_buffer + read_pos);
@@ -520,42 +362,43 @@ void set_paired_read_flags(bool sense_strand,
                            int * right_flag)
 {
     *left_flag = 
-        SamFlags::PAIRED_IN_SEQUENCING |
-        SamFlags::MAPPED_IN_PROPER_PAIR |
-        SamFlags::MATE_ON_NEG_STRAND;
+        SamFlags::MULTI_FRAGMENT_TEMPLATE |
+        SamFlags::ALL_FRAGMENTS_MAPPED |
+        SamFlags::NEXT_FRAGMENT_ON_NEG_STRAND;
 
     *right_flag =
-        SamFlags::PAIRED_IN_SEQUENCING |
-        SamFlags::MAPPED_IN_PROPER_PAIR |
-        SamFlags::QUERY_ON_NEG_STRAND;
+        SamFlags::MULTI_FRAGMENT_TEMPLATE |
+        SamFlags::ALL_FRAGMENTS_MAPPED |
+        SamFlags::THIS_FRAGMENT_ON_NEG_STRAND;
 
     if (sense_strand)
     {
         //transcript is POS stranded
-        *left_flag |= SamFlags::FIRST_READ_IN_PAIR;
-        *right_flag |= SamFlags::SECOND_READ_IN_PAIR;
+        *left_flag |= SamFlags::FIRST_FRAGMENT_IN_TEMPLATE;
+        *right_flag |= SamFlags::LAST_FRAGMENT_IN_TEMPLATE;
     }
     else
     {
         //transcript is NEG stranded
-        *right_flag |= SamFlags::FIRST_READ_IN_PAIR;
-        *left_flag |= SamFlags::SECOND_READ_IN_PAIR;
+        *right_flag |= SamFlags::FIRST_FRAGMENT_IN_TEMPLATE;
+        *left_flag |= SamFlags::LAST_FRAGMENT_IN_TEMPLATE;
 
     }
 }
 
 
+/*
 void print_paired_fastq_entries(FILE * first_fh, FILE * second_fh,
                                 SamLine const* left_read,
                                 SamLine const* right_read)
 {
-    assert(left_read->paired_in_sequencing() &&
-           left_read->mapped_in_proper_pair() &&
-           right_read->paired_in_sequencing() &&
-           right_read->mapped_in_proper_pair());
+    assert(left_read->multi_fragment_template() &&
+           left_read->all_fragments_mapped() &&
+           right_read->multi_fragment_template() &&
+           right_read->all_fragments_mapped());
 
-    assert(left_read->first_read_in_pair() != 
-           right_read->first_read_in_pair());
+    assert(left_read->first_fragment_in_template() != 
+           right_read->first_fragment_in_template());
 
     size_t read_length = left_read->raw_read_length();
 
@@ -566,7 +409,7 @@ void print_paired_fastq_entries(FILE * first_fh, FILE * second_fh,
     qual_buffer[read_length] = '\0';
 
     SamLine const* first_read = 
-        left_read->first_read_in_pair() ? left_read : right_read;
+        left_read->first_fragment_in_template() ? left_read : right_read;
 
     SamLine const* second_read =
         left_read->second_read_in_pair() ? left_read : right_read;
@@ -578,7 +421,7 @@ void print_paired_fastq_entries(FILE * first_fh, FILE * second_fh,
     char const* seq_to_print;
     char const* qual_to_print;
 
-    if (! first_read->query_on_pos_strand())
+    if (! first_read->this_fragment_on_pos_strand())
     {
         cis::ReverseComplement(first_read->seq, read_length, seq_buffer);
         strcpy(qual_buffer, first_read->qual);
@@ -595,7 +438,7 @@ void print_paired_fastq_entries(FILE * first_fh, FILE * second_fh,
     fprintf(first_fh, "@%s\n%s\n+\n%s\n", first_read->qname,
             seq_to_print, qual_to_print);
 
-    if (! second_read->query_on_pos_strand())
+    if (! second_read->this_fragment_on_pos_strand())
     {
         cis::ReverseComplement(second_read->seq, read_length, seq_buffer);
         strcpy(qual_buffer, second_read->qual);
@@ -616,7 +459,7 @@ void print_paired_fastq_entries(FILE * first_fh, FILE * second_fh,
     delete qual_buffer;
 
 }
-
+*/
 
 ReadSampler::ReadSampler(LOCUS_SET const& _sm,
                          char const* q1_file, char const* q2_file,
@@ -738,8 +581,8 @@ ReadSampler::sample_pair(SequenceProjection const& transcript_proj,
     char min_median_qual_code = this->zero_quality_code + min_median_qual_score;
 
     Cigar::CIGAR_VEC transcript2left_read;
-    transcript2left_read.push_back(Cigar::Unit(Cigar::D, transcript_start_pos));
-    transcript2left_read.push_back(Cigar::Unit(Cigar::M, read_length));
+    transcript2left_read.push_back(Cigar::Unit(Cigar::Ops[Cigar::D], transcript_start_pos));
+    transcript2left_read.push_back(Cigar::Unit(Cigar::Ops[Cigar::M], read_length));
 
     Cigar::CIGAR_VEC genome2left_read =
         Cigar::TransitiveMerge(transcript_proj.cigar, 
@@ -755,7 +598,7 @@ ReadSampler::sample_pair(SequenceProjection const& transcript_proj,
     transcript2right_read.push_back
         (Cigar::Unit(Cigar::D, transcript_end_pos - read_length));
 
-    transcript2right_read.push_back(Cigar::Unit(Cigar::M, read_length));
+    transcript2right_read.push_back(Cigar::Unit(Cigar::Ops[Cigar::M], read_length));
 
     Cigar::CIGAR_VEC genome2right_read = 
         Cigar::TransitiveMerge(transcript_proj.cigar, 
@@ -853,10 +696,10 @@ ReadSampler::sample_pair(SequenceProjection const& transcript_proj,
     else
     {
         char left_strand = 
-            (left_read_flag & SamFlags::QUERY_ON_NEG_STRAND) == 0 ? '+' : '-';
+            (left_read_flag & SamFlags::THIS_FRAGMENT_ON_NEG_STRAND) == 0 ? '+' : '-';
 
         char right_strand = 
-            (right_read_flag & SamFlags::QUERY_ON_NEG_STRAND) == 0 ? '+' : '-';
+            (right_read_flag & SamFlags::THIS_FRAGMENT_ON_NEG_STRAND) == 0 ? '+' : '-';
 
         char const* left_read_string = sampling_strand ? "read1" : "read2";
         char const* right_read_string = sampling_strand ? "read2" : "read1";

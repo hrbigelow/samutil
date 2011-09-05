@@ -10,7 +10,7 @@ SOURCES = $(shell find $(srcdir) -name "*.cc")
 BIN = fastq2fastq align_eval pretty_plot make_sq_header make_dnas_file	\
 	 fasta2cisfasta gtf_annotate_regions shuffle_paired_fastq
 
-BIN += sim
+# BIN += sim
 BIN += samutil
 
 # BIN += filter_reads_for_tophat split_reads scatter_smoothing \
@@ -101,14 +101,13 @@ sim: $(sim_OBJS)
 
 
 
-samutil_OBJS = $(addprefix $(OBJDIR)/, samutil.o						\
-	sam_transcript_to_genome.o sam_merge_transcript_genome.o			\
-	dep/tools.o gtf.o cisortho/dna.o sam_score_mapq.o sam_score_aux.o	\
-	align_eval_raw.o cisortho/region.o readsim_aux.o	\
-	file_utils.o sam_buffer.o sam_helper.o sam_order.o cigar_ops.o		\
-	cisortho/nested.o dep/nucleotide_stats.o get_spliced_sequence.o		\
-	dep/stats_tools.o cisortho/litestream.o cisortho/enum.o				\
-	cisortho/dnacol.o sam_generate_projection_header.o)
+samutil_OBJS = $(addprefix $(OBJDIR)/, samutil.o					\
+	sam_transcript_to_genome.o dep/tools.o cisortho/dna.o			\
+	sam_score_mapq.o sam_score_aux.o seq_projection.o gtf.o			\
+	align_eval_raw.o cisortho/region.o file_utils.o sam_buffer.o	\
+	sam_helper.o sam_order.o cigar_ops.o cisortho/nested.o			\
+	dep/nucleotide_stats.o get_spliced_sequence.o dep/stats_tools.o	\
+	cisortho/litestream.o cisortho/enum.o cisortho/dnacol.o)
 
 samutil: $(samutil_OBJS)
 	$(CXX) $(CXXFLAGS) -lz -lgsl -lgslcblas -lpthread -o $@ $^
@@ -120,8 +119,8 @@ samutil: $(samutil_OBJS)
 
 pretty_plot_OBJS = $(addprefix $(OBJDIR)/, pretty_plot.o			\
 	pretty_plot_graph.o pretty_plot_gtf_sam.o cigar_ops.o nclist.o	\
-	sam_order.o sam_helper.o gtf.o dep/tools.o meta_gene.o			\
-	file_utils.o)
+	sam_order.o sam_helper.o gtf.o seq_projection.o dep/tools.o		\
+	meta_gene.o file_utils.o)
 
 pretty_plot: $(pretty_plot_OBJS)
 	$(CXX) $(CXXFLAGS) -lz -o $@ $^
@@ -130,10 +129,10 @@ pretty_plot: $(pretty_plot_OBJS)
 #	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^
 
 
-align_eval_OBJS = $(addprefix $(OBJDIR)/, \
-	align_eval.o align_eval_raw.o align_eval_sort.o				\
-	align_eval_aux.o align_eval_checksort.o align_eval_mask.o			\
-	align_eval_coverage.o align_eval_stats.o cigar_ops.o file_utils.o	\
+align_eval_OBJS = $(addprefix $(OBJDIR)/, align_eval.o				\
+	align_eval_raw.o align_eval_sort.o align_eval_aux.o				\
+	align_eval_checksort.o align_eval_mask.o align_eval_coverage.o	\
+	align_eval_stats.o cigar_ops.o seq_projection.o file_utils.o	\
 	sam_helper.o sam_order.o dep/tools.o)
 
 align_eval: $(align_eval_OBJS)

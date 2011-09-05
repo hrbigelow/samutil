@@ -12,7 +12,6 @@ int usage()
             "Usage:\n\n"
             "samutil genome2tx        Condense reads-to-genome alignments to reads-to-transcriptome\n"
             "samutil tx2genome        Expand reads-to-transcriptome alignments to reads-to-genome alignments\n"
-            "samutil merge_tg         Merge duplicate genome-projected and direct genome alignments\n"
             "samutil get_tx_sequence  Get transcript sequence from genomic sequence\n"
             "samutil gen_qcal         Generate qcal file for use with 'samutil score'\n"
             "samutil score            Set mapq, XP, XY, XZ, and primary alignment flags from fragment-sorted SAM file\n"
@@ -59,10 +58,6 @@ int main(int argc, char *argv[])
     {
         return main_transcript_to_genome(argc - 1, argv + 1);
     }
-    else if (strcmp(argv[1], "merge_tg") == 0)
-    {
-        return main_merge_tg(argc - 1, argv + 1);
-    }
     else if (strcmp(argv[1], "get_tx_sequence") == 0)
     {
         return main_get_tx_sequence(argc - 1, argv + 1);
@@ -77,7 +72,9 @@ int main(int argc, char *argv[])
     }
     else if (strcmp(argv[1], "gen_header") == 0)
     {
-        return main_generate_projection_header(argc - 1, argv + 1);
+        fprintf(stderr, "Not ported yet");
+        exit(1);
+        //return main_generate_projection_header(argc - 1, argv + 1);
     }
     else
     {

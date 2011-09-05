@@ -97,8 +97,8 @@ int main_pretty_plot_graph(int argc, char **argv)
         //by definition, every annotated exon must reside in at least one gene extent
         assert(! overlaps.empty());
 
-        Cigar::CIGAR_VEC gtf_cigar(1, Cigar::Unit(Cigar::D, gtf_entry.start_bound()));
-        gtf_cigar.push_back(Cigar::Unit(Cigar::M, gtf_entry.length()));
+        Cigar::CIGAR_VEC gtf_cigar(1, Cigar::Unit(Cigar::Ops[Cigar::D], gtf_entry.start_bound()));
+        gtf_cigar.push_back(Cigar::Unit(Cigar::Ops[Cigar::M], gtf_entry.length()));
 
         Cigar::CIGAR_VEC gtf_projected =
             Cigar::TransitiveMerge(meta_gene.meta_exon[gtf_entry.seqname],
@@ -163,8 +163,8 @@ int main_pretty_plot_graph(int argc, char **argv)
     char * extra_info = new char[extra_info_chars];
 
     //for representing a single-base locus ;)
-    Cigar::CIGAR_VEC unit_match(1, Cigar::Unit(Cigar::D, 0));
-    unit_match.push_back(Cigar::Unit(Cigar::M, 1));
+    Cigar::CIGAR_VEC unit_match(1, Cigar::Unit(Cigar::Ops[Cigar::D], 0));
+    unit_match.push_back(Cigar::Unit(Cigar::Ops[Cigar::M], 1));
     
     while (! feof(loci_input_fh))
     {

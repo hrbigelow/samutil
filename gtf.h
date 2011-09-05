@@ -6,6 +6,8 @@
 #include <map>
 #include <set>
 
+#include "seq_projection.h"
+
 #include "cisortho/memory.h"
 #include "cigar_ops.h"
 #include "dep/tools.h"
@@ -39,25 +41,6 @@ class GTFEntry
     inline size_t length() const { return this->end - this->start + 1; }
 };
 
-
-class SequenceProjection
-{
- public:
-    std::string species;
-    std::string source_dna;
-    std::string target_dna;
-    bool same_strand;
-    Cigar::CIGAR_VEC cigar;
-    Cigar::CIGAR_INDEX cigar_index;
-
-    SequenceProjection(char const* _species,
-                       char const* _source_dna,
-                       char const* _target_dna,
-                       char const* _strand_string,
-                       int64_t _source2target_offset,
-                       char const* _cigar_string);
-    bool operator<(SequenceProjection const& b) const;
-};
 
 
 std::map<std::string, std::string>

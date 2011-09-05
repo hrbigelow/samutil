@@ -122,7 +122,7 @@ void MetaGene::Initialize(FILE * gtf_fh, size_t pseudo_intron_length)
                 if (end == 0)
                 {
                     //we're at the start of the very FIRST region in the contig
-                    cigar_vec.push_back(Cigar::Unit(Cigar::D, start));
+                    cigar_vec.push_back(Cigar::Unit(Cigar::Ops[Cigar::D], start));
                 }
                 else
                 {
@@ -131,8 +131,8 @@ void MetaGene::Initialize(FILE * gtf_fh, size_t pseudo_intron_length)
                     size_t meta_intron_length = start - end;
                     //bool do_shrink = pseudo_intron_length < meta_intron_length;
 
-                    cigar_vec.push_back(Cigar::Unit(Cigar::I, pseudo_intron_length));
-                    cigar_vec.push_back(Cigar::Unit(Cigar::D, meta_intron_length));
+                    cigar_vec.push_back(Cigar::Unit(Cigar::Ops[Cigar::I], pseudo_intron_length));
+                    cigar_vec.push_back(Cigar::Unit(Cigar::Ops[Cigar::D], meta_intron_length));
 
                     // if (do_shrink)
                     // {
@@ -159,7 +159,7 @@ void MetaGene::Initialize(FILE * gtf_fh, size_t pseudo_intron_length)
             if (cumul_height + jump_height == 0)
             {
                 end = boundary;
-                cigar_vec.push_back(Cigar::Unit(Cigar::M, end - start));
+                cigar_vec.push_back(Cigar::Unit(Cigar::Ops[Cigar::M], end - start));
                 //this->meta_exon_tree->insert(contig.c_str(), start, end, NULL);
 
                 size_t cigar_index = cigar_vec.size() - 1;

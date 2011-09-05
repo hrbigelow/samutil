@@ -5,8 +5,8 @@
 #include <string>
 #include <stdint.h>
 #include <set>
-#include <map>
 
+#include "seq_projection.h"
 
 //class for applying coordinate transformation implied by CIGAR strings
 //
@@ -30,6 +30,8 @@
   -      n      0     n    NOT IMPLEMENTED (impossible to generate SEQ from no template)
 
   T      n      n     0    unsequenced (or re-sequenced) bases align
+  U      0      n     0    unsequenced (or re-sequenced) bases residing in a section of template that is inserted
+                           relative to the reference.
 
   X      n      n     n    bases align and mismatch
   =      n      n     n    bases align and match
@@ -38,22 +40,13 @@
 */
 
 
-struct block_offsets
-{
-    size_t jump;
-    size_t length;
-};
-
-
 namespace Cigar
 {
 
     enum OpCode
     {
-        M = 0, I, D, N, S, H, P, T
+        M = 0, I, D, N, S, H, P, T, U
     };
-
-    char OpName[] = "MIDNSHPT";
 
     //describes which three spans the length operator applies
     struct Op
@@ -65,17 +58,9 @@ namespace Cigar
         int seq;
     };
 
-    Op Ops[] =
-        { 
-            { M, 'M', 1, 1, 1 },
-            { I, 'I', 0, 1, 1 },
-            { D, 'D', 1, 0, 0 },
-            { N, 'N', 1, 0, 0 },
-            { S, 'S', 0, 1, 1 },
-            { H, 'H', 0, 1, 0 },
-            { P, 'P', 0, 0, 0 },
-            { T, 'T', 1, 1, 0 }
-        };
+    extern char const* OpName;
+
+    extern Op Ops[10];
 
     struct Unit
     {
@@ -130,9 +115,16 @@ namespace Cigar
 
     //projects a cigar from (typically) transcriptome space to genome space,
     //using 'blocks' as the projection definition
-    CIGAR_VEC Expand(std::map<size_t, block_offsets> const& blocks,
+    CIGAR_VEC Expand(std::vector<block_offsets> const& blocks,
                      CIGAR_VEC const& cigar,
                      bool use_N_as_insert);
+
+
+    //projects a cigar from (typically) genome space to transcriptome space,
+    //using 'blocks' as the projection definition
+    CIGAR_VEC Condense(std::vector<block_offsets> const& blocks,
+                       CIGAR_VEC const& cigar);
+
     
     //returns the cigar relationship CIGAR(first, second) from
     //CIGAR(ref, first) and CIGAR(ref, second).

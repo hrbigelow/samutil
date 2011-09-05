@@ -10,46 +10,6 @@
 #include "gtf.h"
 #include "file_utils.h"
 
-//use if source = genome, target = tx
-struct LessGenome2TX
-{
-    bool operator()(SequenceProjection const& a,
-                    SequenceProjection const& b)
-    {
-        return a.source_dna < b.source_dna ||
-            (a.source_dna == b.source_dna &&
-             Cigar::LeftOffset(a.cigar, true) < 
-             Cigar::LeftOffset(b.cigar, true));
-    }
-};
-
-
-//use this if source = tx, target = genome
-struct LessTX2Genome
-{
-    bool operator()(SequenceProjection const& a,
-                    SequenceProjection const& b)
-    {
-        return 
-            a.target_dna < b.target_dna ||
-            (a.target_dna == b.target_dna &&
-             Cigar::LeftOffset(a.cigar, false) < 
-             Cigar::LeftOffset(b.cigar, false));
-    }
-};
-
-
-
-bool ApplyProjectionToSAM(SequenceProjection const& projection,
-                          SequenceProjection const& mate_projection,
-                          char const* alignment_space,
-                          SamLine * first,
-                          SamLine * second,
-                          bool inserts_are_introns,
-                          bool add_cufflinks_xs_tag);
-
-SequenceProjection InvertProjection(SequenceProjection const& sp);
-
 
 class Locus
 {

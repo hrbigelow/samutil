@@ -64,8 +64,8 @@ class FragmentScore
 
     void init(char const* qcal_file, char const* contig_space_file);
 
-    int raw_score(SamLine const* a, SamLine const* b) const;
-    char alignment_space(SamLine const* a, SamLine const* b) const;
+    int raw_score(SamLine const* samline) const;
+    char alignment_space(SamLine const* samline) const;
     size_t score_table_index(int top_score, int sec_score, int given_score) const;
     bool operator()(ScoreSpace const& a, ScoreSpace const& b) const;
 };

@@ -317,7 +317,7 @@ namespace cis
             cerr<<"A maximum size of 10,000,000 is allowed for outputting raw dna sequence"<<endl;
             exit(57);
         }
-        if (seek_start_pos + start + size > seek_end_pos)
+        if (seek_start_pos + start + size > static_cast<uint64_t>(seek_end_pos))
         {
             fprintf(stderr, "Error: dna_t::sequence: Requested region %Zu to %Zu on "
                     "%s exceeds length %Zu\n", 

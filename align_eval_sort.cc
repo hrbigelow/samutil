@@ -255,6 +255,11 @@ int main_align_eval_sort(int argc, char ** argv)
     chunk_buffer = new char[max_offset_quantile];
 
     // 1. For each nth quantile, [n, n+1) of the line index:
+    fprintf(stderr, "Sorting index, chunks [0-%zu] ", num_chunks - 1);
+    fflush(stderr);
+
+    FILE * out_fh;
+
     for (size_t o = 0; o != num_chunks; ++o)
     {
         INDEX_ITER beg = offset_quantiles[o];
@@ -269,178 +274,171 @@ int main_align_eval_sort(int argc, char ** argv)
         //b. Sort main index partition [n, n+1) on key value.
         std::sort(beg, end, less_key);
 
-        //c. Print out sorted temp file
-        int file_des = mkstemp(tmp_files[o]);
-        tmp_fhs[o] = fdopen(file_des, "w");
+        //c. Print out sorted temp file, or sorted sam file, if there is a single chunk
+        if (num_chunks > 1)
+        {
+            int file_des = mkstemp(tmp_files[o]);
+            tmp_fhs[o] = fdopen(file_des, "w");
+            out_fh = tmp_fhs[o];
+        }
+        else
+        {
+            out_fh = sorted_sam_fh;
+        }
 
         for (INDEX_ITER lit = beg; lit != end; ++lit)
         {
             fwrite(chunk_buffer + (*lit).start_offset - start_file_offset, 1,
-                   (*lit).line_length, tmp_fhs[o]);
+                   (*lit).line_length, out_fh);
         }
-        fclose(tmp_fhs[o]);
+
+        if (num_chunks > 1)
+        {
+            fclose(tmp_fhs[o]);
+        }
+
+        fprintf(stderr, "%zu ", o);
+        fflush(stderr);
     }
+    fprintf(stderr, "done\n");
+    fflush(stderr);
+
     //Now ordered as (O,K) (see step b. above)
 
-    // 2. Find N quantile key values in index.  (O(N))  Now ordered as (K,K).
-    std::vector<INDEX_ITER> key_quantiles = 
-        get_quantiles(&line_index, less_key, num_chunks, ! already_sorted);
-
-
-    // 3. Calculate size of bytes in each key_quantile.
-    size_t * key_quantile_sizes = new size_t[num_chunks];
-    std::vector<LineIndex> key_quantile_linfo;
-
-    for (size_t k = 0; k != num_chunks; ++k)
+    if (num_chunks > 1)
     {
-        INDEX_ITER kit, kit_end = key_quantiles[k+1];
 
-        LineIndex sentinel = (kit_end == line_index.end())
-            ? LineIndex(INT64_MAX, INT64_MAX, 0)
-            : *kit_end;
+        // 2. Find N quantile key values in index.  (O(N))  Now ordered as (K,K).
+        std::vector<INDEX_ITER> key_quantiles = 
+            get_quantiles(&line_index, less_key, num_chunks, ! already_sorted);
 
-        key_quantile_linfo.push_back(sentinel);
 
-        size_t & kq_size = key_quantile_sizes[k];
-        kq_size = 0;
-        for (kit = key_quantiles[k]; kit != kit_end; ++kit)
+        // 3. Calculate size of bytes in each key_quantile.
+        size_t * key_quantile_sizes = new size_t[num_chunks];
+        std::vector<LineIndex> key_quantile_linfo;
+
+        for (size_t k = 0; k != num_chunks; ++k)
         {
-            kq_size += (*kit).line_length;
+            INDEX_ITER kit, kit_end = key_quantiles[k+1];
+
+            LineIndex sentinel = (kit_end == line_index.end())
+                ? LineIndex(INT64_MAX, INT64_MAX, 0)
+                : *kit_end;
+
+            key_quantile_linfo.push_back(sentinel);
+
+            size_t & kq_size = key_quantile_sizes[k];
+            kq_size = 0;
+            for (kit = key_quantiles[k]; kit != kit_end; ++kit)
+            {
+                kq_size += (*kit).line_length;
+            }
         }
-    }
-    size_t kq_size_max = 
-        *std::max_element(key_quantile_sizes, key_quantile_sizes + num_chunks);
+        size_t kq_size_max = 
+            *std::max_element(key_quantile_sizes, key_quantile_sizes + num_chunks);
 
-    delete key_quantile_sizes;
+        delete key_quantile_sizes;
 
-    // 4. Allocate chunk of memory to hold biggest key_quantile
-    delete chunk_buffer;
-    chunk_buffer = new char[kq_size_max];
+        // 4. Allocate chunk of memory to hold biggest key_quantile
+        delete chunk_buffer;
+        chunk_buffer = new char[kq_size_max];
 
-    // 5. Re-partition index by offset_quantiles.  Now ordered as (O,.)
-    get_quantiles(&line_index, less_offset, num_chunks, ! already_sorted);
+        // 5. Re-partition index by offset_quantiles.  Now ordered as (O,.)
+        get_quantiles(&line_index, less_offset, num_chunks, ! already_sorted);
 
-    // order each quantile by key
-    for (size_t o = 0; o != num_chunks; ++o)
-    {
-        std::sort(offset_quantiles[o], offset_quantiles[o+1], less_key);
-    }
-
-    // 6. For each key_quantile kq
-    for (size_t o = 0; o != num_chunks; ++o)
-    {
-        tmp_fhs[o] = fopen(tmp_files[o], "r");
-    }
-
-    char * write_pointer;
-    std::vector<INDEX_ITER> prev_sub_k(offset_quantiles.size() - 1);
-    std::copy(offset_quantiles.begin(), offset_quantiles.end() - 1, prev_sub_k.begin());
-
-    size_t S, buffer_pos, last_merged_size;
-    INDEX_ITER beg, end, sub_k;
-    size_t part;
-    std::vector<LineIndex> merged;
-
-    size_t num_total_lines = 0;
-    size_t num_chunk_lines = 0;
-
-    size_t num_total_lines_skipped = 0;
-    size_t num_chunk_lines_skipped = 0;
-
-    for (size_t k = 0; k != num_chunks; ++k)
-    {
-        write_pointer = chunk_buffer;
-        merged.clear();
-
-        //load kq range of each tmp file into the buffer
-        buffer_pos = 0;
+        // order each quantile by key
         for (size_t o = 0; o != num_chunks; ++o)
         {
-            beg = prev_sub_k[o];
-            end = offset_quantiles[o+1];
-            sub_k = std::lower_bound(beg, end, key_quantile_linfo[k], less_key);
+            std::sort(offset_quantiles[o], offset_quantiles[o+1], less_key);
+        }
 
-            assert(__gnu_cxx::is_sorted(beg, end, less_key));
+        // 6. For each key_quantile kq
+        for (size_t o = 0; o != num_chunks; ++o)
+        {
+            tmp_fhs[o] = fopen(tmp_files[o], "r");
+        }
 
-            part = std::distance(beg, sub_k);
+        char * write_pointer;
+        std::vector<INDEX_ITER> prev_sub_k(offset_quantiles.size() - 1);
+        std::copy(offset_quantiles.begin(), offset_quantiles.end() - 1, prev_sub_k.begin());
 
-            // fprintf(stdout, "key %Zu, offset %Zu, num_lines: %Zu\n",
-            //         k, o, part);
+        size_t S, buffer_pos, last_merged_size;
+        INDEX_ITER beg, end, sub_k;
+        size_t part;
+        std::vector<LineIndex> merged;
 
-            S = 0;
-            for (INDEX_ITER kit = beg; kit != sub_k; ++kit)
+        size_t num_total_lines = 0;
+        size_t num_chunk_lines = 0;
+
+        for (size_t k = 0; k != num_chunks; ++k)
+        {
+            write_pointer = chunk_buffer;
+            merged.clear();
+
+            //load kq range of each tmp file into the buffer
+            buffer_pos = 0;
+            for (size_t o = 0; o != num_chunks; ++o)
             {
-                (*kit).start_offset = S + buffer_pos;
-                S += (*kit).line_length;
-            }
-            fread(write_pointer, 1, S, tmp_fhs[o]);
-            write_pointer += S;
-            buffer_pos += S;
+                beg = prev_sub_k[o];
+                end = offset_quantiles[o+1];
+                sub_k = std::lower_bound(beg, end, key_quantile_linfo[k], less_key);
 
-            if (buffer_pos > kq_size_max)
-            {
-                fprintf(stderr, "buffer_pos: %Zu, kq_size_max: %Zu, o: %Zu, k: %Zu\n",
-                        buffer_pos, kq_size_max, o, k);
-            }
-            assert(buffer_pos <= kq_size_max);
+                assert(__gnu_cxx::is_sorted(beg, end, less_key));
+
+                part = std::distance(beg, sub_k);
+
+                // fprintf(stdout, "key %Zu, offset %Zu, num_lines: %Zu\n",
+                //         k, o, part);
+
+                S = 0;
+                for (INDEX_ITER kit = beg; kit != sub_k; ++kit)
+                {
+                    (*kit).start_offset = S + buffer_pos;
+                    S += (*kit).line_length;
+                }
+                fread(write_pointer, 1, S, tmp_fhs[o]);
+                write_pointer += S;
+                buffer_pos += S;
+
+                if (buffer_pos > kq_size_max)
+                {
+                    fprintf(stderr, "buffer_pos: %Zu, kq_size_max: %Zu, o: %Zu, k: %Zu\n",
+                            buffer_pos, kq_size_max, o, k);
+                }
+                assert(buffer_pos <= kq_size_max);
             
 
-            last_merged_size = merged.size();
-            merged.insert(merged.end(), beg, sub_k);
+                last_merged_size = merged.size();
+                merged.insert(merged.end(), beg, sub_k);
 
-            std::inplace_merge(merged.begin(), merged.begin() + last_merged_size, 
-                               merged.end(), less_key);
+                std::inplace_merge(merged.begin(), merged.begin() + last_merged_size, 
+                                   merged.end(), less_key);
 
-            // fprintf(stdout, "key %Zu, offset %Zu, added: %Zu, num_lines: %Zu\n",
-            //         k, o, part, merged.size());
+                // fprintf(stdout, "key %Zu, offset %Zu, added: %Zu, num_lines: %Zu\n",
+                //         k, o, part, merged.size());
 
-            prev_sub_k[o] = sub_k;
-        }
-
-        num_total_lines += merged.size();
-        num_chunk_lines = merged.size();
-        num_chunk_lines_skipped = 0;
-
-        if (filter_duplicates)
-        {
-            size_t prev_index = SIZE_MAX;
-            for (INDEX_ITER mit = merged.begin(); mit != merged.end(); ++mit)
-            {
-                if (prev_index != (*mit).index)
-                {
-                    fwrite(chunk_buffer + (*mit).start_offset, 1,
-                           (*mit).line_length, sorted_sam_fh);
-                }
-                else
-                {
-                    ++num_chunk_lines_skipped;
-                }
-                prev_index = (*mit).index;
+                prev_sub_k[o] = sub_k;
             }
-        }
-        else
-        {
+
+            num_total_lines += merged.size();
+            num_chunk_lines = merged.size();
+
             for (INDEX_ITER mit = merged.begin(); mit != merged.end(); ++mit)
             {
                 fwrite(chunk_buffer + (*mit).start_offset, 1,
                        (*mit).line_length, sorted_sam_fh);
             }
+
+            fprintf(stdout, "Chunk %Zu: %Zu lines printed.\n", k, num_chunk_lines);
         }
-
-        num_total_lines_skipped += num_chunk_lines_skipped;
-
-        fprintf(stdout, "Chunk %Zu: %Zu lines printed, %Zu lines skipped.\n",
-                k, num_chunk_lines - num_chunk_lines_skipped,
-                num_chunk_lines_skipped);
-
-    }
     
-    for (size_t o = 0; o != num_chunks; ++o)
-    {
-        fclose(tmp_fhs[o]);
-        remove(tmp_files[o]);
+        for (size_t o = 0; o != num_chunks; ++o)
+        {
+            fclose(tmp_fhs[o]);
+            remove(tmp_files[o]);
+        }
     }
-        
+
     close_if_present(alignment_sam_fh);
     close_if_present(sorted_sam_fh);
     close_if_present(sam_header_fh);
@@ -451,9 +449,7 @@ int main_align_eval_sort(int argc, char ** argv)
     delete tmp_fhs;
     delete tmp_file_buf;
 
-    fprintf(stdout, "%Zu lines printed, %Zu lines skipped.\n", 
-            num_total_lines - num_total_lines_skipped,
-            num_total_lines_skipped);
+    fprintf(stdout, "%Zu lines printed.\n", line_index.size());
 
     return 0;
 }

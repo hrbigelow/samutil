@@ -351,8 +351,6 @@ int main_sim_reads(int argc, char ** argv)
 
     CONTIG_OFFSETS::const_iterator contig_iter = sam_order.contig_offsets.begin();
 
-    LessSAMLinePair sam_pair_less_fcn(&sam_order);
-
     FILE * output_sam_fh = open_if_present(output_sam_file, "w");
 
     //the coordinate transformation will be a transcript->genome input

@@ -11,6 +11,10 @@
 int align_eval_raw_usage(char const* sdef, size_t mdef);
 int main_align_eval_raw(int argc, char ** argv);
 
+
+//describes jumps for evaluating alignment accuracy in comparison with
+//a simulated alignment.  For efficiency, also holds a pointer to the
+//contig offsets in a flattened coordinate system.
 struct Feature
 {
     int guide_jumps : 20;
@@ -36,15 +40,15 @@ struct read_coords
     size_t read_id; //unique identifier for the read (combination of fragment_id and read-number (1 or 2)
     char contig[1024];
     bool pos_stranded;
-    size_t position;
-    char cigar[10000];
+    /* size_t position; */
+    std::vector<block_offsets> blocks;
     size_t fragment_size;
     size_t num_errors;
 };
 
 
-void CigarFromSimSAMLine(char const* readname, bool first_in_pair,
-                         bool guide_is_ones_based,
-                         read_coords * guide_coords);
+void ParseSimReadCoords(char const* readname, bool first_in_pair,
+                        bool guide_is_ones_based,
+                        read_coords * guide_coords);
 
 #endif // _ALIGN_EVAL_RAW_H

@@ -102,8 +102,10 @@ SamBuffer::insert(SamLine const* entry)
 {
     std::pair<SamLine const*, bool> result(static_cast<SamLine const*>(NULL), false);
 
-    if (! entry->paired_in_sequencing())
+    if (! entry->multi_fragment_template()
+        || )
     {
+        //this entry is complete.
         std::pair<SINGLE_READ_SET::iterator, bool> insert = 
             this->unique_entries.insert(entry);
         assert(insert.second);
@@ -158,16 +160,17 @@ SamBuffer::insert(SamLine const* entry)
                     fprintf(stderr, "SAM format error: inappropriate 'isize' fields.  Should be "
                             "positive for left and negative for right-most reads\n"
                             "Entries:\n");
-                    left->print(stderr, false);
-                    right->print(stderr, false);
+                    left->print_sam(stderr);
+                    right->print_sam(stderr);
                     exit(1);
                 }
 
-                SamLine * line_array[] = { left, right };
+                SamLine const* line_array[] = { left, right };
 
                 SamLine * merged = new SamLine(line_array, 2, read_layout);
                 
-                std::pair<SINGLE_READ_SET::iterator, bool> insert = this->unique_entries.insert(merged);
+                std::pair<SINGLE_READ_SET::iterator, bool> 
+                    insert_success = this->unique_entries.insert(merged);
                 
                 if (insert_success.second)
                 {
@@ -232,6 +235,7 @@ SamBuffer::insert(SamLine const* entry)
 void SamBuffer::purge(FILE * output_sam_fh, 
                       FILE * output_first_fastq_fh, 
                       FILE * output_second_fastq_fh, 
+                      bool output_rsam_format,
                       SamLine const* low_bound)
 {
 
@@ -297,10 +301,11 @@ void SamBuffer::purge(FILE * output_sam_fh,
         SINGLE_READ_SET::const_iterator iter;
         for (iter = this->unique_entries.begin(); iter != unique_bound; ++iter)
         {
-            print_paired_fastq_entries(output_first_fastq_fh,
-                                       output_second_fastq_used_fh,
-                                       (*iter).first,
-                                       (*iter).second);
+            assert(false);
+            // print_paired_fastq_entries(output_first_fastq_fh,
+            //                            output_second_fastq_used_fh,
+            //                            (*iter).first,
+            //                            (*iter).second);
         }
     }
 
@@ -309,26 +314,23 @@ void SamBuffer::purge(FILE * output_sam_fh,
 
     for (iter = this->unique_entries.begin(); iter != unique_bound; ++iter)
     {
-        SamLine const* first = (*iter).first;
-        SamLine const* second = (*iter).second;
+        SamLine const* samline = *iter;
 
         if (output_sam_fh != NULL)
         {
-            first->print(output_sam_fh, 
-                         this->output_pairs_as_same_strand 
-                         && first->second_read_in_pair());
-
-            second->print(output_sam_fh, 
-                          this->output_pairs_as_same_strand 
-                          && second->second_read_in_pair());
+            if (output_rsam_format)
+            {
+                samline->print_rsam(output_sam_fh);
+            }
+            else
+            {
+                samline->print_sam(output_sam_fh);
+            }
+            // first->print(output_sam_fh, 
+            //              this->output_pairs_as_same_strand 
+            //              && first->second_read_in_pair());
         }
-
-        //since the unique_bound contains the
-        // assert(first != low_bound);
-        // assert(second != low_bound);
-
-        delete first;
-        delete second;
+        delete samline;
     }
 
     //fprintf(stderr, "unique_read_pairs.size(): %Zu ...", this->unique_read_pairs.size());
@@ -341,18 +343,25 @@ void SamBuffer::purge(FILE * output_sam_fh,
     for (read_iter = this->incomplete_entries.begin();
          read_iter != incomplete_bound; ++read_iter)
     {
-        SamLine const* cur_read = *read_iter;
-        bool flip_query_strand_flag = this->output_pairs_as_same_strand &&
-            cur_read->second_read_in_pair();
+        SamLine const* samline = *read_iter;
+        // bool flip_query_strand_flag = this->output_pairs_as_same_strand &&
+        //     samline->second_read_in_pair();
 
         if (output_sam_fh != NULL)
         {
-            cur_read->print(output_sam_fh, flip_query_strand_flag);
+            if (output_rsam_format)
+            {
+                samline->print_rsam(output_sam_fh);
+            }
+            else
+            {
+                samline->print_sam(output_sam_fh);
+            }
         }
         
         // assert(*read_iter != low_bound);
-        assert(this->incomplete_entries.find(cur_read) == this->incomplete_entries.end());
-        delete cur_read;
+        assert(this->incomplete_entries.find(samline) == this->incomplete_entries.end());
+        delete samline;
     }
     //fprintf(stderr, "incomplete_entries.size(): %Zu ...", this->incomplete_entries.size());
     this->incomplete_entries.erase(this->incomplete_entries.begin(), incomplete_bound);

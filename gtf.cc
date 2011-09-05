@@ -1,5 +1,7 @@
 #include "gtf.h"
 
+#include "seq_projection.h"
+
 #include <set>
 #include <cstring>
 
@@ -85,17 +87,14 @@ void GTFEntry::print(FILE * gtf_fh)
 SequenceProjection::SequenceProjection(char const* _species,
                                        char const* _source_dna,
                                        char const* _target_dna,
-                                       char const* _strand_string,
-                                       int64_t offset,
-                                       char const* cigar_string)
+                                       char _strand_char,
+                                       std::vector<block_offsets> const& _blocks)
 {
     species = std::string(_species);
     source_dna = std::string(_source_dna);
     target_dna = std::string(_target_dna);
-    same_strand = _strand_string[0] == '+';
-
-    cigar = Cigar::FromString(cigar_string, offset);
-    cigar_index = Cigar::ComputeOffsets(cigar);
+    same_strand = _strand_char == '+';
+    transformation = _blocks;
 }
 
 
@@ -103,21 +102,21 @@ SequenceProjection::SequenceProjection(char const* _species,
 bool SequenceProjection::operator<(SequenceProjection const& b) const
 {
     
-    int64_t a_left_offset = Cigar::LeftOffset(this->cigar, true);
-    int64_t b_left_offset = Cigar::LeftOffset(b.cigar, true);
+    int64_t a_left_offset = this->transformation.empty() ? 0 : this->transformation[0].jump_length;
+    int64_t b_left_offset = b.transformation.empty() ? 0 : b.transformation[0].jump_length;
 
-    int64_t a_right_neg_offset = - Cigar::RightOffset(this->cigar, true);
-    int64_t b_right_neg_offset = - Cigar::RightOffset(b.cigar, true);
+    // int64_t a_right_neg_offset = - Cigar::RightOffset(this->cigar, true);
+    // int64_t b_right_neg_offset = - Cigar::RightOffset(b.cigar, true);
 
     return this->source_dna < b.source_dna ||
         (this->source_dna == b.source_dna &&
          (a_left_offset < b_left_offset ||
           (a_left_offset == b_left_offset &&
-           (a_right_neg_offset < b_right_neg_offset ||
-            (a_right_neg_offset == b_right_neg_offset &&
+           // (a_right_neg_offset < b_right_neg_offset ||
+           //  (a_right_neg_offset == b_right_neg_offset &&
              (this->target_dna < b.target_dna ||
               (this->target_dna == b.target_dna &&
-               (this->same_strand < b.same_strand))))))));
+               (this->same_strand < b.same_strand))))));
 }
 
 
@@ -128,21 +127,16 @@ bool SequenceProjection::operator<(SequenceProjection const& b) const
 bool LessSequenceProjectionTarget::operator()(SequenceProjection const& a,
                                               SequenceProjection const& b) const
 {
-    int64_t a_left_offset = Cigar::LeftOffset(a.cigar, false);
-    int64_t b_left_offset = Cigar::LeftOffset(b.cigar, false);
+    int64_t a_left_offset = a.transformation.empty() ? 0 : a.transformation[0].jump_length;
+    int64_t b_left_offset = b.transformation.empty() ? 0 : b.transformation[0].jump_length;
     
-    int64_t a_right_offset = Cigar::Length(a.cigar, false);
-    int64_t b_right_offset = Cigar::Length(b.cigar, false);
-
     return a.target_dna < b.target_dna ||
         (a.target_dna == b.target_dna &&
          (a_left_offset < b_left_offset ||
           (a_left_offset == b_left_offset &&
-           (a_right_offset < b_right_offset ||
-            (a_right_offset == b_right_offset &&
-             (a.source_dna < b.source_dna ||
-              (a.source_dna == b.source_dna &&
-               a.same_strand < b.same_strand)))))));
+           (a.source_dna < b.source_dna ||
+            (a.source_dna == b.source_dna &&
+             a.same_strand < b.same_strand)))));
 }
 
 
@@ -268,46 +262,35 @@ gtf_to_sequence_projection(char const* gtf_file, char const* species)
     SP_SET sequence_projection;
     std::pair<SP_SET::iterator, bool> sp_inserter;
 
+
     TRANSCRIPTS::iterator tx_iter;
     for (tx_iter = transcripts.begin(); tx_iter != transcripts.end(); ++tx_iter)
     {
         unique_transcript const& transcript = (*tx_iter).first;
         EXONS const& exons = (*tx_iter).second;
+        EXONS::const_iterator it;
 
         assert(! exons.empty());
-
-        //construct a cigar_string from a well-ordered set of exons
-        Cigar::CIGAR_VEC cigar;
-        EXONS::iterator eit = exons.begin();
-        EXONS::iterator last_eit = exons.begin();
-
-        size_t start_on_genome = (*eit).start_boundary;
-        cigar.push_back(Cigar::Unit(Cigar::M, 
-                                    (*eit).end_boundary - 
-                                    (*eit).start_boundary));
-        ++eit;
-        for (; eit != exons.end(); ++eit, ++last_eit)
-        {
-            cigar.push_back(Cigar::Unit(Cigar::D,
-                                        (*eit).start_boundary 
-                                        - (*last_eit).end_boundary));
-            cigar.push_back(Cigar::Unit(Cigar::M,
-                                        (*eit).end_boundary - 
-                                        (*eit).start_boundary));
-        }
-        
-        char * cigar_string = new char[cigar.size() * 10]; //(assume each op can have a 9-digit number
-        Cigar::ToString(cigar.begin(), cigar.end(), cigar_string);
-
-        char strand_string[2] = ".";
-        strand_string[0] = transcript.strand;
 
         SequenceProjection 
             sp(species, 
                transcript.contig_name.c_str(), 
                transcript.transcript_id.c_str(),
-               strand_string, start_on_genome, cigar_string);
+               transcript.strand, 
+               std::vector<block_offsets>());
 
+        size_t last_end_boundary = 0;
+
+        for (it = exons.begin(); it != exons.end(); ++it)
+        {
+            sp.transformation.push_back
+                (block_offsets((*it).start_boundary - last_end_boundary,
+                               (*it).end_boundary - (*it).start_boundary));
+
+            last_end_boundary = (*it).end_boundary;
+            sp.total_block_length += (*it).end_boundary - (*it).start_boundary;
+        }
+        
         sp_inserter = sequence_projection.insert(sp);
 
         if (! sp_inserter.second)
@@ -319,9 +302,6 @@ gtf_to_sequence_projection(char const* gtf_file, char const* species)
                     sp.target_dna.c_str());
             exit(1);
         }
-        delete cigar_string;
     }
-
     return sequence_projection;
-    
 }

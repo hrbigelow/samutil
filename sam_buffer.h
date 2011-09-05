@@ -89,7 +89,7 @@ struct LessSAMLinePair
     LessSAMLinePair(SamOrder const* _so = NULL) : sam_order(_so) { }
     bool operator()(SAMPTR_PAIR const& a, SAMPTR_PAIR const& b);
 };
-
+*/
 
 struct LessSAMLinePtrMatePair
 {
@@ -97,7 +97,6 @@ struct LessSAMLinePtrMatePair
     LessSAMLinePtrMatePair(SamOrder const* _so = NULL) : sam_order(_so) { }
     bool operator()(SamLine const* a, SamLine const* b);
 };
-*/
 
 
 
@@ -117,7 +116,7 @@ class SamBuffer
     //if known, this marks the lowest possible contig position that any 
     //new read will have
     LessSAMLinePtr less_ordering;
-    //LessSAMLinePtrMatePair less_entry_matepair;
+    LessSAMLinePtrMatePair less_entry_matepair;
 
  public:
 
@@ -146,6 +145,7 @@ class SamBuffer
     void purge(FILE * output_sam_fh, 
                FILE * output_first_fastq_fh, 
                FILE * output_second_fastq_fh, 
+               bool output_rsam_format,
                SamLine const* low_bound);
 
 };

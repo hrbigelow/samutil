@@ -30,6 +30,7 @@
 #include "sam_helper.h"
 #include "sam_order.h"
 #include "dep/tools.h"
+#include "seq_projection.h"
 #include "align_eval_raw.h"
 
 
@@ -97,12 +98,11 @@ bool remember_read(size_t read_id, std::vector<char> * seen_ids)
 }
 
 
-void CigarFromSimSAMLine(char const* readname, bool first_in_pair,
-                         bool guide_is_ones_based_pos,
-                         read_coords * guide_coords)
+void ParseSimReadCoords(char const* readname, bool first_in_pair,
+                        read_coords * guide_coords)
 {
 
-    int ones_adjust = guide_is_ones_based_pos ? 1 : 0;
+    int ones_adjust = 1;
     char strand;
 
     size_t num_fields = sscanf(readname, "%zu:", &guide_coords->fragment_id);
@@ -112,6 +112,9 @@ void CigarFromSimSAMLine(char const* readname, bool first_in_pair,
                 "Please see 'readsim'\n", readname);
         exit(1);
     }
+
+    char sim_projection[1024];
+    size_t start_position;
 
     if (first_in_pair)
     {
@@ -125,9 +128,14 @@ void CigarFromSimSAMLine(char const* readname, bool first_in_pair,
             sscanf(read1_str, "read1:%[^:]:%c:%zu:%[^:]:%zu", 
                    guide_coords->contig, 
                    &strand, 
-                   &guide_coords->position,
-                   guide_coords->cigar,
+                   &start_position,
+                   sim_projection,
                    &guide_coords->num_errors);
+
+        guide_coords->blocks = InitFromMDString(sim_projection);
+        assert(! guide_coords->blocks.empty());
+        assert(guide_coords->blocks[0].jump_length == 0);
+        guide_coords->blocks[0].jump_length = start_position - ones_adjust;
 
         assert(num_fields == 5);
     }
@@ -145,9 +153,14 @@ void CigarFromSimSAMLine(char const* readname, bool first_in_pair,
             sscanf(read2_str, "read2:%[^:]:%c:%zu:%[^:]:%zu", 
                    guide_coords->contig, 
                    &strand, 
-                   &guide_coords->position,
-                   guide_coords->cigar,
+                   &start_position,
+                   sim_projection,
                    &guide_coords->num_errors);
+
+        guide_coords->blocks = InitFromMDString(sim_projection);
+        assert(! guide_coords->blocks.empty());
+        assert(guide_coords->blocks[0].jump_length == 0);
+        guide_coords->blocks[0].jump_length = start_position - ones_adjust;
 
         assert(num_fields == 5);
     }
@@ -171,7 +184,6 @@ void CigarFromSimSAMLine(char const* readname, bool first_in_pair,
     }
 
     guide_coords->read_id = (guide_coords->fragment_id<<1) + (first_in_pair ? 0 : 1);
-    guide_coords->position -= ones_adjust;
     guide_coords->pos_stranded = (strand == '+');
 }
 
@@ -296,7 +308,6 @@ int main_align_eval_raw(int argc, char ** argv)
     std::fill(primary_alignment_mapq, primary_alignment_mapq + 256, 0);
 
     read_coords guide_coords;
-    bool guide_is_ones_based_pos = true;
 
     size_t num_read_id_bytes = 1000000;
 
@@ -335,16 +346,16 @@ int main_align_eval_raw(int argc, char ** argv)
     std::map<size_t, guide_used> total_by_oplen;
     std::map<size_t, guide_used> total_by_fragsize;
 
+    std::vector<block_offsets>::const_iterator gi;
 
     samline = new SamLine(alignment_sam_fh, allow_absent_seq_qual);
 
     while (samline->parse_flag == DATA_LINE)
     {
-        CigarFromSimSAMLine(samline->qname, 
-                            samline->first_read_in_pair(),
-                            guide_is_ones_based_pos,
-                            &guide_coords);
-
+        ParseSimReadCoords(samline->qname, 
+                           samline->first_fragment_in_template(),
+                           &guide_coords);
+        
         assert(num_used_bases == num_correct_bases + num_error_bases + num_trimmed_bases);
         assert(num_total_bases == num_used_bases + num_skipped_bases);
         assert((! require_primary_alignment) || (num_used_bases <= num_guide_bases));
@@ -369,7 +380,7 @@ int main_align_eval_raw(int argc, char ** argv)
 
         assert(guide_offset_iter != sam_order.contig_offsets.end());
         
-        size_t guide_flat_low_bound = (*guide_offset_iter).second + guide_coords.position;
+        size_t guide_flat_low_bound = (*guide_offset_iter).second + guide_coords.blocks[0].jump_length;
 
         //any cumulative even before this low bound may be printed and purged
         new_feature_bound = std::min(guide_flat_low_bound, align_flat_low_bound);
@@ -423,57 +434,46 @@ int main_align_eval_raw(int argc, char ** argv)
 
         bool seen_this_read = remember_read(guide_coords.read_id, &seen_read_ids);
 
-        Cigar::CIGAR_VEC guide_cigar = 
-            Cigar::FromString(guide_coords.cigar, guide_coords.position);
+        assert(! guide_coords.blocks.empty());
 
-        size_t first_guide_op_len = guide_cigar[1].length;
+        size_t first_guide_op_len = guide_coords.blocks[0].block_length;
 
-        this_num_guide_bases = Cigar::Length(guide_cigar, false);
+        this_num_guide_bases = 0;
+        for (gi = guide_coords.blocks.begin(); gi != guide_coords.blocks.end(); ++gi)
+        {
+            this_num_guide_bases += (*gi).block_length;
+        }
 
         num_total_bases += this_num_guide_bases;
 
         if (! seen_this_read)
         {
+            //this is the first alignment of the fragment that we've
+            //seen.  for this time only, initialize the guide jumps
+            //and tallies that pertain to the simulation statistics.
+
             total_by_oplen[first_guide_op_len].guide++;
             total_by_fragsize[guide_coords.fragment_size].guide++;
 
+            //initialize the feature bound to be the start position of
+            //the contig within the meta_contig
             feature_bound = guide_offset_iter->second;
-            for (Cigar::CIGAR_ITER gi = guide_cigar.begin(); gi != guide_cigar.end(); ++gi)
+            
+            for (gi = guide_coords.blocks.begin(); gi != guide_coords.blocks.end(); ++gi)
             {
-                switch((*gi).op)
-                {
-                case Cigar::M:
-                    {
-                        assert(old_feature_bound <= feature_bound);
-
-                        Feature & start_feature = ordered_features[feature_bound];
-                        start_feature.guide_jumps++;
-                        start_feature.offset_iter = guide_offset_iter;
-                        
-                        //this could be a bug, if we allow guide reads to
-                        //be fusions across contigs. !!!
-                        Feature & end_feature = ordered_features[feature_bound + (*gi).length];
-                        end_feature.guide_jumps--;
-                        end_feature.offset_iter = guide_offset_iter;
-                        
-                        feature_bound += (*gi).length;
-                        num_guide_bases += (*gi).length;
-
-                    }
-                    break;
-                case Cigar::I:
-                    assert(false);
-                    break;
-                case Cigar::D:
-                case Cigar::N:
-                case Cigar::H:
-                case Cigar::P:
-                    feature_bound += (*gi).length;
-                    break;
-                case Cigar::S:
-                case Cigar::None:
-                    break;
-                }
+                assert(old_feature_bound <= feature_bound);
+                feature_bound += (*gi).jump_length;
+                
+                Feature & start_feature = ordered_features[feature_bound];
+                start_feature.guide_jumps++;
+                start_feature.offset_iter = guide_offset_iter;
+                
+                Feature & end_feature = ordered_features[feature_bound + (*gi).block_length];
+                end_feature.guide_jumps--;
+                end_feature.offset_iter = guide_offset_iter;
+                
+                feature_bound += (*gi).block_length;
+                num_guide_bases += (*gi).block_length;
             }
         }
 
@@ -502,26 +502,22 @@ int main_align_eval_raw(int argc, char ** argv)
 
         if (require_primary_alignment && used_this_read)
         {
-            fprintf(stderr, "Error: requiring primary alignment, but have used this read before:\n");
-            samline->print(stderr, false);
+            fprintf(stderr, "Error: requiring primary alignment, but have used this template before:\n");
+            samline->print_sam(stderr);
             exit(1);
         }
                     
         Cigar::CIGAR_VEC test_cigar = Cigar::FromString(samline->cigar, samline->zero_based_pos());
 
-        std::multiset<std::pair<size_t, size_t> > guide_cigar_index =
-            Cigar::ComputeOffsets(guide_cigar);
-
-
         size_t this_num_correct_bases = 0;
         //tally the correct and incorrect features
         if (guide_offset_iter == align_offset_iter &&
-            guide_coords.pos_stranded == samline->query_on_pos_strand())
+            guide_coords.pos_stranded == samline->this_fragment_on_pos_strand())
         {
             //alignment is at least on the right contig and strand.
             //appropriate to do the merge.
             Cigar::CIGAR_VEC merge_cigar = 
-                Cigar::TransitiveMerge(guide_cigar, guide_cigar_index, test_cigar, true, false);
+                Cigar::Condense(guide_coords.blocks, test_cigar);
 
             size_t guide_read_pos = 0;
             size_t test_read_pos = 0;
@@ -542,7 +538,7 @@ int main_align_eval_raw(int argc, char ** argv)
                 Feature & end_feature = ordered_features[feature_bound + unit.length];
                 end_feature.offset_iter = guide_offset_iter;
 
-                switch(unit.op)
+                switch(unit.op.code)
                 {
                 case Cigar::M:
                     assert(old_feature_bound <= feature_bound);
@@ -594,8 +590,12 @@ int main_align_eval_raw(int argc, char ** argv)
                     break;
 
                 case Cigar::S:
-                case Cigar::None:
                     //this shouldn't happen since we're dealing with a merged CIGAR
+                    assert(false);
+                    break;
+
+                case Cigar::T:
+                case Cigar::U:
                     assert(false);
                     break;
                 }
@@ -625,15 +625,15 @@ int main_align_eval_raw(int argc, char ** argv)
             feature_bound = align_offset_iter->second;
 
             if (guide_offset_iter == align_offset_iter &&
-                guide_coords.pos_stranded != samline->query_on_pos_strand() &&
-                guide_coords.position == samline->zero_based_pos())
+                guide_coords.pos_stranded != samline->this_fragment_on_pos_strand() &&
+                guide_coords.blocks[0].jump_length == samline->zero_based_pos())
             {
                 //samline->print(stderr, false);
             }
 
             for (Cigar::CIGAR_ITER ti = test_cigar.begin(); ti != test_cigar.end(); ++ti)
             {
-                switch((*ti).op)
+                switch((*ti).op.code)
                 {
                 case Cigar::M:
                     {
@@ -660,7 +660,11 @@ int main_align_eval_raw(int argc, char ** argv)
                     feature_bound += (*ti).length;
                     break;
                 case Cigar::S:
-                case Cigar::None:
+                    break;
+
+                case Cigar::T:
+                case Cigar::U:
+                    assert(false);
                     break;
                 }
             }

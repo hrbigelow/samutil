@@ -7,6 +7,7 @@
 #include <string>
 #include <cassert>
 #include <map>
+#include <functional>
 
 #ifdef __GXX_EXPERIMENTAL_CXX0X__
 #include <unordered_map>
@@ -17,14 +18,14 @@
 //flag masks.  When set, these flags proclaim their name
 namespace SamFlags
 {
-    extern int const PAIRED_IN_SEQUENCING;
-    extern int const MAPPED_IN_PROPER_PAIR;
-    extern int const QUERY_UNMAPPED;
-    extern int const MATE_UNMAPPED;
-    extern int const QUERY_ON_NEG_STRAND;
-    extern int const MATE_ON_NEG_STRAND;
-    extern int const FIRST_READ_IN_PAIR;
-    extern int const SECOND_READ_IN_PAIR;
+    extern int const MULTI_FRAGMENT_TEMPLATE;
+    extern int const ALL_FRAGMENTS_MAPPED;
+    extern int const THIS_FRAGMENT_UNMAPPED;
+    extern int const NEXT_FRAGMENT_UNMAPPED;
+    extern int const THIS_FRAGMENT_ON_NEG_STRAND;
+    extern int const NEXT_FRAGMENT_ON_NEG_STRAND;
+    extern int const FIRST_FRAGMENT_IN_TEMPLATE;
+    extern int const LAST_FRAGMENT_IN_TEMPLATE;
     extern int const ALIGNMENT_NOT_PRIMARY;
     extern int const FAILED_QUALITY_CHECK;
     extern int const PCR_OR_OPTICAL_DUPLICATE;
@@ -63,21 +64,25 @@ struct eqstr
 };
 
 
-struct to_integer
+#ifdef __GXX_EXPERIMENTAL_CXX0X__
+typedef std::hash<std::string> STRING_HASH;
+struct to_integer : public STRING_HASH
 {
     size_t operator()(char const* k) const;
 };
-
-
-#ifdef __GXX_EXPERIMENTAL_CXX0X__
 typedef std::unordered_map<char const*, char, to_integer, eqstr> CONTIG_SPACE;
 typedef std::unordered_map<char const*, size_t, to_integer, eqstr> CONTIG_OFFSETS;
 #else
+struct to_integer : public STRING_HASH
+{
+    size_t operator()(char const* k) const;
+};
 typedef std::tr1::unordered_map<char const*, char, to_integer, eqstr> CONTIG_SPACE;
 typedef std::tr1::unordered_map<char const*, size_t, to_integer, eqstr> CONTIG_OFFSETS;
 #endif
 
 typedef CONTIG_OFFSETS::const_iterator OFFSETS_ITER;
+
 
 
 #define AlignSpaceTag "XP"
@@ -115,7 +120,7 @@ V parse_sam_tag(char const* tag_string,
   Storage policy:
   line, extra, and extra_tag own the memory they point to.
   all other pointers point to offsets within them.
-  qname, rname, mrnm, seq, and qual always point into line.
+  qname, rname, rnext, seq, and qual always point into line.
   cigar may point into line or extra
   tag_string may point into line or extra_tag
  */
@@ -134,8 +139,8 @@ public:
     size_t pos;
     size_t mapq;
     char * cigar;
-    char * mrnm;
-    size_t mpos;
+    char * rnext;
+    size_t pnext;
     int isize;
     char * seq;
     char * qual;
@@ -150,7 +155,7 @@ public:
             char const* _qname, int _flag, 
             char const* _rname, size_t _pos,
             size_t _mapq, char const* cigar,
-            char const* _mrnm, size_t _mpos,
+            char const* _rnext, size_t _pnext,
             int _isize, char const* _seq,
             char const* _qual,
             char const* _tag_string);
@@ -180,6 +185,7 @@ public:
 
     SAM_PARSE load(FILE * seqfile);
 
+    void print(FILE * samfile, bool print_rsam) const;
     void print_sam(FILE * samfile) const;
     void print_rsam(FILE * samfile) const;
 
@@ -200,23 +206,23 @@ public:
     size_t ones_based_pos() const { return this->pos + 1; }
     size_t zero_based_pos() const { return this->pos; }
 
-    bool paired_in_sequencing() const { return (this->flag & SamFlags::PAIRED_IN_SEQUENCING) != 0; }
-    bool mapped_in_proper_pair() const { return (this->flag & SamFlags::MAPPED_IN_PROPER_PAIR) != 0; }
-    bool query_unmapped() const { return ((this->flag & SamFlags::QUERY_UNMAPPED)) != 0; }
-    bool mate_unmapped() const { return (this->flag & SamFlags::MATE_UNMAPPED) != 0; }
+    bool multi_fragment_template() const { return (this->flag & SamFlags::MULTI_FRAGMENT_TEMPLATE) != 0; }
+    bool all_fragments_mapped() const { return (this->flag & SamFlags::ALL_FRAGMENTS_MAPPED) != 0; }
+    bool this_fragment_unmapped() const { return ((this->flag & SamFlags::THIS_FRAGMENT_UNMAPPED)) != 0; }
+    bool next_fragment_unmapped() const { return (this->flag & SamFlags::NEXT_FRAGMENT_UNMAPPED) != 0; }
 
     //strandedness flags are nonzero for the negative strand.
     bool template_on_pos_strand() const { return (this->flag & SamFlags::TEMPLATE_ON_NEG_STRAND) == 0; }
-    bool query_on_pos_strand() const { return (this->flag & SamFlags::QUERY_ON_NEG_STRAND) == 0; }
-    bool mate_on_pos_strand() const { return (this->flag & SamFlags::MATE_ON_NEG_STRAND) == 0; }
+    bool this_fragment_on_pos_strand() const { return (this->flag & SamFlags::THIS_FRAGMENT_ON_NEG_STRAND) == 0; }
+    bool next_fragment_on_pos_strand() const { return (this->flag & SamFlags::NEXT_FRAGMENT_ON_NEG_STRAND) == 0; }
 
-    bool first_read_in_pair() const { return (this->flag & SamFlags::FIRST_READ_IN_PAIR) != 0; }
-    bool second_read_in_pair() const { return (this->flag & SamFlags::SECOND_READ_IN_PAIR) != 0; }
+    bool first_fragment_in_template() const { return (this->flag & SamFlags::FIRST_FRAGMENT_IN_TEMPLATE) != 0; }
+    bool last_fragment_in_template() const { return (this->flag & SamFlags::LAST_FRAGMENT_IN_TEMPLATE) != 0; }
     bool alignment_not_primary() const { return (this->flag & SamFlags::ALIGNMENT_NOT_PRIMARY) != 0; }
     bool failed_quality_check() const { return (this->flag & SamFlags::FAILED_QUALITY_CHECK) != 0; }
     bool pcr_or_optical_duplicate() const { return (this->flag & SamFlags::PCR_OR_OPTICAL_DUPLICATE) != 0; }
 
-    char const* mate_ref_name() const;
+    char const* next_fragment_ref_name() const;
 
 };
 
@@ -254,7 +260,7 @@ int SAM_cmp_qname_flag_aux(char const* qname1, int flag1,
 /*                     char const* qname, int flag,  */
 /*                     char const* rname, size_t pos, */
 /*                     size_t mapq, char const* cigar, */
-/*                     char const* mrnm, size_t mpos, */
+/*                     char const* rnext, size_t pnext, */
 /*                     int isize, char const* seq, */
 /*                     char const* qual, */
 /*                     char const* tag_string, */
