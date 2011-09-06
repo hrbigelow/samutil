@@ -453,7 +453,7 @@ size_t SamOrder::samline_read_id(char const* samline) const
     char qname[1024];
     size_t flag;
 
-    // qname flag rname pos mapq cigar rnext pnext isize seq qual tags...
+    // qname flag rname pos mapq cigar rnext pnext tlen seq qual tags...
     int nfields_read = sscanf(samline, "%s\t%zu", qname, &flag);
     if (nfields_read != 2)
     {

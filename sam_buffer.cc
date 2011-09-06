@@ -154,10 +154,10 @@ SamBuffer::insert(SamLine const* entry)
                 assert(left != right);
                 
                 //now, in accordance with sam format spec
-                if (left->isize < 0 || right->isize > 0)
+                if (left->tlen < 0 || right->tlen > 0)
                 {
                     //bool unmerged_iter_is_leftmost = this->less_entry_matepair(yet_unmerged_entry, entry);
-                    fprintf(stderr, "SAM format error: inappropriate 'isize' fields.  Should be "
+                    fprintf(stderr, "SAM format error: inappropriate 'tlen' fields.  Should be "
                             "positive for left and negative for right-most reads\n"
                             "Entries:\n");
                     left->print_sam(stderr);

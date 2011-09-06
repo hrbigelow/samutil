@@ -388,7 +388,7 @@ int main_transcript_to_genome(int argc, char ** argv)
     char rname_buffer[256];
     std::fill(rname_buffer, rname_buffer + 256, 'A');
 
-    SamLine output_lowbound(DATA_LINE, "output_bound", 0, rname_buffer, 0, 0, "", "*", 0, 0, "", "", "");
+    SamLine output_lowbound(DATA_LINE, "output_bound", 0, rname_buffer, 0, 0, "", "", "", read_layout, "");
 
     SamLine::SetGlobalFlags(tx_qname_fmt);
 

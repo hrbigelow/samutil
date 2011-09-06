@@ -552,8 +552,8 @@ TallyFragmentLengths(FILE ** sam_fh,
             std::advance(mpit, std::distance(packed_scores.begin(), fit));
             top_fragment_entry = (*mpit).first;
             
-            assert(top_fragment_entry->isize > 0);
-            template_length = static_cast<size_t>(top_fragment_entry->isize);
+            assert(top_fragment_entry->tlen > 0);
+            template_length = static_cast<size_t>(top_fragment_entry->tlen);
             length_counts[top_score][template_length]++;
             score_totals[top_score]++;
             num_frags_used++;

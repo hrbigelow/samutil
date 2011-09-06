@@ -89,17 +89,50 @@ void SamLine::SetGlobalFlags(SAM_QNAME_FORMAT _qname_format)
 }
 
 
+
 SamLine::SamLine(SAM_PARSE _parse_flag,
                  char const* _qname, int _flag, 
                  char const* _rname, size_t _pos,
                  size_t _mapq, char const* _cigar,
-                 char const* _rnext, size_t _pnext,
-                 int _isize, char const* _seq,
+                 char const* _seq,
                  char const* _qual,
+                 char const* _read_layout,
+                 char const* _tag_string)
+{
+    char line[4096];
+    if (_parse_flag == END_OF_FILE)
+    {
+        return;
+    }
+    size_t reported_pos = 
+        ((_flag & SamFlags::THIS_FRAGMENT_UNMAPPED) != 0) ? 0 : _pos + 1;
+
+    sprintf(line, "%s\t%i\t%s\t%Zu\t%Zu\t%s\t%s\t%s\t%s",
+            _qname, _flag, _rname, reported_pos,
+            _mapq, _cigar, _read_layout,
+            _seq, _qual);
+
+    if (strlen(_tag_string) != 0)
+    {
+        sprintf(line, "\t%s", _tag_string);
+    }
+    sprintf(line, "\n");
+
+    this->Init(line, true);
+}
+
+
+/*
+SamLine::SamLine(SAM_PARSE _parse_flag,
+                 char const* _qname, int _flag, 
+                 char const* _rname, size_t _pos,
+                 size_t _mapq, char const* _cigar,
+                 char const* _seq,
+                 char const* _qual,
+                 char const* _read_layout,
                  char const* _tag_string) :
     parse_flag(_parse_flag), flag(_flag), pos(_pos), 
-    mapq(_mapq), pnext(_pnext), 
-    isize(_isize), extra(NULL), extra_tag(NULL),
+    mapq(_mapq), extra(NULL), extra_tag(NULL),
     flattened_pos(0), alignment_space(AlignSpaceMissing)
 {
     
@@ -107,7 +140,7 @@ SamLine::SamLine(SAM_PARSE _parse_flag,
     assert(strlen(_seq) < 10000);
 
     char const* src[] = { 
-        _qname, _rname, _cigar, _rnext, _seq, _qual, _tag_string
+        _qname, _rname, _cigar, _read_layout, _seq, _qual, _tag_string
     };
     size_t len[7];
 
@@ -120,9 +153,8 @@ SamLine::SamLine(SAM_PARSE _parse_flag,
     this->bytes_in_line += 7;
 
     char ** trg[] = { 
-        &this->qname, &this->rname, &this->cigar, 
-        &this->rnext, &this->seq, &this->qual,
-        &this->tag_string
+        &this->qname, &this->rname, &this->cigar, &this->read_layout
+        &this->seq, &this->qual, &this->tag_string
     };
 
     this->line = new char[this->bytes_in_line + 1];
@@ -159,15 +191,12 @@ SamLine::SamLine(SAM_PARSE _parse_flag,
         this->alignment_space = as_tag[0];
     }
 }
+*/
 
 
 
 
-
-SamLine::SamLine(FILE * seqfile, bool allow_absent_seq_qual) :
-    bytes_in_line(0), line(NULL), qname(NULL), fragment_id(0), rname(NULL), 
-    cigar(NULL), rnext(NULL), seq(NULL), qual(NULL), tag_string(NULL), extra(NULL),
-    extra_tag(NULL), flattened_pos(0), alignment_space(AlignSpaceMissing)
+SamLine::SamLine(FILE * seqfile, bool rsam_format)
 {
     char buf[4096 + 1];
     if (fgets(buf, 4096, seqfile) == NULL)
@@ -175,20 +204,28 @@ SamLine::SamLine(FILE * seqfile, bool allow_absent_seq_qual) :
         this->parse_flag = END_OF_FILE;
         return;
     }
-    this->Init(buf, allow_absent_seq_qual);
+    this->Init(buf, rsam_format);
 }
 
 
 
-SamLine::SamLine(char const* samline_string, bool allow_absent_seq_qual) :
-    qname(NULL), fragment_id(0), rname(NULL), cigar(NULL), rnext(NULL), 
-    seq(NULL), qual(NULL), tag_string(NULL), extra(NULL), extra_tag(NULL),
-    flattened_pos(0), alignment_space(AlignSpaceMissing)
+SamLine::SamLine(char const* samline_string, bool rsam_format)
 {
-    this->Init(samline_string, allow_absent_seq_qual);
+    this->Init(samline_string, rsam_format);
 }
 
 
+
+SamLine::SamLine(SamLine const& s) :
+    flattened_pos(s.flattened_pos)
+{
+    this->line = new char[s.bytes_in_line];
+    memcpy(this->line, s.line, s.bytes_in_line);
+    this->Init(this->line, true);
+}
+
+
+/*
 //copy a SamLine according to the storage policy described in sam_helper.h
 SamLine::SamLine(SamLine const& s) :
     bytes_in_line(s.bytes_in_line),
@@ -198,7 +235,7 @@ SamLine::SamLine(SamLine const& s) :
     pos(s.pos),
     mapq(s.mapq),
     pnext(s.pnext),
-    isize(s.isize),
+    tlen(s.tlen),
     flattened_pos(s.flattened_pos),
     alignment_space(s.alignment_space)
 {
@@ -209,6 +246,9 @@ SamLine::SamLine(SamLine const& s) :
     this->rnext = this->line + std::distance(s.line, s.rnext);
     this->seq = this->line + std::distance(s.line, s.seq);
     this->qual = this->line + std::distance(s.line, s.qual);
+    
+    this->read_layout = new char[strlen(s.read_layout + 1)];
+    strcpy(this->read_layout, s.read_layout);
 
     if (s.cigar == s.extra)
     {
@@ -242,7 +282,7 @@ SamLine::SamLine(SamLine const& s) :
         this->tag_string = this->extra_tag;
     }
 }
-
+*/
 
 
 //Merge two or more SAMlines that are part of the same fragment
@@ -253,7 +293,7 @@ SamLine::SamLine(SamLine const* samlines[], size_t n_lines, char const* read_lay
       pos(samlines[0]->pos),
       mapq(samlines[0]->mapq),
       pnext(0),
-      isize(0),
+      tlen(0),
       flattened_pos(samlines[0]->flattened_pos)
 {
     //assume at least one line
@@ -356,7 +396,7 @@ SamLine::SamLine(SamLine const* samlines[], size_t n_lines, char const* read_lay
 
 
 //samline_string must be terminated by newline
-void SamLine::Init(char const* samline_string, bool allow_absent_seq_qual)
+void SamLine::Init(char const* samline_string, bool rsam_format)
 {
 
     this->bytes_in_line = strlen(samline_string);
@@ -380,63 +420,106 @@ void SamLine::Init(char const* samline_string, bool allow_absent_seq_qual)
     {
         bool was_error = false;
 
-        //there will either be an immediate newline, or a tab, then
-        //some non-tab characters, then a newline
-        int num_numeric_fields =
-            sscanf(this->line, "%*s\t%i\t%*s\t%zu\t%zu\t%*s\t%*s\t%zu\t%i",
-                   &this->flag, &this->pos, &this->mapq, &this->pnext, &this->isize);
+        int off[5];
+        int tab[5]; // mark positions just before tabs
 
-        if (num_numeric_fields != 5)
+        char * rest_of_line;
+
+        if (rsam_format)
         {
-            was_error = true;
-        }
+            //QNAME.FLAG.RNAME.POS.MAPQ.CIGAR.RLAYOUT.SEQ.QUAL[.TAG[.TAG[.TAG...]]]
+            int num_fields =
+                sscanf(this->line, 
+                       "%n%*s%n\t" "%i\t" "%n%*s%n\t" "%zu\t" "%zu\t"
+                       "%n%*s%n\t" "%n%*s%n\t" "%n",
+                       off, tab, &this->flag, off + 1, tab + 1, &this->pos, &this->mapq, 
+                       off + 2, tab + 2, off + 3, tab + 3, off + 4);
 
-        //now, replace tabs with nulls, and set addresses
-        char * ptr = this->line;
+            if (num_fields != 3)
+            {
+                was_error = true;
+            }
+            this->qname = this->line + off[0];
+            this->rname = this->line + off[1];
+            this->cigar = this->line + off[2];
+            this->read_layout = this->line + off[3];
+            rest_of_line = this->line + off[4];
 
-        char * dummy = NULL;
-
-        char ** trg[] = { 
-            &this->qname, &dummy, &this->rname, &dummy, &dummy, &this->cigar, &this->rnext,
-            &dummy, &dummy, &this->seq, &this->qual, &this->tag_string
-        };
-
-        char *** trg_ptr = trg;
-        **trg_ptr = ptr;
-
-        //this->line is NULL-terminated
-        //replace tabs with NULLs in this->line
-        //set trg[] members to point to each field
-        while (*ptr != '\0' && *trg_ptr != &this->tag_string)
-        {
-            ptr = strchrnul(ptr, '\t'); //advance to end of this field
-            *ptr++ = '\0'; //replace with NULL, advance to start of next field
-            **++trg_ptr = ptr; //set target to point to this field
-        }
-        
-        bool seq_absent = *trg_ptr == &this->seq;
-
-        if (*trg_ptr != &this->tag_string && ! (allow_absent_seq_qual && seq_absent))
-        {
-            was_error = true;
-        }
-
-        if (seq_absent)
-        {
-            this->seq = NULL;
-            this->qual = NULL;
-            this->tag_string = NULL;
+            this->line[tab[0]] = '\0';
+            this->line[tab[1]] = '\0';
+            this->line[tab[2]] = '\0';
+            this->line[tab[3]] = '\0';
         }
         else
         {
-            //seq/qual are present, is tag string there?
-            if (strlen(this->tag_string) == 0)
+            //QNAME.FLAG.RNAME.POS.MAPQ.CIGAR.RNEXT.PNEXT.TLEN.SEQ.QUAL[.TAG[.TAG[.TAG...]]]
+            int num_fields =
+                sscanf(this->line, 
+                       "%n%*s\t" "%i\t" "%n%*s%n\t" "%zu\t" "%zu\t" 
+                       "%n%*s%n\t" "%n%*s%n\t" 
+                       "%zu\t" "%i\t" "%n",
+                       off, &this->flag, off + 1, tab + 1, &this->pos, &this->mapq, 
+                       off + 2, tab + 2, off + 3, tab + 3,
+                       &this->pnext, &this->tlen, off + 4);
+
+            if (num_fields != 5)
             {
-                this->tag_string = NULL;
+                was_error = true;
             }
+
+            this->qname = this->line + off[0];
+            this->rname = this->line + off[1];
+            this->cigar = this->line + off[2];
+            this->rnext = this->line + off[3];
+            rest_of_line = this->line + off[4];
+
+            this->line[tab[1]] = '\0';
+            this->line[tab[2]] = '\0';
+            this->line[tab[3]] = '\0';
+            
+        }
+
+        //rest_of_line must be one of:
+        //SEQ.QUAL.TAGS
+        //SEQ.QUAL
+        //.TAGS
+        //.
+
+        int rest_off[3];
+
+        //handles cases SEQ.QUAL.TAGS and SEQ.QUAL
+        if (sscanf(rest_of_line, "%n%*s%n\t" "%n%*s", rest_off, tab, rest_off + 1) == 0)
+        {
+            this->seq = this->line + rest_off[0];
+            this->qual = this->line + rest_off[1];
+            this->line[tab[0]] = '\0';
+        }
+
+        //handles cases . and .TAGS
+        else if (sscanf(rest_of_line, "\t%n", rest_off) == 0)
+        {
+            //seq and qual are zero length, there are no tags
+            this->seq = rest_of_line;
+            this->qual = rest_of_line + 1;
+            this->tag_string = rest_of_line + 2;
+            this->seq[0] = '\0';
+            this->qual[0] = '\0';
         }
         
-
+        else
+        {
+            was_error = true;
+        }
+        
+        if (was_error)
+        {
+            char const* format = rsam_format ? "rSAM" : "SAM";
+            fprintf(stderr, "Error: SamLine: Bad %s format:\n\n%s\n",
+                    format, this->line);
+            this->parse_flag = PARSE_ERROR;
+            return;
+        }
+        
         if (! this->this_fragment_unmapped())
         {
             --this->pos;
@@ -448,15 +531,9 @@ void SamLine::Init(char const* samline_string, bool allow_absent_seq_qual)
 
         this->fragment_id = SamLine::parse_fragment_id(this->qname);
 
-        if (was_error)
-        {
-            fprintf(stderr, "SamLine::load_line: encountered badly formatted line.\n");
-            fprintf(stderr, "Line:\n\n%s\n", this->line);
-            this->parse_flag = PARSE_ERROR;
-            return;
-        }
-        
         this->parse_flag = DATA_LINE;
+
+        this->flattened_pos = 0;
 
         char as_tag[10];
         char as_type;
@@ -464,6 +541,7 @@ void SamLine::Init(char const* samline_string, bool allow_absent_seq_qual)
         {
             this->alignment_space = as_tag[0];
         }
+
     }
 }
 
@@ -819,8 +897,8 @@ void SetToFirstDataLine(FILE ** sam_fh)
     SamLine * samline;
     rewind(*sam_fh);
 
-    bool allow_absent_seq_qual = true;
-    while ((samline = new SamLine(*sam_fh, allow_absent_seq_qual)))
+    bool rsam_format = true;
+    while ((samline = new SamLine(*sam_fh, rsam_format)))
     {
         if (samline->parse_flag == HEADER)
         {

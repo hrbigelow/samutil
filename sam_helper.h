@@ -125,6 +125,23 @@ V parse_sam_tag(char const* tag_string,
   tag_string may point into line or extra_tag
  */
 
+/*
+  SAM Format (1.4-r983) (tab-separated, including optional tags, represented here by '.')
+  QNAME.FLAG.RNAME.POS.MAPQ.CIGAR.RNEXT.PNEXT.TLEN.SEQ.QUAL[.TAG[.TAG[.TAG...]]]
+
+  Or, with zero-length SEQ and QUAL:
+  QNAME.FLAG.RNAME.POS.MAPQ.CIGAR.RNEXT.PNEXT.TLEN..[.TAG[.TAG[.TAG...]]]
+
+  Or, with no tags and zero length SEQ and QUAL:
+  QNAME.FLAG.RNAME.POS.MAPQ.CIGAR.RNEXT.PNEXT.TLEN..
+
+  rSAM Format (recombinant, template-based SAM)
+  QNAME.FLAG.RNAME.POS.MAPQ.CIGAR.RLAYOUT.SEQ.QUAL[.TAG[.TAG[.TAG...]]]
+  
+  RLAYOUT is the 'read layout' field.
+
+ */
+
 class SamLine
 {
 public:
@@ -141,7 +158,7 @@ public:
     char * cigar;
     char * rnext;
     size_t pnext;
-    int isize;
+    int tlen;
     char * seq;
     char * qual;
     char * read_layout;
@@ -155,19 +172,19 @@ public:
             char const* _qname, int _flag, 
             char const* _rname, size_t _pos,
             size_t _mapq, char const* cigar,
-            char const* _rnext, size_t _pnext,
-            int _isize, char const* _seq,
+            char const* _seq,
             char const* _qual,
+            char const* _read_layout,
             char const* _tag_string);
 
-    SamLine(FILE * sam_fh, bool allow_absent_seq_qual);
-    SamLine(char const* samline_string, bool allow_absent_seq_qual);
+    SamLine(FILE * sam_fh, bool rsam_format);
+    SamLine(char const* samline_string, bool rsam_format);
 
     SamLine(SamLine const& s);
 
     SamLine(SamLine const* samlines[], size_t n_lines, char const* read_layout);
 
-    void Init(char const* samline_string, bool allow_absent_seq_qual);
+    void Init(char const* samline_string, bool rsam_format);
     void SetFlattenedPosition(CONTIG_OFFSETS const& contig_offsets,
                               CONTIG_OFFSETS::const_iterator * contig_iter);
 
@@ -255,16 +272,6 @@ int SAM_cmp_qname_flag(SamLine const& a, SamLine const& b);
 int SAM_cmp_qname_flag_aux(char const* qname1, int flag1,
                            char const* qname2, int flag2);
 
-
-/* void print_sam_line(FILE * sam_fh, */
-/*                     char const* qname, int flag,  */
-/*                     char const* rname, size_t pos, */
-/*                     size_t mapq, char const* cigar, */
-/*                     char const* rnext, size_t pnext, */
-/*                     int isize, char const* seq, */
-/*                     char const* qual, */
-/*                     char const* tag_string, */
-/*                     bool output_is_ones_based); */
 
 void PrintSAMHeader(FILE ** input_sam_fh, FILE * output_fh);
 

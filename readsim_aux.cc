@@ -677,7 +677,7 @@ ReadSampler::sample_pair(SequenceProjection const& transcript_proj,
     int64_t position2 = Cigar::LeftOffset(genome2right_read, true);
 
     //buffer the sam lines, keeping them in sorted order.
-    int64_t isize = outer_mate_dist;
+    int64_t tlen = outer_mate_dist;
 
     bool sampling_strand = do_sample_sense_strand ? 
         transcript_proj.same_strand :
@@ -712,21 +712,21 @@ ReadSampler::sample_pair(SequenceProjection const& transcript_proj,
                     right_read_string,
                     target_dna->name.c_str(),
                     right_strand, position2 + 1, cigar_string2, num_right_errors,
-                    isize);
+                    tlen);
     }
 
     char const* tag_string1 = "";
     SamLine * left_read = 
         new SamLine(DATA_LINE, qname, left_read_flag, target_dna->name.c_str(),
                     position1, mapping_quality, cigar_string1,
-                    "=", position2, isize,
+                    "=", position2, tlen,
                     left_read_seq_print, left_read_qual_print, tag_string1);
 
     char const* tag_string2 = "";
     SamLine * right_read =
         new SamLine(DATA_LINE, qname, right_read_flag, target_dna->name.c_str(),
                     position2, mapping_quality, cigar_string2,
-                    "=", position1, -1 * isize,
+                    "=", position1, -1 * tlen,
                     right_read_seq_print, right_read_qual_print, tag_string2);
 
     assert(left_read->qname != NULL);
