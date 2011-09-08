@@ -204,12 +204,17 @@ SamLine::SamLine(SamLine const* samlines[], size_t n_lines, char const* read_lay
     // a. calculate sum of lengths of reads.
     size_t total_seq_length = strlen(sl->seq);
 
-    // b. construct CIGAR with excess memory.  (simply catenate together with intervening 'H')
+    // b. construct merged CIGAR
     char *merged_cigar = new char[1024];
-    strcpy(merged_cigar, sl->cigar);
 
     char cigar_op[16];
-    Cigar::CIGAR_VEC prev_cigar = Cigar::FromString(sl->cigar, 0);
+    Cigar::CIGAR_VEC prev_cigar = sl->flag.this_fragment_unmapped 
+        ? Cigar::CIGAR_VEC({ Cigar::Unit(Cigar::Ops[Cigar::S], strlen(sl->seq))} )
+        : Cigar::FromString(sl->cigar, 0);
+
+    strcpy(merged_cigar, Cigar::ToString(prev_cigar).c_str());
+
+    Cigar::CIGAR_VEC cur_cigar;
 
     for (size_t i = 1; i != n_lines; ++i)
     {
@@ -219,15 +224,25 @@ SamLine::SamLine(SamLine const* samlines[], size_t n_lines, char const* read_lay
             - (static_cast<int64_t>(samlines[i-1]->pos) 
                + static_cast<int64_t>(Cigar::Length(prev_cigar, true)));
 
-        sprintf(cigar_op, "%ziH", inter_seq_jump);
+        cur_cigar = samlines[i]->flag.this_fragment_unmapped 
+            ? Cigar::CIGAR_VEC({ Cigar::Unit(Cigar::Ops[Cigar::S], strlen(samlines[i]->seq)) })
+            : Cigar::FromString(samlines[i]->cigar, 0);
+        
+        sprintf(cigar_op, "%ziT", inter_seq_jump);
         strcat(merged_cigar, cigar_op);
-        strcat(merged_cigar, samlines[i]->cigar);
+        strcat(merged_cigar, Cigar::ToString(cur_cigar).c_str());
+
+        prev_cigar = cur_cigar;
     }
 
 
     // c. merge tags appropriately (complicated!)  perhaps for now, we
     // simply can catenate tag strings together in fragment alignment
     // order. then, when printing, de-duplicate them...
+
+    // for now, just take the tag string of the first record as the
+    // string for the whole one
+    
     
     // d. with all data, calculate bytes_in_line and allocate
     this->bytes_in_line = 
@@ -235,6 +250,7 @@ SamLine::SamLine(SamLine const* samlines[], size_t n_lines, char const* read_lay
         + strlen(sl->rname)
         + strlen(merged_cigar)
         + (2 * total_seq_length)
+        + strlen(sl->tag_string)
         + 7; // space for null terminators
 
     this->line = new char[this->bytes_in_line];
@@ -264,6 +280,12 @@ SamLine::SamLine(SamLine const* samlines[], size_t n_lines, char const* read_lay
     {
         strcat(this->qual, samlines[i]->qual);
     }    
+
+    this->tag_string = this->qual + strlen(this->qual) + 1;
+    strcpy(this->tag_string, sl->tag_string);
+
+    this->extra = NULL;
+    this->extra_tag = NULL;
 
     this->flag.raw = 0;
 

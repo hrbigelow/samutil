@@ -65,7 +65,7 @@ int main_score_mapq(int argc, char ** argv)
     char const* expected_read_layout = "";
     // bool equivalency_mapq = false;
 
-    while ((c = getopt(argc, argv, "l:L:y:")) >= 0)
+    while ((c = getopt(argc, argv, "l:L:ry:")) >= 0)
     {
         switch(c)
         {

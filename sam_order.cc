@@ -224,7 +224,6 @@ bool SamOrder::less_position(SamLine const& a, SamLine const& b) const
     // int flattened_cmp = icmp(this->flattened_position(&a, &dummy),
     //                          this->flattened_position(&b, &dummy));
 
-    assert(false); // !!! make sure to check the logic.  do we want negative stranded less than positive stranded?
     return flattened_cmp < 0 || 
         (flattened_cmp == 0 && 
          (a.flag.this_fragment_on_neg_strand < b.flag.this_fragment_on_neg_strand ||
@@ -274,7 +273,6 @@ bool SamOrder::less_fposition(SamLine const& a, SamLine const& b) const
 
     int flattened_cmp = icmp(a_fragment_pos, b_fragment_pos);
 
-    assert(false); // !!! make sure to check the logic.  do we want negative stranded less than positive stranded?
     return flattened_cmp < 0 || 
         (flattened_cmp == 0 && 
          (a.flag.this_fragment_on_neg_strand < b.flag.this_fragment_on_neg_strand ||

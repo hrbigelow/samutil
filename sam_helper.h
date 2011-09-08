@@ -127,9 +127,7 @@ V parse_sam_tag(char const* tag_string,
   qname, rname, rnext, seq, and qual always point into line.
   cigar may point into line or extra
   tag_string may point into line or extra_tag
- */
 
-/*
   SAM Format (1.4-r983) (tab-separated, including optional tags, represented here by '.')
   QNAME.FLAG.RNAME.POS.MAPQ.CIGAR.RNEXT.PNEXT.TLEN.SEQ.QUAL[.TAG[.TAG[.TAG...]]]
 
@@ -148,23 +146,23 @@ union SamFlag
 {
     struct
     {
-        int multi_fragment_template : 1;
-        int all_fragments_mapped : 1;
-        int this_fragment_unmapped : 1;
-        int next_fragment_unmapped : 1;
-        int this_fragment_on_neg_strand : 1;
-        int next_fragment_on_neg_strand : 1;
-        int first_fragment_in_template : 1;
-        int last_fragment_in_template : 1;
-        int alignment_not_primary : 1;
-        int failed_quality_check : 1;
-        int pcr_or_optical_duplicate : 1;
-        int template_layout : 1;
-        int : 4; // padding to 16 bits
+        unsigned int multi_fragment_template : 1;
+        unsigned int all_fragments_mapped : 1;
+        unsigned int this_fragment_unmapped : 1;
+        unsigned int next_fragment_unmapped : 1;
+        unsigned int this_fragment_on_neg_strand : 1;
+        unsigned int next_fragment_on_neg_strand : 1;
+        unsigned int first_fragment_in_template : 1;
+        unsigned int last_fragment_in_template : 1;
+        unsigned int alignment_not_primary : 1;
+        unsigned int failed_quality_check : 1;
+        unsigned int pcr_or_optical_duplicate : 1;
+        unsigned int template_layout : 1;
+        unsigned int : 4; // padding to 16 bits
 
-        int is_rsam_format : 8;
-        int num_fragments_in_template : 8;
-        int read_layout : 32;
+        unsigned int is_rsam_format : 8;
+        unsigned int num_fragments_in_template : 8;
+        unsigned int read_layout : 32;
     };
     size_t raw;
 
