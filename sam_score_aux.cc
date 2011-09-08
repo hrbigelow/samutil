@@ -115,8 +115,10 @@ void FragmentScore::init(char const* score_cal_file, char const* contig_space_fi
         ? this->min_fragment_score 
         : this->max_fragment_score;
 
-    this->raw_score_comp = RawScoreComp(this->larger_score_better);
+    //want the best score at the beginning
+    bool ascending_order = ! this->larger_score_better;
 
+    this->raw_score_comp = RawScoreComp(ascending_order);
 
     FILE * contig_space_fh = 
         open_or_die(contig_space_file, "r", "Input contig alignment space file");
@@ -218,7 +220,7 @@ size_t FragmentScore::score_table_index(int top_score, int sec_score, int given_
 }
 
 
-//order by [raw_score, space]
+//order by [raw_score, space] with best score at the beginning
 bool FragmentScore::operator()(ScoreSpace const& a, ScoreSpace const& b) const
 {
     return this->raw_score_comp(a.raw_score, b.raw_score)
