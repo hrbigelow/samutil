@@ -52,7 +52,10 @@ Cigar::CIGAR_VEC Cigar::FromString(char const* cigar,
         size_t num_fields = sscanf(chunk, "%zi%c", &oplength, &opname);
         assert(num_fields == 2);
 
-        size_t op_ind = std::distance(Cigar::OpName, strchr(Cigar::OpName, opname));
+        size_t op_ind = 
+            std::distance(Cigar::OpName, 
+                          const_cast<char const*>(strchr(Cigar::OpName, opname)));
+
         Cigar::Unit unit(Cigar::Ops[op_ind], oplength);
 
         cigar_vec.push_back(unit);

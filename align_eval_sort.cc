@@ -26,7 +26,8 @@
 #include <map>
 #include <cstdlib>
 #include <cstdio>
-#include <ext/algorithm>
+#include <algorithm>
+//#include <ext/algorithm>
 
 
 #include "align_eval_raw.h"
@@ -202,6 +203,9 @@ int main_align_eval_sort(int argc, char ** argv)
 
     size_t num_chunks;
     char * chunk_buffer = new char[max_mem];
+    char * chunk_buffer_out;
+    char * write_pointer;
+
     size_t const max_line = 10000;
 
     fprintf(stderr, "Building index...");
@@ -252,7 +256,9 @@ int main_align_eval_sort(int argc, char ** argv)
         *std::max_element(offset_quantile_sizes.begin(), offset_quantile_sizes.end());
 
     delete chunk_buffer;
+
     chunk_buffer = new char[max_offset_quantile];
+    chunk_buffer_out = new char[max_offset_quantile];
 
     // 1. For each nth quantile, [n, n+1) of the line index:
     fprintf(stderr, "Sorting index, chunks [0-%zu] ", num_chunks - 1);
@@ -266,6 +272,8 @@ int main_align_eval_sort(int argc, char ** argv)
         INDEX_ITER end = offset_quantiles[o+1];
         
         size_t start_file_offset = (*beg).start_offset;
+
+        write_pointer = chunk_buffer_out;
 
         //a. Read chunk of file from start.file_offset to end.file_offset
         fseek(alignment_sam_fh, start_file_offset, std::ios::beg);
@@ -288,9 +296,19 @@ int main_align_eval_sort(int argc, char ** argv)
 
         for (INDEX_ITER lit = beg; lit != end; ++lit)
         {
-            fwrite(chunk_buffer + (*lit).start_offset - start_file_offset, 1,
-                   (*lit).line_length, out_fh);
+            memcpy(write_pointer,
+                   chunk_buffer + (*lit).start_offset - start_file_offset,
+                   (*lit).line_length);
+
+            write_pointer += (*lit).line_length;
+
+            // fwrite(chunk_buffer + (*lit).start_offset - start_file_offset, 1,
+            //        (*lit).line_length, out_fh);
         }
+        assert(static_cast<size_t>(std::distance(chunk_buffer_out, write_pointer)) 
+               == offset_quantile_sizes[o]);
+
+        fwrite(chunk_buffer_out, 1, offset_quantile_sizes[o], out_fh);
 
         if (num_chunks > 1)
         {
@@ -337,11 +355,12 @@ int main_align_eval_sort(int argc, char ** argv)
         size_t kq_size_max = 
             *std::max_element(key_quantile_sizes, key_quantile_sizes + num_chunks);
 
-        delete key_quantile_sizes;
-
         // 4. Allocate chunk of memory to hold biggest key_quantile
         delete chunk_buffer;
+        delete chunk_buffer_out;
+
         chunk_buffer = new char[kq_size_max];
+        chunk_buffer_out = new char[kq_size_max];
 
         // 5. Re-partition index by offset_quantiles.  Now ordered as (O,.)
         get_quantiles(&line_index, less_offset, num_chunks, ! already_sorted);
@@ -358,7 +377,6 @@ int main_align_eval_sort(int argc, char ** argv)
             tmp_fhs[o] = fopen(tmp_files[o], "r");
         }
 
-        char * write_pointer;
         std::vector<INDEX_ITER> prev_sub_k(offset_quantiles.size() - 1);
         std::copy(offset_quantiles.begin(), offset_quantiles.end() - 1, prev_sub_k.begin());
 
@@ -369,6 +387,9 @@ int main_align_eval_sort(int argc, char ** argv)
 
         size_t num_total_lines = 0;
         size_t num_chunk_lines = 0;
+
+        fprintf(stderr, "Merging chunks [0-%zu] ", num_chunks - 1);
+        fflush(stderr);
 
         for (size_t k = 0; k != num_chunks; ++k)
         {
@@ -383,7 +404,7 @@ int main_align_eval_sort(int argc, char ** argv)
                 end = offset_quantiles[o+1];
                 sub_k = std::lower_bound(beg, end, key_quantile_linfo[k], less_key);
 
-                assert(__gnu_cxx::is_sorted(beg, end, less_key));
+                //assert(__gnu_cxx::is_sorted(beg, end, less_key));
 
                 part = std::distance(beg, sub_k);
 
@@ -423,21 +444,44 @@ int main_align_eval_sort(int argc, char ** argv)
             num_total_lines += merged.size();
             num_chunk_lines = merged.size();
 
+            write_pointer = chunk_buffer_out;
+
             for (INDEX_ITER mit = merged.begin(); mit != merged.end(); ++mit)
             {
-                fwrite(chunk_buffer + (*mit).start_offset, 1,
-                       (*mit).line_length, sorted_sam_fh);
+                memcpy(write_pointer, chunk_buffer + (*mit).start_offset,
+                       (*mit).line_length);
+
+                write_pointer += (*mit).line_length;
+
+                // fwrite(chunk_buffer + (*mit).start_offset, 1,
+                //        (*mit).line_length, sorted_sam_fh);
             }
 
-            fprintf(stdout, "Chunk %Zu: %Zu lines printed.\n", k, num_chunk_lines);
+            assert(static_cast<size_t>(std::distance(chunk_buffer_out, write_pointer)) 
+                   == key_quantile_sizes[k]);
+
+            fwrite(chunk_buffer_out, 1, key_quantile_sizes[k], sorted_sam_fh);
+
+            fprintf(stderr, "%zu ", k);
+            fflush(stderr);
+
         }
+
+        fprintf(stderr, "done\n");
+        fprintf(stderr, "Cleaning up...");
+        fflush(stderr);
+
+        delete key_quantile_sizes;
     
         for (size_t o = 0; o != num_chunks; ++o)
         {
             fclose(tmp_fhs[o]);
             remove(tmp_files[o]);
         }
+        fprintf(stderr, "done\n");
+        fflush(stderr);
     }
+
 
     close_if_present(alignment_sam_fh);
     close_if_present(sorted_sam_fh);

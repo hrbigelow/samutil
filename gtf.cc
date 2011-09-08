@@ -95,6 +95,7 @@ SequenceProjection::SequenceProjection(char const* _species,
     target_dna = std::string(_target_dna);
     same_strand = _strand_char == '+';
     transformation = _blocks;
+    total_block_length = 0;
 }
 
 
@@ -274,8 +275,8 @@ gtf_to_sequence_projection(char const* gtf_file, char const* species)
 
         SequenceProjection 
             sp(species, 
-               transcript.contig_name.c_str(), 
                transcript.transcript_id.c_str(),
+               transcript.contig_name.c_str(), 
                transcript.strand, 
                std::vector<block_offsets>());
 

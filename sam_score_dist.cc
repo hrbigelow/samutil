@@ -40,6 +40,7 @@ int score_dist_usage(size_t fdef, float qdef, float Qdef, size_t ldef, size_t Ld
             "-i     FLAG    if present, consider a larger alignment score better [false]\n"
             "-m     INT     default alignment score assumed for SAM entries with missing tag [%Zu]\n"
             "-e     FLAG    if set, alignment is 'correct' if given raw score is same as that of correct alignment [false]\n"
+            "-y     STRING   expected read layout. If parsing traditional SAM, this is required []\n"
             "\n\n"
             "calibration.qcal: a histogram over the set of alignment categories\n"
             "(top score, 2nd score, given score)\n"
@@ -109,8 +110,9 @@ int main_score_dist(int argc, char ** argv)
     bool larger_score_better = false;
     size_t max_valid_fragment_score = mdef;
     bool equivalency_correctness = false;
+    char const* expected_read_layout = "";
 
-    while ((c = getopt(argc, argv, "f:q:Q:l:L:c:es:im:")) >= 0)
+    while ((c = getopt(argc, argv, "f:q:Q:l:L:c:es:im:y:")) >= 0)
     {
         switch(c)
         {
@@ -124,6 +126,7 @@ int main_score_dist(int argc, char ** argv)
         case 's': raw_score_tag = optarg; break;
         case 'i': larger_score_better = true; break;
         case 'm': max_valid_fragment_score = static_cast<size_t>(atoi(optarg)); break;
+        case 'y': expected_read_layout = optarg; break;
 
         default: return score_dist_usage(fdef, qdef, Qdef, ldef, Ldef, cdef, sdef, mdef); break;
         }
@@ -145,7 +148,7 @@ int main_score_dist(int argc, char ** argv)
     SAM_QNAME_FORMAT qname_fmt = sam_order.InitFromFile(unscored_sam_fh);
     sam_order.AddHeaderContigStats(unscored_sam_fh);
 
-    SamLine::SetGlobalFlags(qname_fmt);
+    SamLine::SetGlobalFlags(qname_fmt, expected_read_layout);
     
     //alignments from different physical fragments
     bool paired_reads_are_same_stranded = false;

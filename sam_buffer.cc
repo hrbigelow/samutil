@@ -15,7 +15,7 @@
 
 //sort on whichever 'less' function is chosen by 'sam_order'
 bool LessSAMLinePtr::operator()(SamLine const* a,
-                                SamLine const* b)
+                                SamLine const* b) const
 {
     return (this->sam_order->*(this->sam_order->less))(*a, *b);
 }
@@ -35,27 +35,25 @@ bool LessSAMLinePair::operator()(SAMPTR_PAIR const& a,
 
 //sort on fragment ID (qid or qname)
 bool LessSAMLineFragmentIDPtr::operator()(SamLine const* a,
-                                          SamLine const* b)
+                                          SamLine const* b) const
 {
     return this->sam_order->less_fragment_id(*a, *b);
 }
 
 
-/*
 //sort on flattened position
 bool LessSAMLinePtrMatePair::operator()(SamLine const* a,
-                                        SamLine const* b)
+                                        SamLine const* b) const
 {
     return this->sam_order->less_position_rid(*a, *b);
 }
-*/
 
 
 SamBuffer::SamBuffer(SamOrder const* _sam_order, bool pairs_same_strand) : 
     
     output_pairs_as_same_strand(pairs_same_strand),
     less_ordering(_sam_order),
-    //less_entry_matepair(_sam_order),
+    less_entry_matepair(_sam_order),
     sam_order(_sam_order),
     // low_bound(NULL),
     unique_entries(LessSAMLinePtr(_sam_order)),
@@ -102,25 +100,44 @@ SamBuffer::insert(SamLine const* entry)
 {
     std::pair<SamLine const*, bool> result(static_cast<SamLine const*>(NULL), false);
 
-    if (! entry->multi_fragment_template()
-        || )
+    if (entry->flag.is_rsam_format)
     {
-        //this entry is complete.
+        //entry is already in rSAM format.  Simply insert
         std::pair<SINGLE_READ_SET::iterator, bool> insert = 
             this->unique_entries.insert(entry);
+
         assert(insert.second);
+
+        result = std::make_pair(entry, true);
+    }
+    else if ((! entry->flag.is_rsam_format) && ! entry->flag.multi_fragment_template)
+    {
+        //we have traditional SAM, and it is a singleton.  convert it to rSAM
+        SamLine const* line_array[] = { entry };
+        SamLine * merged = new SamLine(line_array, 1, SamLine::expected_read_layout);
+
+        //this entry is 
+        std::pair<SINGLE_READ_SET::iterator, bool> insert = 
+            this->unique_entries.insert(merged);
+
+        assert(insert.second);
+        delete entry;
+
         result = std::make_pair(entry, true);
     }
     else
     {
+        //traditional SAM format, multi-fragment template entry.  Needs to be
+        //joined with its mate and merged.
+
         //is mate stored already?  
 
         //will find all as-yet unpaired entries with the same qname as
         //the entry in the regime where the first and then second of
         //the entries are inserted, this will trigger a non-empty range
         //every time the second in the pair is inserted.
-        std::pair<SINGLE_READ_ID_MSET::const_iterator,
-                  SINGLE_READ_ID_MSET::const_iterator> yet_unmerged_range =
+        std::pair<SINGLE_READ_ID_MSET::iterator,
+                  SINGLE_READ_ID_MSET::iterator> yet_unmerged_range =
             this->incomplete_entries.equal_range(entry);
 
         //it is an error if the existing entry finds more than one mapped mate
@@ -167,48 +184,21 @@ SamBuffer::insert(SamLine const* entry)
 
                 SamLine const* line_array[] = { left, right };
 
-                SamLine * merged = new SamLine(line_array, 2, read_layout);
-                
+                SamLine * merged = new SamLine(line_array, 2, SamLine::expected_read_layout);
+
+                delete left;
+                delete right;
+                this->incomplete_entries.erase(unmerged_iter);
+                    
                 std::pair<SINGLE_READ_SET::iterator, bool> 
                     insert_success = this->unique_entries.insert(merged);
-                
-                if (insert_success.second)
-                {
-                    //successfully inserted the pair together.
-                    result = std::make_pair(merged, true);
-                    this->incomplete_entries.erase(unmerged_iter);
-                    delete yet_unmerged_entry;
-                    delete entry;
-                }
-                else
-                {
-                    //this entry reveals that it and its mate create a
-                    //duplicate read pair in the set of
-                    //unique_entry_pairs.
-                    SamLine const* pre_existing_entry = 
-                        unmerged_iter_is_leftmost 
-                        ? (*insert_success.first).second
-                        : (*insert_success.first).first;
 
-                    result = std::make_pair(pre_existing_entry, false);
-
-                    // if (this->low_bound == yet_unmerged_entry)
-                    // {
-                    //     //we want to then set the low bound to the SamLine
-                    //     //that represents the pre-existing duplicate SamLine
-                    //     //that the low_bound was previously set to.
-                    //     this->low_bound = unmerged_iter_is_leftmost ?
-                    //         (*insert_success.first).first :
-                    //         (*insert_success.first).second;
-                    //     assert(! this->less_entry_matepair(this->low_bound, yet_unmerged_entry));
-                    //     assert(! this->less_entry_matepair(yet_unmerged_entry, this->low_bound));
-                        
-                    // }
-                    this->incomplete_entries.erase(unmerged_iter);
-                    delete yet_unmerged_entry;
-                    // assert(entry != this->low_bound);
-                    delete entry;
+                if (! insert_success.second)
+                {
+                    delete merged;
                 }
+                result = std::make_pair(*insert_success.first, insert_success.second);
+
                 break;
             }
             unmerged_iter = unmerged_next_iter;
@@ -253,8 +243,8 @@ void SamBuffer::purge(FILE * output_sam_fh,
     //what would this be?  it would have to take the minimum alignment
     //position between it and the mate.
 
-    SINGLE_READ_SET::const_iterator unique_bound;
-    SINGLE_READ_SET::const_iterator incomplete_bound;
+    SINGLE_READ_SET::iterator unique_bound;
+    SINGLE_READ_ID_MSET::iterator incomplete_bound;
 
     // SamLine const* temp_low_bound = this->low_bound;
 
@@ -338,7 +328,7 @@ void SamBuffer::purge(FILE * output_sam_fh,
     //fprintf(stderr, "%Zu\n", this->unique_entries.size());
     //fflush(stderr);
 
-    SINGLE_READ_SET::const_iterator read_iter;
+    SINGLE_READ_ID_MSET::const_iterator read_iter;
 
     for (read_iter = this->incomplete_entries.begin();
          read_iter != incomplete_bound; ++read_iter)

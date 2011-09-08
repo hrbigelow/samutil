@@ -61,7 +61,7 @@ struct LessSAMLinePtr
 {
     SamOrder const* sam_order;
     LessSAMLinePtr(SamOrder const* _so = NULL) : sam_order(_so) { }
-    bool operator()(SamLine const* a, SamLine const* b);
+    bool operator()(SamLine const* a, SamLine const* b) const;
 };
 
 
@@ -70,7 +70,7 @@ struct LessSAMLineFragmentIDPtr
 {
     SamOrder const* sam_order;
     LessSAMLineFragmentIDPtr(SamOrder const* _so = NULL) : sam_order(_so) { }
-    bool operator()(SamLine const* a, SamLine const* b);
+    bool operator()(SamLine const* a, SamLine const* b) const;
 };
 
 
@@ -95,7 +95,7 @@ struct LessSAMLinePtrMatePair
 {
     SamOrder const* sam_order;
     LessSAMLinePtrMatePair(SamOrder const* _so = NULL) : sam_order(_so) { }
-    bool operator()(SamLine const* a, SamLine const* b);
+    bool operator()(SamLine const* a, SamLine const* b) const;
 };
 
 

@@ -55,7 +55,7 @@ bool apply_projection_aux(SequenceProjection const& projection,
                           SamLine * samline,
                           bool inserts_are_introns)
 {
-    if (samline->this_fragment_unmapped())
+    if (samline->flag.this_fragment_unmapped)
     {
         return false;
     }
@@ -73,8 +73,11 @@ bool apply_projection_aux(SequenceProjection const& projection,
         assert(right_offset >= 0);
         source_to_read.push_back(Cigar::Unit(Cigar::Ops[Cigar::D], static_cast<size_t>(right_offset)));
         std::reverse(source_to_read.begin(), source_to_read.end());
-        int strand_mask = (SamFlags::THIS_FRAGMENT_ON_NEG_STRAND | SamFlags::NEXT_FRAGMENT_ON_NEG_STRAND);
-        samline->flag = samline->flag ^ strand_mask;
+
+        // flip the template-to-reference, since the reference is
+        //changing from transcriptome to genome and they are in
+        //opposite directions.
+        samline->flag.template_layout ^= 1; 
     }
 
     Cigar::CIGAR_VEC target_to_read =

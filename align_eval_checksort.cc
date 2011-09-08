@@ -2,7 +2,7 @@
 #include "dep/tools.h"
 #include "sam_order.h"
 
-#include <ext/algorithm>
+#include <algorithm>
 #include <getopt.h>
 
 int align_eval_checksort_usage(char const* sdef)
@@ -55,7 +55,7 @@ int main_align_eval_checksort(int argc, char ** argv)
     SAM_QNAME_FORMAT qname_fmt = sam_order.InitFromFile(sorted_sam_fh);
     sam_order.AddHeaderContigStats(sorted_sam_fh);
 
-    SamLine::SetGlobalFlags(qname_fmt);
+    SamLine::SetGlobalFlags(qname_fmt, "");
 
     SetToFirstDataLine(&sorted_sam_fh);
 
@@ -72,7 +72,7 @@ int main_align_eval_checksort(int argc, char ** argv)
     delete chunk_buffer;
 
     bool is_sorted = 
-        __gnu_cxx::is_sorted(line_index.begin(), line_index.end(), less_key);
+        std::is_sorted(line_index.begin(), line_index.end(), less_key);
 
     if (is_sorted)
     {

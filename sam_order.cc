@@ -97,30 +97,30 @@ SamOrder::~SamOrder()
 SAM_QNAME_FORMAT SamOrder::InitFromFile(FILE * sam_fh)
 {
     SetToFirstDataLine(&sam_fh);
-    //parse a SAM record
-    SamLine const* samtest = new SamLine(sam_fh, true);
+
+    char qname[1024];
     int dum[5];
     char dum_string[30];
 
     SAM_QNAME_FORMAT qname_format;
 
-    if (samtest->parse_flag == END_OF_FILE)
+    if (fscanf(sam_fh, "%s\t", qname) != 1)
     {
         this->parse_fragment_id = &parse_fragment_id_zero;
         qname_format = SAM_NON_INTERPRETED;
     }
-    else if (sscanf(samtest->qname, "%i", dum) == 1)
+    else if (sscanf(qname, "%i", dum) == 1)
     {
         this->parse_fragment_id = &parse_fragment_id_numeric;
         qname_format = SAM_NUMERIC;
     }
-    else if (sscanf(samtest->qname, "%[^:]:%i:%i:%i:%i", dum_string, dum, dum + 1, dum + 2, dum + 3) == 5)
+    else if (sscanf(qname, "%[^:]:%i:%i:%i:%i", dum_string, dum, dum + 1, dum + 2, dum + 3) == 5)
     {
         this->parse_fragment_id = &parse_fragment_id_illumina;
         qname_format = SAM_ILLUMINA;
     }
 
-    else if (sscanf(samtest->qname, "%*[^:]:%*[^:]:%[^:]:%i:%i:%i:%i", 
+    else if (sscanf(qname, "%*[^:]:%*[^:]:%[^:]:%i:%i:%i:%i", 
                     dum_string, dum, dum + 1, dum + 2, dum + 3) == 5)
 
     {
@@ -130,11 +130,10 @@ SAM_QNAME_FORMAT SamOrder::InitFromFile(FILE * sam_fh)
     else
     {
         fprintf(stderr, "Error: SamOrder: Don't have a parser for this qname format: %s\n",
-                samtest->qname);
+                qname);
         exit(1);
     }
     rewind(sam_fh);
-    delete samtest;
 
     return qname_format;
 }
@@ -225,10 +224,11 @@ bool SamOrder::less_position(SamLine const& a, SamLine const& b) const
     // int flattened_cmp = icmp(this->flattened_position(&a, &dummy),
     //                          this->flattened_position(&b, &dummy));
 
+    assert(false); // !!! make sure to check the logic.  do we want negative stranded less than positive stranded?
     return flattened_cmp < 0 || 
         (flattened_cmp == 0 && 
-         (a.this_fragment_on_pos_strand() < b.this_fragment_on_pos_strand() ||
-          (a.this_fragment_on_pos_strand() == b.this_fragment_on_pos_strand() &&
+         (a.flag.this_fragment_on_neg_strand < b.flag.this_fragment_on_neg_strand ||
+          (a.flag.this_fragment_on_neg_strand == b.flag.this_fragment_on_neg_strand &&
            (strcmp(a.cigar, b.cigar) < 0 ||
             (strcmp(a.cigar, b.cigar) == 0 &&
              (icmp(this->flattened_position_mate(&a, &dummy),
@@ -246,7 +246,7 @@ bool SamOrder::equal_position(SamLine const& a, SamLine const& b) const
 
     return 
         a.flattened_pos == b.flattened_pos &&
-        a.this_fragment_on_pos_strand() == b.this_fragment_on_pos_strand() &&
+        a.flag.this_fragment_on_neg_strand == b.flag.this_fragment_on_neg_strand &&
         strcmp(a.cigar, b.cigar) == 0 &&
         flattened_position_mate(&a, &dummy) == flattened_position_mate(&b, &dummy) &&
         a.alignment_space == b.alignment_space;
@@ -264,22 +264,21 @@ bool SamOrder::less_fposition(SamLine const& a, SamLine const& b) const
 {
     CONTIG_OFFSETS::const_iterator dummy;
 
-    size_t a_fragment_pos = a.all_fragments_mapped()
-        ? std::min(a.flattened_pos,
-                   this->flattened_position_mate(&a, &dummy))
+    size_t a_fragment_pos = a.flag.all_fragments_mapped
+        ? std::min(a.flattened_pos, this->flattened_position_mate(&a, &dummy))
         : a.flattened_pos;
 
-    size_t b_fragment_pos = b.all_fragments_mapped()
-        ? std::min(b.flattened_pos,
-                   this->flattened_position_mate(&b, &dummy))
+    size_t b_fragment_pos = b.flag.all_fragments_mapped
+        ? std::min(b.flattened_pos, this->flattened_position_mate(&b, &dummy))
         : b.flattened_pos;
 
     int flattened_cmp = icmp(a_fragment_pos, b_fragment_pos);
 
+    assert(false); // !!! make sure to check the logic.  do we want negative stranded less than positive stranded?
     return flattened_cmp < 0 || 
         (flattened_cmp == 0 && 
-         (a.this_fragment_on_pos_strand() < b.this_fragment_on_pos_strand() ||
-          (a.this_fragment_on_pos_strand() == b.this_fragment_on_pos_strand() &&
+         (a.flag.this_fragment_on_neg_strand < b.flag.this_fragment_on_neg_strand ||
+          (a.flag.this_fragment_on_neg_strand == b.flag.this_fragment_on_neg_strand &&
            (strcmp(a.cigar, b.cigar) < 0))));
 
 }
@@ -291,7 +290,7 @@ bool SamOrder::less_rid(SamLine const& a, SamLine const& b) const
     int qname_cmp = fragment_id_aux(a, b);
     return qname_cmp < 0 
         || (qname_cmp == 0
-            && (a.first_fragment_in_template() < b.first_fragment_in_template()));
+            && (a.flag.first_fragment_in_template < b.flag.first_fragment_in_template));
 }
 
 
@@ -300,7 +299,7 @@ bool SamOrder::equal_rid(SamLine const& a, SamLine const& b) const
 {
     int qname_cmp = fragment_id_aux(a, b);
     return qname_cmp == 0
-        && (a.first_fragment_in_template() == b.first_fragment_in_template());
+        && (a.flag.first_fragment_in_template == b.flag.first_fragment_in_template);
 }
 
 
@@ -366,9 +365,11 @@ void SamOrder::AddHeaderContigStats(FILE * sam_fh)
 {
     SamLine * samline;
     size_t contig_offset = 0;
-    bool allow_absent_seq_qual = true;
-    while ((samline = new SamLine(sam_fh, allow_absent_seq_qual)))
+
+    while (1)
     {
+        samline = new SamLine(sam_fh);
+
         if (samline->parse_flag != HEADER)
         {
             //SamLine::line does not have a newline at the end.  But we want to count it.
@@ -451,10 +452,10 @@ size_t SamOrder::samline_read_id(char const* samline) const
 {
 
     char qname[1024];
-    size_t flag;
+    SamFlag flag;
 
     // qname flag rname pos mapq cigar rnext pnext tlen seq qual tags...
-    int nfields_read = sscanf(samline, "%s\t%zu", qname, &flag);
+    int nfields_read = sscanf(samline, "%s\t%zu", qname, &flag.raw);
     if (nfields_read != 2)
     {
         fprintf(stderr, "samline_read_id_flag: bad format for read-id sorting.\n"
@@ -466,7 +467,7 @@ size_t SamOrder::samline_read_id(char const* samline) const
     size_t read_id = this->parse_fragment_id(qname);
 
     read_id = read_id<<1;
-    int read_num = ((flag & SamFlags::FIRST_FRAGMENT_IN_TEMPLATE) != 0) ? 0 : 1;
+    int read_num = flag.first_fragment_in_template ? 0 : 1;
     read_id += read_num;
 
     return read_id;
@@ -480,7 +481,7 @@ size_t SamOrder::samline_position_min_align_guide(char const* samline) const
     char guide_chrom_left[32];
     char guide_chrom_right[32];
     int read_num_left, read_num_right;
-    size_t flag;
+    SamFlag flag;
     size_t guide_pos_left, guide_pos_right;
     char align_chrom[32];
     size_t align_pos;
@@ -492,9 +493,9 @@ size_t SamOrder::samline_position_min_align_guide(char const* samline) const
            "%zu\t%s\t%zu", //part of alignment
            &read_num_left, guide_chrom_left, &guide_pos_left, 
            &read_num_right, guide_chrom_right, &guide_pos_right,
-           &flag, align_chrom, &align_pos);
+           &flag.raw, align_chrom, &align_pos);
     
-    int read_num = ((flag & SamFlags::FIRST_FRAGMENT_IN_TEMPLATE) != 0) ? 1 : 2;
+    int read_num = flag.first_fragment_in_template ? 1 : 2;
 
     char * guide_chrom = read_num == read_num_left ? guide_chrom_left : guide_chrom_right;
     size_t guide_pos = read_num == read_num_left ? guide_pos_left : guide_pos_right;

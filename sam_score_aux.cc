@@ -186,7 +186,7 @@ int FragmentScore::raw_score(SamLine const* samline) const
 
 char FragmentScore::alignment_space(SamLine const* a) const
 {
-    if (a->this_fragment_unmapped())
+    if (a->flag.this_fragment_unmapped)
     {
         return this->space_ordering[0];
     }
@@ -242,7 +242,7 @@ void set_score_fields(SamBuffer const& sam_buffer,
                       FragmentScore const& fragment_scoring)
 {
 
-    SINGLE_READ_SET::iterator pit;
+    SINGLE_READ_SET::const_iterator pit;
 
     size_t N = sam_buffer.unique_entries.size();
     int * raw_scores = new int[N];
@@ -316,7 +316,7 @@ void set_score_fields(SamBuffer const& sam_buffer,
 
         new_mapq = fragment_scoring.score_table[table_index];
 
-        bool mapq_correct = samline->this_fragment_unmapped() ? (new_mapq == 0) : true;
+        bool mapq_correct = samline->flag.this_fragment_unmapped ? (new_mapq == 0) : true;
 
         assert(mapq_correct);
 
@@ -339,20 +339,20 @@ void set_score_fields(SamBuffer const& sam_buffer,
 
         
         //set primary flag
-        if (stratum_rank == 1 && samline->all_fragments_mapped() && first_encountered_top_stratum)
+        if (stratum_rank == 1 && samline->flag.all_fragments_mapped && first_encountered_top_stratum)
         {
             //alignment is primary.
-            samline->flag &= ~SamFlags::ALIGNMENT_NOT_PRIMARY;
+            samline->flag.alignment_not_primary = 0;
             first_encountered_top_stratum = false;
         }
-        else if (samline->this_fragment_unmapped())
+        else if (samline->flag.this_fragment_unmapped)
         {
             //alignment is 'primary' per downstream weird interpretations
-            samline->flag &= ~SamFlags::ALIGNMENT_NOT_PRIMARY;
+            samline->flag.alignment_not_primary = 0;
         }
         else
         {
-            samline->flag |= SamFlags::ALIGNMENT_NOT_PRIMARY;
+            samline->flag.alignment_not_primary = 1;
         }
 
     }
@@ -379,13 +379,11 @@ size_t CountCorrectBases(SamLine const* samline,
     *num_bases_test = 0;
 
     if (strcmp(samline->rname, guide_coords.contig) == 0
-        && samline->this_fragment_on_pos_strand() == guide_coords.pos_stranded)
+        && samline->flag.this_fragment_on_neg_strand != guide_coords.pos_stranded)
     {
         //proceed to measure actual base overlap
         Cigar::CIGAR_VEC test_cigar = Cigar::FromString(samline->cigar, samline->zero_based_pos());
-        Cigar::CIGAR_VEC merge_cigar = 
-            Cigar::TransitiveMerge(guide_cigar, guide_cigar_index, 
-                                   test_cigar, true, false);
+        Cigar::CIGAR_VEC merge_cigar = Cigar::Expand(guide_coords.blocks, test_cigar, true);
         
         num_correct_bases = 
             Cigar::CountAlignedPositions(merge_cigar, num_bases_guide, num_bases_test);
@@ -400,14 +398,13 @@ size_t CountCorrectBases(SamLine const* samline,
 //pervious entries are properly paired.
 void NextLine(FILE * unscored_sam_fh, 
               SamBuffer & sam_buffer,
-              bool allow_absent_seq_qual,
               bool * new_fragment, 
               bool * seen_a_read,
               char * prev_qname,
               size_t * prev_fragment_id,
               SamLine ** low_bound)
 {
-    SamLine * samline = new SamLine(unscored_sam_fh, allow_absent_seq_qual);
+    SamLine * samline = new SamLine(unscored_sam_fh);
 
     switch (samline->parse_flag)
     {

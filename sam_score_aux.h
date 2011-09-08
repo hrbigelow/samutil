@@ -95,7 +95,6 @@ size_t CountCorrectBases(SamLine const* samline,
 
 void NextLine(FILE * unnscored_sam_fh, 
               SamBuffer & sam_buffer,
-              bool allow_absent_seq_qual,
               bool * new_fragment, 
               bool * seen_a_read,
               char * prev_rname,

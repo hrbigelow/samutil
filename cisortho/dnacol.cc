@@ -155,7 +155,7 @@ void DC::add(string const species,
 int64_t DC::num_bases() const {
 
     int64_t sz = 0;
-    for (cis::DNAS::iterator dna_it = (*this).begin(); 
+    for (cis::DNAS::const_iterator dna_it = (*this).begin(); 
          dna_it != (*this).end(); ++dna_it) 
         sz += (*dna_it)->length();
     return sz;

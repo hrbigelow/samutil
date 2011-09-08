@@ -50,6 +50,7 @@ int transcript_to_genome_usage()
             "-n     FLAG     If present, use CIGAR 'N' to represent introns.  Otherwise use 'D'\n"
             "-x     FLAG     If present, add Cufflinks XS:A: tag (+/-) denotes source RNA strand.\n"
             "-r     FLAG     If present, print in rSAM format. Otherwise, print traditional SAM\n"
+            "-y     STRING   expected read layout. If parsing traditional SAM, this is required []\n"
             "-t     INT      Number of threads to use\n"
             "\n"
             "Only one of each group of identical fragment alignments is output.\n"
@@ -58,7 +59,9 @@ int transcript_to_genome_usage()
             "reads.vs.tx.sam must be sorted by [rname, read_pair_flag, pos].\n"
             "\n"
             "reads.vs.tx.asort.sam must be sorted by alignment position, with contigs (transcript)\n"
-            "ordered by projection order according to genomic contig order as specified in\n\n"
+            "ordered by projection order according to genomic contig order as specified.\n"
+            "expected read layout is a sequenced of 'f' and 'r' denoting whether each read is\n"
+            "on the forward or reverse strand of the template molecule.\n"
             );
     return 1;
 }
@@ -275,7 +278,6 @@ bool CheckProjectionOrder(CONTIG_OFFSETS const& genome_contig_order,
             exit(1);
         }
         size_t genome_contig_offset = (*oit).second;
-        assert(false); // !!! so that we check the integrity of this edit.
         size_t tx_local_offset = (*pit).transformation[0].jump_length;
 
         tx_implied_genomic_offsets.insert(std::make_pair(genome_contig_offset + tx_local_offset, tx_contig));
@@ -337,10 +339,11 @@ int main_transcript_to_genome(int argc, char ** argv)
     bool inserts_are_introns = false;
     bool add_cufflinks_xs_tag = false;
     bool print_rsam = false;
+    char const* expected_read_layout = "";
 
     size_t num_threads = 1;
 
-    while ((c = getopt(argc, argv, "h:nxrt:")) >= 0)
+    while ((c = getopt(argc, argv, "h:nxry:t:")) >= 0)
     {
         switch(c)
         {
@@ -348,6 +351,7 @@ int main_transcript_to_genome(int argc, char ** argv)
         case 'n': inserts_are_introns = true; break;
         case 'x': add_cufflinks_xs_tag = true; break;
         case 'r': print_rsam = true; break;
+        case 'y': expected_read_layout = optarg; break;
         case 't': num_threads = static_cast<size_t>(atof(optarg)); break;
         default: return transcript_to_genome_usage(); break;
         }
@@ -367,12 +371,6 @@ int main_transcript_to_genome(int argc, char ** argv)
     FILE * input_genome_sam_header_fh = open_if_present(input_genome_sam_header_file, "r");
     FILE * output_genome_sam_fh = open_or_die(output_genome_sam_file, "w", "Output genome-projected SAM file");
 
-
-    // input SAM file is allowed to have or not have seq / qual.
-    // basically, they are just payload, and unaffected by the transformation
-    bool allow_absent_seq_qual = true;
-
-
     SamOrder genome_sam_order(SAM_POSITION_RID, "ALIGN");
     SamOrder tx_sam_order(SAM_POSITION_RID, "ALIGN");
 
@@ -384,13 +382,14 @@ int main_transcript_to_genome(int argc, char ** argv)
 
     //here, construct a dummy low bound SamLine entry.
     
-    SamLine::SetGlobalFlags(SAM_NON_INTERPRETED);
-    char rname_buffer[256];
-    std::fill(rname_buffer, rname_buffer + 256, 'A');
+    SamLine::SetGlobalFlags(SAM_NON_INTERPRETED, expected_read_layout);
+    char rname_buffer[32];
+    std::fill(rname_buffer, rname_buffer + 31, 'A');
+    rname_buffer[31] = '\0';
 
-    SamLine output_lowbound(DATA_LINE, "output_bound", 0, rname_buffer, 0, 0, "", "", "", read_layout, "");
+    SamLine output_lowbound(DATA_LINE, "output_bound", 0, rname_buffer, 0, 0, "*", "", "", "");
 
-    SamLine::SetGlobalFlags(tx_qname_fmt);
+    SamLine::SetGlobalFlags(tx_qname_fmt, expected_read_layout);
 
     bool paired_reads_are_same_stranded = false;
 
@@ -481,7 +480,7 @@ int main_transcript_to_genome(int argc, char ** argv)
     while (! feof(input_tx_sam_fh))
     {
         // parse samline
-        samline = new SamLine(input_tx_sam_fh, allow_absent_seq_qual);
+        samline = new SamLine(input_tx_sam_fh);
 
         switch (samline->parse_flag)
         {
@@ -508,7 +507,7 @@ int main_transcript_to_genome(int argc, char ** argv)
         case DATA_LINE:
 
             //check well-orderedness of input
-            sprintf(fake_samline, "fake\t%i\t%s\t%Zu", samline->flag, samline->rname, samline->pos);
+            sprintf(fake_samline, "fake\t%Zu\t%s\t%Zu", samline->flag.raw, samline->rname, samline->pos);
             cur_pos_index = (input_buffer.sam_order->*(input_buffer.sam_order->sam_index))(fake_samline);
             if (cur_pos_index < prev_pos_index)
             {
@@ -518,7 +517,7 @@ int main_transcript_to_genome(int argc, char ** argv)
             }
             prev_pos_index = cur_pos_index;
 
-            if (samline->this_fragment_unmapped())
+            if (samline->flag.this_fragment_unmapped)
             {
                 samline->print(output_genome_sam_fh, print_rsam);
                 delete samline;

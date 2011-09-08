@@ -25,6 +25,7 @@
 #include <map>
 #include <string>
 #include <numeric>
+#include <getopt.h>
 
 #include "cigar_ops.h"
 #include "sam_helper.h"
@@ -287,9 +288,6 @@ int main_align_eval_raw(int argc, char ** argv)
     FILE * frag_halfs_fh = open_or_die(frag_halfs_file, "w", "Output fragment size distribution file by halfs");
     FILE * dist_summary_fh = open_or_die(dist_summary_file, "w", "Output distribution summary file");
 
-    //evaluation should not depend on the actual sequence, just the alignment blocks.
-    bool allow_absent_seq_qual = true;
-
     SamLine * samline;
 
     SamOrder sam_order(SAM_RID, "MIN_ALIGN_GUIDE"); // doesn't matter what the order is here.
@@ -348,12 +346,12 @@ int main_align_eval_raw(int argc, char ** argv)
 
     std::vector<block_offsets>::const_iterator gi;
 
-    samline = new SamLine(alignment_sam_fh, allow_absent_seq_qual);
+    samline = new SamLine(alignment_sam_fh);
 
     while (samline->parse_flag == DATA_LINE)
     {
         ParseSimReadCoords(samline->qname, 
-                           samline->first_fragment_in_template(),
+                           samline->flag.first_fragment_in_template,
                            &guide_coords);
         
         assert(num_used_bases == num_correct_bases + num_error_bases + num_trimmed_bases);
@@ -477,17 +475,17 @@ int main_align_eval_raw(int argc, char ** argv)
             }
         }
 
-        if (! samline->alignment_not_primary())
+        if (! samline->flag.alignment_not_primary)
         {
             ++primary_alignment_mapq[samline->mapq];
         }
 
         if (samline->mapq < min_mapping_quality
-            || (require_primary_alignment && samline->alignment_not_primary()))
+            || (require_primary_alignment && samline->flag.alignment_not_primary))
         {
             num_skipped_bases += this_num_guide_bases;
             delete samline;
-            samline = new SamLine(alignment_sam_fh, allow_absent_seq_qual);
+            samline = new SamLine(alignment_sam_fh);
             continue;
         }
         else
@@ -512,7 +510,7 @@ int main_align_eval_raw(int argc, char ** argv)
         size_t this_num_correct_bases = 0;
         //tally the correct and incorrect features
         if (guide_offset_iter == align_offset_iter &&
-            guide_coords.pos_stranded == samline->this_fragment_on_pos_strand())
+            guide_coords.pos_stranded != samline->flag.this_fragment_on_neg_strand)
         {
             //alignment is at least on the right contig and strand.
             //appropriate to do the merge.
@@ -625,7 +623,7 @@ int main_align_eval_raw(int argc, char ** argv)
             feature_bound = align_offset_iter->second;
 
             if (guide_offset_iter == align_offset_iter &&
-                guide_coords.pos_stranded != samline->this_fragment_on_pos_strand() &&
+                guide_coords.pos_stranded == samline->flag.this_fragment_on_neg_strand &&
                 guide_coords.blocks[0].jump_length == samline->zero_based_pos())
             {
                 //samline->print(stderr, false);
@@ -694,7 +692,7 @@ int main_align_eval_raw(int argc, char ** argv)
         assert((! require_primary_alignment) || (num_used_bases <= num_guide_bases));
 
         delete samline;
-        samline = new SamLine(alignment_sam_fh, allow_absent_seq_qual);
+        samline = new SamLine(alignment_sam_fh);
     }
     if (samline->parse_flag != END_OF_FILE)
     {

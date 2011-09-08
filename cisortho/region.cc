@@ -238,7 +238,7 @@ namespace cis {
     REG_MAP SplitRegions(REGIONS_MULTI const& regions)
     {
         REG_MAP contig_to_regions;
-        REGIONS_MULTI::iterator reg_iter;
+        REGIONS_MULTI::const_iterator reg_iter;
         for (reg_iter = regions.begin(); reg_iter != regions.end(); ++reg_iter)
         {
             dna_t const* contig = &(*reg_iter)->dna;

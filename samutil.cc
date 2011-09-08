@@ -60,7 +60,9 @@ int main(int argc, char *argv[])
     }
     else if (strcmp(argv[1], "get_tx_sequence") == 0)
     {
-        return main_get_tx_sequence(argc - 1, argv + 1);
+        fprintf(stderr, "Not ported yet");
+        exit(1);
+        // return main_get_tx_sequence(argc - 1, argv + 1);
     }
     // else if (strcmp(argv[1], "score_dist") == 0)
     // {

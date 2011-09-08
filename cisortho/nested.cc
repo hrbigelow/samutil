@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <cassert>
+#include <cstdio>
 
 #define __STDC_FORMAT_MACROS
 #include <inttypes.h>
@@ -310,7 +311,7 @@ namespace cis {
             return NULL;
         }
 
-        RIT r = regs.begin();
+        REGIONS_MULTI::const_iterator r = regs.begin();
         dna_t const& contig = (*r)->dna;
 
         region_tree * root = new region_tree(NULL);

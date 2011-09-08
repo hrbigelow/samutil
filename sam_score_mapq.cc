@@ -3,6 +3,7 @@
 
 #include <cstdlib>
 #include <algorithm>
+#include <getopt.h>
 
 #include "sam_score_aux.h"
 #include "sam_buffer.h"
@@ -19,6 +20,7 @@ int score_mapq_usage(size_t ldef, size_t Ldef)
             "-l     INT     min allowed fragment length for paired alignment [%Zu]\n"
             "-L     INT     max allowed fragment length for paired alignment [%Zu]\n"
             "-r     FLAG    If present, print in rSAM format. Otherwise, print traditional SAM [false]\n"
+            "-y     STRING  expected read layout. If parsing traditional SAM, this is required []\n"
             "\n\n"
             "calibration.qcal: a histogram over the set of alignment categories\n"
             "(top score, 2nd score, given score)\n"
@@ -60,15 +62,17 @@ int main_score_mapq(int argc, char ** argv)
     size_t max_fragment_length = Ldef;
     bool print_rsam = false;
 
+    char const* expected_read_layout = "";
     // bool equivalency_mapq = false;
 
-    while ((c = getopt(argc, argv, "l:L:")) >= 0)
+    while ((c = getopt(argc, argv, "l:L:y:")) >= 0)
     {
         switch(c)
         {
         case 'l': min_fragment_length = static_cast<size_t>(atoi(optarg)); break;
         case 'L': max_fragment_length = static_cast<size_t>(atoi(optarg)); break;
         case 'r': print_rsam = true; break;
+        case 'y': expected_read_layout = optarg; break;
         // case 'e': equivalency_mapq = true; break;
         default: return score_mapq_usage(ldef, Ldef); break;
         }
@@ -95,10 +99,9 @@ int main_score_mapq(int argc, char ** argv)
     SAM_QNAME_FORMAT qname_fmt = sam_order.InitFromFile(unscored_sam_fh);
     sam_order.AddHeaderContigStats(unscored_sam_fh);
 
-    SamLine::SetGlobalFlags(qname_fmt);
+    SamLine::SetGlobalFlags(qname_fmt, expected_read_layout);
 
     bool paired_reads_are_same_stranded = false;
-    bool allow_absent_seq_qual = true; // why not?
 
     bool new_fragment;
 
@@ -117,7 +120,7 @@ int main_score_mapq(int argc, char ** argv)
 
     while (! feof(unscored_sam_fh))
     {
-        NextLine(unscored_sam_fh, cal_buffer, allow_absent_seq_qual,
+        NextLine(unscored_sam_fh, cal_buffer,
                  &new_fragment, &seen_a_read, prev_qname, &prev_qid, &low_bound);
 
         if (new_fragment)

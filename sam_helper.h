@@ -16,22 +16,22 @@
 #endif
 
 //flag masks.  When set, these flags proclaim their name
-namespace SamFlags
-{
-    extern int const MULTI_FRAGMENT_TEMPLATE;
-    extern int const ALL_FRAGMENTS_MAPPED;
-    extern int const THIS_FRAGMENT_UNMAPPED;
-    extern int const NEXT_FRAGMENT_UNMAPPED;
-    extern int const THIS_FRAGMENT_ON_NEG_STRAND;
-    extern int const NEXT_FRAGMENT_ON_NEG_STRAND;
-    extern int const FIRST_FRAGMENT_IN_TEMPLATE;
-    extern int const LAST_FRAGMENT_IN_TEMPLATE;
-    extern int const ALIGNMENT_NOT_PRIMARY;
-    extern int const FAILED_QUALITY_CHECK;
-    extern int const PCR_OR_OPTICAL_DUPLICATE;
+/* namespace SamFlags */
+/* { */
+/*     extern int const MULTI_FRAGMENT_TEMPLATE; */
+/*     extern int const ALL_FRAGMENTS_MAPPED; */
+/*     extern int const THIS_FRAGMENT_UNMAPPED; */
+/*     extern int const NEXT_FRAGMENT_UNMAPPED; */
+/*     extern int const THIS_FRAGMENT_ON_NEG_STRAND; */
+/*     extern int const NEXT_FRAGMENT_ON_NEG_STRAND; */
+/*     extern int const FIRST_FRAGMENT_IN_TEMPLATE; */
+/*     extern int const LAST_FRAGMENT_IN_TEMPLATE; */
+/*     extern int const ALIGNMENT_NOT_PRIMARY; */
+/*     extern int const FAILED_QUALITY_CHECK; */
+/*     extern int const PCR_OR_OPTICAL_DUPLICATE; */
     
-    extern int const TEMPLATE_ON_NEG_STRAND;
-};
+/*     extern int const TEMPLATE_ON_NEG_STRAND; */
+/* }; */
 
 enum SAM_PARSE
     {
@@ -73,6 +73,7 @@ struct to_integer : public STRING_HASH
 typedef std::unordered_map<char const*, char, to_integer, eqstr> CONTIG_SPACE;
 typedef std::unordered_map<char const*, size_t, to_integer, eqstr> CONTIG_OFFSETS;
 #else
+typedef std::tr1::hash<std::string> STRING_HASH;
 struct to_integer : public STRING_HASH
 {
     size_t operator()(char const* k) const;
@@ -88,6 +89,9 @@ typedef CONTIG_OFFSETS::const_iterator OFFSETS_ITER;
 #define AlignSpaceTag "XP"
 #define AlignSpaceType 'A'
 #define AlignSpaceMissing '-'
+
+// The Not Applicable Read Layout used when parsing 
+#define ReadLayoutNA "-"
 
 template<typename V>
 V parse_sam_tag(char const* tag_string, 
@@ -136,11 +140,41 @@ V parse_sam_tag(char const* tag_string,
   QNAME.FLAG.RNAME.POS.MAPQ.CIGAR.RNEXT.PNEXT.TLEN..
 
   rSAM Format (recombinant, template-based SAM)
-  QNAME.FLAG.RNAME.POS.MAPQ.CIGAR.RLAYOUT.SEQ.QUAL[.TAG[.TAG[.TAG...]]]
+  QNAME.FLAG.RNAME.POS.MAPQ.CIGAR.SEQ.QUAL[.TAG[.TAG[.TAG...]]]
   
-  RLAYOUT is the 'read layout' field.
-
  */
+
+union SamFlag
+{
+    struct
+    {
+        int multi_fragment_template : 1;
+        int all_fragments_mapped : 1;
+        int this_fragment_unmapped : 1;
+        int next_fragment_unmapped : 1;
+        int this_fragment_on_neg_strand : 1;
+        int next_fragment_on_neg_strand : 1;
+        int first_fragment_in_template : 1;
+        int last_fragment_in_template : 1;
+        int alignment_not_primary : 1;
+        int failed_quality_check : 1;
+        int pcr_or_optical_duplicate : 1;
+        int template_layout : 1;
+        int : 4; // padding to 16 bits
+
+        int is_rsam_format : 8;
+        int num_fragments_in_template : 8;
+        int read_layout : 32;
+    };
+    size_t raw;
+
+};
+
+#define LAYOUT_FORWARD 0
+#define LAYOUT_REVERSE 1
+
+
+
 
 class SamLine
 {
@@ -151,7 +185,7 @@ public:
     SAM_PARSE parse_flag;
     char * qname;
     size_t fragment_id;
-    int flag;
+    SamFlag flag;
     char * rname;
     size_t pos;
     size_t mapq;
@@ -161,35 +195,39 @@ public:
     int tlen;
     char * seq;
     char * qual;
-    char * read_layout;
     char * tag_string;
     char * extra;
     char * extra_tag;
     size_t flattened_pos; //position along a virtual concatenated meta-contig.
     char alignment_space;
+    
 
     SamLine(SAM_PARSE _parse_flag,
-            char const* _qname, int _flag, 
+            char const* _qname, size_t _flag, 
             char const* _rname, size_t _pos,
             size_t _mapq, char const* cigar,
             char const* _seq,
             char const* _qual,
-            char const* _read_layout,
             char const* _tag_string);
 
-    SamLine(FILE * sam_fh, bool rsam_format);
-    SamLine(char const* samline_string, bool rsam_format);
+    SamLine(FILE * sam_fh);
+    SamLine(char const* samline_string);
 
     SamLine(SamLine const& s);
 
     SamLine(SamLine const* samlines[], size_t n_lines, char const* read_layout);
 
-    void Init(char const* samline_string, bool rsam_format);
+    void Init(char const* samline_string);
     void SetFlattenedPosition(CONTIG_OFFSETS const& contig_offsets,
                               CONTIG_OFFSETS::const_iterator * contig_iter);
 
-    static void SetGlobalFlags(SAM_QNAME_FORMAT _qname_format);
+    static void SetGlobalFlags(SAM_QNAME_FORMAT _qname_format,
+                               char const* _expected_layout);
+
     static SAM_QNAME_FORMAT sam_qname_format;
+    static char expected_read_layout[256];
+    static bool expect_rsam_format;
+
     static size_t (* parse_fragment_id)(char const* qname);
 
     SamLine();
@@ -223,21 +261,21 @@ public:
     size_t ones_based_pos() const { return this->pos + 1; }
     size_t zero_based_pos() const { return this->pos; }
 
-    bool multi_fragment_template() const { return (this->flag & SamFlags::MULTI_FRAGMENT_TEMPLATE) != 0; }
-    bool all_fragments_mapped() const { return (this->flag & SamFlags::ALL_FRAGMENTS_MAPPED) != 0; }
-    bool this_fragment_unmapped() const { return ((this->flag & SamFlags::THIS_FRAGMENT_UNMAPPED)) != 0; }
-    bool next_fragment_unmapped() const { return (this->flag & SamFlags::NEXT_FRAGMENT_UNMAPPED) != 0; }
+    /* bool multi_fragment_template() const { return (this->flag & SamFlags::MULTI_FRAGMENT_TEMPLATE) != 0; } */
+    /* bool all_fragments_mapped() const { return (this->flag & SamFlags::ALL_FRAGMENTS_MAPPED) != 0; } */
+    /* bool this_fragment_unmapped() const { return ((this->flag & SamFlags::THIS_FRAGMENT_UNMAPPED)) != 0; } */
+    /* bool next_fragment_unmapped() const { return (this->flag & SamFlags::NEXT_FRAGMENT_UNMAPPED) != 0; } */
 
-    //strandedness flags are nonzero for the negative strand.
-    bool template_on_pos_strand() const { return (this->flag & SamFlags::TEMPLATE_ON_NEG_STRAND) == 0; }
-    bool this_fragment_on_pos_strand() const { return (this->flag & SamFlags::THIS_FRAGMENT_ON_NEG_STRAND) == 0; }
-    bool next_fragment_on_pos_strand() const { return (this->flag & SamFlags::NEXT_FRAGMENT_ON_NEG_STRAND) == 0; }
+    /* //strandedness flags are nonzero for the negative strand. */
+    /* bool template_on_pos_strand() const { return (this->flag & SamFlags::TEMPLATE_ON_NEG_STRAND) == 0; } */
+    /* bool this_fragment_on_pos_strand() const { return (this->flag & SamFlags::THIS_FRAGMENT_ON_NEG_STRAND) == 0; } */
+    /* bool next_fragment_on_pos_strand() const { return (this->flag & SamFlags::NEXT_FRAGMENT_ON_NEG_STRAND) == 0; } */
 
-    bool first_fragment_in_template() const { return (this->flag & SamFlags::FIRST_FRAGMENT_IN_TEMPLATE) != 0; }
-    bool last_fragment_in_template() const { return (this->flag & SamFlags::LAST_FRAGMENT_IN_TEMPLATE) != 0; }
-    bool alignment_not_primary() const { return (this->flag & SamFlags::ALIGNMENT_NOT_PRIMARY) != 0; }
-    bool failed_quality_check() const { return (this->flag & SamFlags::FAILED_QUALITY_CHECK) != 0; }
-    bool pcr_or_optical_duplicate() const { return (this->flag & SamFlags::PCR_OR_OPTICAL_DUPLICATE) != 0; }
+    /* bool first_fragment_in_template() const { return (this->flag & SamFlags::FIRST_FRAGMENT_IN_TEMPLATE) != 0; } */
+    /* bool last_fragment_in_template() const { return (this->flag & SamFlags::LAST_FRAGMENT_IN_TEMPLATE) != 0; } */
+    /* bool alignment_not_primary() const { return (this->flag & SamFlags::ALIGNMENT_NOT_PRIMARY) != 0; } */
+    /* bool failed_quality_check() const { return (this->flag & SamFlags::FAILED_QUALITY_CHECK) != 0; } */
+    /* bool pcr_or_optical_duplicate() const { return (this->flag & SamFlags::PCR_OR_OPTICAL_DUPLICATE) != 0; } */
 
     char const* next_fragment_ref_name() const;
 
