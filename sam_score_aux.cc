@@ -283,19 +283,20 @@ void set_score_fields(SamBuffer const& sam_buffer,
         (*sit).second++;
     }
 
-    std::copy(raw_scores, raw_scores + N, raw_scores_copy);
-    raw_scores_copy[N] = fragment_scoring.worst_fragment_score;
-    raw_scores_copy[N + 1] = fragment_scoring.worst_fragment_score;
-
-    std::nth_element(raw_scores_copy, raw_scores_copy + N, 
-                     raw_scores_copy + N + 2, 
-                     fragment_scoring.raw_score_comp);
-
-    std::sort(raw_scores_copy + N, raw_scores_copy + N + 2, fragment_scoring.raw_score_comp);
+    //extract the top two raw scores, or substitute with missing defaults
+    std::partial_sort_copy(raw_scores, raw_scores + N,
+                           raw_scores_copy, raw_scores_copy + N,
+                           fragment_scoring.raw_score_comp);
+    
+    int * raw_unique_end = std::unique(raw_scores_copy, raw_scores_copy + N);
+    
+    *raw_unique_end = fragment_scoring.worst_fragment_score;
+    *++raw_unique_end = fragment_scoring.worst_fragment_score;
+    
+    int top_fragment_score = raw_scores_copy[0];
+    int sec_fragment_score = raw_scores_copy[1];
 
     int new_mapq;
-    int top_fragment_score = raw_scores_copy[N + 1];
-    int sec_fragment_score = raw_scores_copy[N];
     int fragment_score;
     char fragment_space;
     char rank_tag_value[10];
