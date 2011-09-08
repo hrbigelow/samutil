@@ -24,13 +24,12 @@ public:
 
 struct RawScoreComp
 {
-    bool larger_score_better;
-    RawScoreComp(bool _lsb = true) : larger_score_better(_lsb) { }
+    bool ascending_order;
+    RawScoreComp(bool _asc = true) : ascending_order(_asc) { }
 
-    //returns true if a is worse than b
     bool operator()(int a, int b) const
     {
-        return this->larger_score_better ? a < b : a > b;
+        return this->ascending_order ? a < b : a > b;
     }
 };
 
