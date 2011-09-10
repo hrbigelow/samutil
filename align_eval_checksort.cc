@@ -59,7 +59,7 @@ int main_align_eval_checksort(int argc, char ** argv)
 
     SetToFirstDataLine(&sorted_sam_fh);
 
-    size_t const max_mem = 1024l * 1024l * 100l;
+    size_t const max_mem = 1024l * 1024l * 1024l;
     size_t const max_line = 10000;
     size_t num_chunks;
 

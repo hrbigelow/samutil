@@ -206,10 +206,11 @@ size_t SamOrder::flattened_position(SamLine const* a,
 size_t SamOrder::flattened_position_mate(SamLine const* a, 
                                          CONTIG_OFFSETS::const_iterator * contig_iter) const
 {
-    
-    return flattened_position_aux(a->next_fragment_ref_name(), a->pnext,
-                                  this->contig_offsets,
-                                  contig_iter);
+    return a->flag.is_rsam_format
+        ? 0
+        : flattened_position_aux(a->next_fragment_ref_name(), a->pnext,
+                                 this->contig_offsets,
+                                 contig_iter);
 }
 
 

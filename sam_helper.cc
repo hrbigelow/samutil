@@ -175,9 +175,19 @@ SamLine::SamLine(char const* samline_string)
 SamLine::SamLine(SamLine const& s) :
     flattened_pos(s.flattened_pos)
 {
-    this->line = new char[s.bytes_in_line];
-    memcpy(this->line, s.line, s.bytes_in_line);
-    this->Init(this->line);
+    char * line = new char[s.bytes_in_line + 1];
+    memcpy(line, s.line, s.bytes_in_line + 1);
+    //replace all nulls with tabs
+    char * l = line;
+    while ((l = index(l, '\0')) != line + s.bytes_in_line - 1)
+    {
+        *l++ = '\t';
+    }
+    *l = '\n';
+
+    this->Init(line);
+
+    delete line;
 }
 
 
@@ -189,7 +199,8 @@ SamLine::SamLine(SamLine const* samlines[], size_t n_lines, char const* read_lay
       mapq(samlines[0]->mapq),
       pnext(0),
       tlen(0),
-      flattened_pos(samlines[0]->flattened_pos)
+      flattened_pos(samlines[0]->flattened_pos),
+      alignment_space(samlines[0]->alignment_space)
 {
     flag.raw = 0;
 
@@ -218,6 +229,8 @@ SamLine::SamLine(SamLine const* samlines[], size_t n_lines, char const* read_lay
 
     for (size_t i = 1; i != n_lines; ++i)
     {
+        assert(samlines[i]->alignment_space == this->alignment_space);
+
         total_seq_length += strlen(samlines[i]->seq);
         int64_t inter_seq_jump = 
             static_cast<int64_t>(samlines[i]->pos) 
@@ -253,7 +266,7 @@ SamLine::SamLine(SamLine const* samlines[], size_t n_lines, char const* read_lay
         + strlen(sl->tag_string)
         + 7; // space for null terminators
 
-    this->line = new char[this->bytes_in_line];
+    this->line = new char[this->bytes_in_line + 1];
 
     //2 initialize all remaining fields and pointers
 
@@ -372,6 +385,9 @@ void SamLine::Init(char const* samline_string)
                 this->rname = this->line + off[1];
                 this->cigar = this->line + off[2];
                 rest_of_line = this->line + off[3];
+
+                this->rnext = NULL;
+                this->pnext = 0;
                 
                 this->line[tab[0]] = '\0';
                 this->line[tab[1]] = '\0';
@@ -470,7 +486,7 @@ void SamLine::Init(char const* samline_string)
         {
             --this->pos;
         }
-        if (! this->flag.next_fragment_unmapped)
+        if (! this->flag.is_rsam_format && ! this->flag.next_fragment_unmapped)
         {
             --this->pnext;
         }            
@@ -542,6 +558,23 @@ void SamLine::print_sam(FILE * seqfile) const
     if (this->parse_flag == HEADER)
     {
         fprintf(seqfile, "%s\n", this->line);
+        return;
+    }
+
+    else if (! this->flag.is_rsam_format)
+    {
+        size_t reported_pos = this->flag.this_fragment_unmapped ? 0 : this->ones_based_pos();
+
+        fprintf(seqfile, "%s\t%Zu\t%s\t%Zu\t%Zu\t%s\t%s\t%Zu\t%i",
+                this->qname, flag.raw, this->rname, reported_pos,
+                this->mapq, this->cigar, this->rnext, this->pnext, this->tlen);
+
+        if (this->tag_string != NULL)
+        {
+            fprintf(seqfile, "\t%s", this->tag_string);
+        }
+        fprintf (seqfile, "\n");
+
         return;
     }
 

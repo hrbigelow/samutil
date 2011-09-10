@@ -384,10 +384,16 @@ size_t CountCorrectBases(SamLine const* samline,
     if (strcmp(samline->rname, guide_coords.contig) == 0
         && samline->flag.this_fragment_on_neg_strand != guide_coords.pos_stranded)
     {
+        size_t expanded_samline_pos;
         //proceed to measure actual base overlap
-        Cigar::CIGAR_VEC test_cigar = Cigar::FromString(samline->cigar, samline->zero_based_pos());
-        Cigar::CIGAR_VEC merge_cigar = Cigar::Expand(guide_coords.blocks, test_cigar, true);
-        
+        Cigar::CIGAR_VEC test_cigar = Cigar::FromString(samline->cigar, 0);
+
+        Cigar::CIGAR_VEC merge_cigar = 
+            Cigar::Expand(guide_coords.blocks, test_cigar, samline->zero_based_pos(), 
+                          &expanded_samline_pos, true);
+
+        merge_cigar.insert(merge_cigar.begin(), Cigar::Unit(Cigar::Ops[Cigar::D], expanded_samline_pos));
+
         num_correct_bases = 
             Cigar::CountAlignedPositions(merge_cigar, num_bases_guide, num_bases_test);
     }

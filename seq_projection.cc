@@ -60,18 +60,18 @@ bool apply_projection_aux(SequenceProjection const& projection,
         return false;
     }
 
-    Cigar::CIGAR_VEC source_to_read = 
-        Cigar::FromString(samline->cigar, samline->pos);
+    Cigar::CIGAR_VEC source_to_read = Cigar::FromString(samline->cigar, 0);
+
+    size_t start_offset = projection.same_strand 
+        ? samline->pos
+        : (projection.total_block_length 
+           - Cigar::Length(source_to_read, true)
+           - samline->pos);
 
     if (! projection.same_strand)
     {
         //reverse alignment.  right_offset is the distance from end of
         //read alignment to end of source.
-        int64_t right_offset = projection.total_block_length
-            - Cigar::Length(source_to_read, true);
-
-        assert(right_offset >= 0);
-        source_to_read.push_back(Cigar::Unit(Cigar::Ops[Cigar::D], static_cast<size_t>(right_offset)));
         std::reverse(source_to_read.begin(), source_to_read.end());
 
         // flip the template-to-reference, since the reference is
@@ -80,8 +80,12 @@ bool apply_projection_aux(SequenceProjection const& projection,
         samline->flag.template_layout ^= 1; 
     }
 
+    size_t expanded_start_offset;
+
     Cigar::CIGAR_VEC target_to_read =
-        Cigar::Expand(projection.transformation, source_to_read, inserts_are_introns);
+        Cigar::Expand(projection.transformation, source_to_read, 
+                      start_offset, & expanded_start_offset,
+                      inserts_are_introns);
 
     Cigar::CIGAR_ITER trimmed_left, trimmed_right;
     Cigar::Trim(target_to_read, false, &trimmed_left, &trimmed_right);
@@ -105,7 +109,7 @@ bool apply_projection_aux(SequenceProjection const& projection,
         samline->rname = samline->extra + strlen(bufstring) + 1;
 
         strcpy(samline->cigar, bufstring);
-        samline->pos = Cigar::LeftOffset(target_to_read, true);
+        samline->pos = expanded_start_offset;
         strcpy(samline->rname, projection.target_dna.c_str());
     }
     return overlap > 0;

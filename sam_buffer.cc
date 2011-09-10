@@ -348,9 +348,6 @@ void SamBuffer::purge(FILE * output_sam_fh,
                 samline->print_sam(output_sam_fh);
             }
         }
-        
-        // assert(*read_iter != low_bound);
-        assert(this->incomplete_entries.find(samline) == this->incomplete_entries.end());
         delete samline;
     }
     //fprintf(stderr, "incomplete_entries.size(): %Zu ...", this->incomplete_entries.size());

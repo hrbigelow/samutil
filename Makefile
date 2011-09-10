@@ -29,13 +29,13 @@ LDFLAGS = -lgsl -lgslcblas -static-libgcc -L.
 ifeq ($(findstring el5,$(shell uname -r)), el5)
 bindir = $(HOME)/usr_el5/bin
 OBJDIR = obj_el5
-CXXFLAGS = -ggdb3 -Wall $(OPT) $(DEBUG)
+CXXFLAGS = -ggdb3 -Wall -fopenmp $(OPT) $(DEBUG)
 # CPPFLAGS += -I $(HOME)/usr_el5/include/stlport
 # LDFLAGS += -L$(HOME)/usr_el5/lib
 else
 bindir = $(HOME)/usr/bin
 OBJDIR = obj
-CXXFLAGS = -ggdb3 -Wall -std=c++0x $(OPT) $(DEBUG)
+CXXFLAGS = -ggdb3 -Wall -std=c++0x -fopenmp $(OPT) $(DEBUG)
 # CPPFLAGS += -I $(HOME)/usr/include/stlport
 # LDFLAGS += -L$(HOME)/usr/lib
 endif

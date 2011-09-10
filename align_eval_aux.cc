@@ -1,6 +1,8 @@
 #include "align_eval_aux.h"
 #include "file_utils.h"
 
+#include <parallel/algorithm>
+
 //partial ordering
 bool less_offset(LineIndex const& a, LineIndex const& b)
 {
@@ -17,6 +19,20 @@ bool less_key(LineIndex const& a, LineIndex const& b)
 }
 
 
+//unary function for computing index
+struct partial_index_aux
+{
+    SamOrder const* sam_order;
+    partial_index_aux(SamOrder const* _sam_order) : sam_order(_sam_order) { }
+    LineIndex operator()(char const* samline)
+    {
+        return LineIndex((this->sam_order->*(this->sam_order->sam_index))(samline), 
+                         0,
+                         strlen(samline) + 1);
+    }        
+};
+
+
 
 std::vector<LineIndex> 
 build_index(char const* sam_file,
@@ -29,8 +45,6 @@ build_index(char const* sam_file,
 {
 
     std::vector<LineIndex> line_index;
-    ssize_t line_length;
-    size_t index;
 
     FILE * sam_fh = fopen(sam_file, "r");
     SetToFirstDataLine(&sam_fh);
@@ -44,6 +58,9 @@ build_index(char const* sam_file,
     chunk_lengths[0] -= header_length;
     *num_chunks = chunk_lengths.size();
 
+    // size_t max_chunk_length = 
+    //     std::max_element(chunk_lengths.begin(), chunk_lengths.end());
+
     size_t current_offset = header_length;
     fprintf(stderr, "chunks [0-%zu] ", *num_chunks - 1);
     fflush(stderr);
@@ -54,8 +71,14 @@ build_index(char const* sam_file,
         assert(nbytes_read == chunk_lengths[chunk]);
         chunk_buffer[nbytes_read] = '\0';
 
+        //this is really fast
         std::vector<char *> samlines = FileUtils::find_line_starts(chunk_buffer);
 
+        size_t S = samlines.size();
+
+        LineIndex * line_index_chunk = new LineIndex[S];
+
+        //this is really fast
         char * line_end = chunk_buffer;
         while ((line_end = strchr(line_end, '\n')) != NULL)
         {
@@ -63,14 +86,23 @@ build_index(char const* sam_file,
         }
 
         std::vector<char *>::iterator sit;
-        for (sit = samlines.begin(); sit != samlines.end(); ++sit)
+        LineIndex * lit;
+        
+        partial_index_aux paux(&sam_order);
+
+        __gnu_parallel::transform(samlines.begin(), samlines.end(), line_index_chunk, paux);
+
+        // now update the current offsets
+        for (lit = line_index_chunk; lit != line_index_chunk + S; ++lit)
         {
-            //zero terminated.  we still want to record the spacer for what was the \n
-            line_length = strlen(*sit) + 1; 
-            index = (sam_order.*(sam_order.sam_index))(*sit);
-            line_index.push_back(LineIndex(index, current_offset, line_length));
-            current_offset += line_length;
+            (*lit).start_offset = current_offset;
+            current_offset += (*lit).line_length;
         }
+
+        line_index.insert(line_index.end(), line_index_chunk, line_index_chunk + S);
+
+        delete line_index_chunk;
+
         fprintf(stderr, "%zu ", chunk);
         fflush(stderr);
     }

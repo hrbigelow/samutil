@@ -117,6 +117,8 @@ namespace Cigar
     //using 'blocks' as the projection definition
     CIGAR_VEC Expand(std::vector<block_offsets> const& blocks,
                      CIGAR_VEC const& cigar,
+                     size_t start_offset, /* cigar start position on condensed coordinate */
+                     size_t * expanded_start_offset, /* cigar start position on expanded coordinate */
                      bool use_N_as_insert);
 
 

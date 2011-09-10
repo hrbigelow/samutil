@@ -50,7 +50,7 @@ int transcript_to_genome_usage()
             "-n     FLAG     If present, use CIGAR 'N' to represent introns.  Otherwise use 'D'\n"
             "-x     FLAG     If present, add Cufflinks XS:A: tag (+/-) denotes source RNA strand.\n"
             "-r     FLAG     If present, print in rSAM format. Otherwise, print traditional SAM\n"
-            "-y     STRING   expected read layout. If parsing traditional SAM, this is required []\n"
+            "-y     STRING   If present, expect traditional SAM format with this read layout. Otherwise, expect rSAM [fr]\n"
             "-t     INT      Number of threads to use\n"
             "\n"
             "Only one of each group of identical fragment alignments is output.\n"
@@ -238,8 +238,6 @@ void ProjectTranscriptEntries(PROJ_MAP const& tx_projections,
                 
     //at this point, the low bound
     char const* target_contig = (*seq_proj).target_dna.c_str();
-    assert(false);
-    // !!! check this logic.  what is 'target_min_pos'?
     size_t target_min_pos = (*seq_proj).transformation[0].jump_length;
 
     

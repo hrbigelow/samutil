@@ -311,6 +311,8 @@ std::multiset<std::pair<size_t, size_t> > Cigar::ComputeOffsets(Cigar::CIGAR_VEC
 Cigar::CIGAR_VEC
 Cigar::Expand(std::vector<block_offsets> const& blocks,
               Cigar::CIGAR_VEC const& cigar,
+              size_t start_offset, /* cigar start position on condensed coordinate */
+              size_t * expanded_start_offset, /* cigar start position on expanded coordinate */
               bool use_N_as_insert)
 {
     Cigar::CIGAR_VEC result;
@@ -322,14 +324,38 @@ Cigar::Expand(std::vector<block_offsets> const& blocks,
     
     assert(! blocks.empty());
 
-    Cigar::Op ins = use_N_as_insert ? Ops[Cigar::N] : Ops[Cigar::D];
+    Cigar::Op mskip = use_N_as_insert ? Ops[Cigar::N] : Ops[Cigar::D];
+    Cigar::Op ins;
 
     //initialize
     std::vector<block_offsets>::const_iterator cur_block = blocks.begin();
     CIGAR_VEC::const_iterator cur_op = cigar.begin();
 
-    size_t op_remain = (*cur_op).length;
-    size_t block_remain = (*cur_block).block_length;
+    int64_t op_remain = abs((*cur_op).length);
+    int64_t block_remain = (*cur_block).block_length;
+    bool is_reverse = (*cur_op).length < 0;
+    int64_t mult = is_reverse ? -1 : 1;
+
+    //eat up 'start_offset' units of block length
+    *expanded_start_offset = (*cur_block).jump_length;
+    
+    int64_t offset_remain = start_offset;
+    while (offset_remain > 0 && cur_block != blocks.end())
+    {
+        if (offset_remain < block_remain)
+        {
+            *expanded_start_offset += offset_remain;
+            offset_remain = 0;
+            block_remain -= offset_remain;
+        }
+        else
+        {
+            *expanded_start_offset += block_remain;
+            offset_remain -= block_remain;
+            block_remain = (*++cur_block).block_length;
+            *expanded_start_offset += (*cur_block).jump_length;
+        }
+    }
     
     while (1)
     {
@@ -344,20 +370,34 @@ Cigar::Expand(std::vector<block_offsets> const& blocks,
         if (op_remain <= block_remain)
         {
             //Remaining piece of op
-            result.push_back(*cur_op);
-            block_remain -= (*cur_op).length;
+            result.push_back(Cigar::Unit((*cur_op).op, op_remain * mult));
+            block_remain -= op_remain;
             if (++cur_op == cigar.end())
             {
                 break;
             }
-            op_remain = (*cur_op).length;
+            op_remain = abs((*cur_op).length);
+            if (is_reverse != ((*cur_op).length < 0))
+            {
+                //flip block_remain only if we are *reversing*
+                //direction, not if we are currently moving forward or
+                //reverse.
+                block_remain = (*cur_block).block_length - block_remain;
+            }
+            is_reverse = (*cur_op).length < 0;
+            mult = is_reverse ? -1 : 1;
+
         }
         else
         {
             //CIGAR op is broken up into two pieces
-            result.push_back(Cigar::Unit((*cur_op).op, block_remain));
-            result.push_back(Cigar::Unit(ins, (*cur_block).jump_length));
-            ++cur_block;
+            ins = (*cur_op).op.code == Cigar::T ? Ops[Cigar::U] : mskip;
+
+            result.push_back(Cigar::Unit((*cur_op).op, block_remain * mult));
+            result.push_back(Cigar::Unit(ins, (*cur_block).jump_length * mult));
+
+            is_reverse ? --cur_block : ++cur_block;
+            op_remain -= block_remain;
             block_remain = (*cur_block).block_length;
         }
     }
