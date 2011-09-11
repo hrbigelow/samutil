@@ -65,9 +65,11 @@ int main_align_eval_checksort(int argc, char ** argv)
 
     char * chunk_buffer = new char[max_mem];
 
-    std::vector<LineIndex> line_index = 
-        build_index(sorted_sam_file, chunk_buffer, max_mem, max_line,
-                    sam_order, &num_chunks);
+    assert(false);
+    std::vector<LineIndex> line_index;
+    // std::vector<LineIndex> line_index = 
+    //     build_index(sorted_sam_file, chunk_buffer, max_mem, max_line,
+    //                 sam_order, &num_chunks);
     
     delete chunk_buffer;
 

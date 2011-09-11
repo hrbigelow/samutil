@@ -23,8 +23,8 @@ BIN += samutil
 OPT = -O0
 
 CPPFLAGS = -I.
-LDFLAGS = -lgsl -lgslcblas -static-libgcc -L.
-
+# LDFLAGS = -lgsl -lgslcblas -static-libgcc -L.
+LDFLAGS = -lgsl -lgslcblas
 
 ifeq ($(findstring el5,$(shell uname -r)), el5)
 bindir = $(HOME)/usr_el5/bin
