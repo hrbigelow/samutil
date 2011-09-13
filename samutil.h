@@ -6,6 +6,8 @@ int main_transcript_to_genome(int argc, char ** argv);
 int main_get_tx_sequence(int argc, char ** argv);
 int main_score_dist(int argc, char ** argv);
 int main_score_mapq(int argc, char ** argv);
+int main_sam_index_fastq(int argc, char ** argv);
+
 //int main_generate_projection_header(int argc, char ** argv);
 
 #endif // _SAMUTIL_H

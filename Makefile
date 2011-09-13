@@ -109,11 +109,11 @@ sim: $(sim_OBJS)
 
 samutil_OBJS = $(addprefix $(OBJDIR)/, samutil.o					\
 	sam_transcript_to_genome.o dep/tools.o cisortho/dna.o			\
-	sam_score_mapq.o sam_score_aux.o seq_projection.o gtf.o			\
-	align_eval_raw.o cisortho/region.o file_utils.o sam_buffer.o	\
-	sam_helper.o sam_order.o cigar_ops.o cisortho/nested.o			\
-	dep/nucleotide_stats.o dep/stats_tools.o cisortho/litestream.o	\
-	cisortho/enum.o cisortho/dnacol.o)
+	sam_score_mapq.o sam_score_aux.o sam_index_fastq.o				\
+	seq_projection.o gtf.o align_eval_raw.o cisortho/region.o		\
+	file_utils.o sam_buffer.o sam_helper.o sam_order.o cigar_ops.o	\
+	cisortho/nested.o dep/nucleotide_stats.o dep/stats_tools.o		\
+	cisortho/litestream.o cisortho/enum.o cisortho/dnacol.o)
 
 samutil: $(samutil_OBJS)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -lz -lpthread -o $@ $^

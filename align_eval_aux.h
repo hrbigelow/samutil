@@ -36,6 +36,16 @@ get_key_quantiles(std::vector<LineIndex> const& line_index,
                   size_t * key_quantile_sizes,
                   std::vector<LineIndex> * key_quantile_sentinels);
 
+
+void 
+write_final_merge(std::vector<LineIndex> const& ok_index,
+                  std::vector<INDEX_ITER> const& offset_quantiles,
+                  FILE * tmp_fhs[],
+                  size_t num_chunks,
+                  FILE * out_dat_fh,
+                  FILE * out_ind_fh);
+
+
 std::vector<INDEX_ITER> 
 get_quantiles(std::vector<LineIndex> * line_index,
               bool (less_fcn)(LineIndex const&, LineIndex const&),

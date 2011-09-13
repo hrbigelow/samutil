@@ -49,10 +49,14 @@ bool GTFEntry::get_next_record(FILE * gtf_fh)
         exit(1);
     }
         
-    int parsed_attributes = 
-        sscanf(this->attribute_string, "gene_id \"%[^;\"]\"; transcript_id \"%[^;\"]\";",
-               this->gene_id, this->transcript_id);
 
+    char * att1 = strstr(this->attribute_string, "gene_id");
+    char * att2 = strstr(this->attribute_string, "transcript_id");
+    int parsed_attributes = 0;
+
+    parsed_attributes += att1 == NULL ? 0 : sscanf(att1, "gene_id \"%[^;\"]\";", this->gene_id);
+    parsed_attributes += att2 == NULL ? 0 : sscanf(att2, "transcript_id \"%[^;\"]\";", this->transcript_id);
+    
     if (score_string[0] == '.')
     {
         this->score = -1.0;

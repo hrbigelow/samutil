@@ -16,6 +16,8 @@ int usage()
             "samutil gen_qcal         Generate qcal file for use with 'samutil score'\n"
             "samutil score            Set mapq, XP, XY, XZ, and primary alignment flags from fragment-sorted SAM file\n"
             "samutil gen_header       Generate a projection-order transcript header\n"      
+            "samutil seqindex         Generate a sequence and index from fastq\n"
+
             "\n\n"
             "Notes:\n\n"
             "Read names may be in Illumina format, Casava 1.8 foramt, or 'numeric' format\n\n"
@@ -77,6 +79,10 @@ int main(int argc, char *argv[])
         fprintf(stderr, "Not ported yet");
         exit(1);
         //return main_generate_projection_header(argc - 1, argv + 1);
+    }
+    else if (strcmp(argv[1], "seqindex") == 0)
+    {
+        return main_sam_index_fastq(argc - 1, argv + 1);
     }
     else
     {

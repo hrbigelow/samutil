@@ -245,6 +245,10 @@ int main_align_eval_sort(int argc, char ** argv)
     fprintf(stderr, ".\n");
     fflush(stderr);
 
+    delete chunk_buffer_in;
+    delete chunk_buffer_out;
+
+
     // 0. Determine N quantiles based on file offset, offset_quantiles
     std::vector<INDEX_ITER> offset_quantiles;
     INDEX_ITER iit = line_index.begin();
@@ -259,179 +263,16 @@ int main_align_eval_sort(int argc, char ** argv)
     // line_index is sorted by (O,K)
     if (num_chunks > 1)
     {
-        std::vector<LineIndex> key_quantile_sentinels;
-        size_t * key_quantile_sizes = new size_t[num_chunks];
-
-        // 2. Find N quantile key values in index.  does not change
-        // order of line_index.
-        get_key_quantiles(line_index, num_chunks, key_quantile_sizes, & key_quantile_sentinels);
-
-        size_t kq_size_max = 
-            *std::max_element(key_quantile_sizes, key_quantile_sizes + num_chunks);
-
-        // 4. Allocate chunk of memory to hold biggest key_quantile
-        delete chunk_buffer_in;
-        delete chunk_buffer_out;
-
-        chunk_buffer_in = new char[kq_size_max];
-        chunk_buffer_out = new char[kq_size_max];
-
         for (size_t c = 0; c != num_chunks; ++c)
         {
             fseek(tmp_fhs[c], 0, std::ios::beg);
         }
 
-        std::vector<INDEX_ITER> prev_sub_k(offset_quantiles.size() - 1);
-        std::copy(offset_quantiles.begin(), offset_quantiles.end() - 1, prev_sub_k.begin());
-
-        size_t S, buffer_pos, total_subrange_size;
-        INDEX_ITER beg, end, sub_k;
-
-
-        std::vector<LineIndex> buf1, buf2;
-        std::vector<LineIndex> * merged;
-        std::vector<LineIndex> * swap;
-
-        size_t num_total_lines = 0;
-        size_t num_chunk_lines = 0;
-
-        fprintf(stderr, "Merging chunks [0-%zu]:", num_chunks - 1);
-        fflush(stderr);
-
-        std::pair<INDEX_ITER, INDEX_ITER> * subrange_iters =
-            new std::pair<INDEX_ITER, INDEX_ITER>[num_chunks];
-
-        //we want one sentinel value to be there in case we have to merge a zero-length
-        //range
-        size_t * subrange_sizes = new size_t[num_chunks + 1];
-        subrange_sizes[num_chunks] = 0;
-
-        for (size_t k = 0; k != num_chunks; ++k)
-        {
-            write_pointer = chunk_buffer_in;
-
-            //load kq range of each tmp file into the buffer
-            buffer_pos = 0;
-            total_subrange_size = 0;
-
-            for (size_t o = 0; o != num_chunks; ++o)
-            {
-                beg = prev_sub_k[o];
-                end = offset_quantiles[o+1];
-                sub_k = std::lower_bound(beg, end, key_quantile_sentinels[k], less_key);
-
-                //assert(__gnu_cxx::is_sorted(beg, end, less_key));
-
-                // fprintf(stdout, "key %Zu, offset %Zu, num_lines: %Zu\n",
-                //         k, o, part);
-
-                S = 0;
-                for (INDEX_ITER kit = beg; kit != sub_k; ++kit)
-                {
-                    (*kit).start_offset = S + buffer_pos;
-                    S += (*kit).line_length;
-                }
-                fread(write_pointer, 1, S, tmp_fhs[o]);
-                write_pointer += S;
-                buffer_pos += S;
-
-                if (buffer_pos > kq_size_max)
-                {
-                    fprintf(stderr, "buffer_pos: %Zu, kq_size_max: %Zu, o: %Zu, k: %Zu\n",
-                            buffer_pos, kq_size_max, o, k);
-                }
-                assert(buffer_pos <= kq_size_max);
-            
-
-                // last_merged_size = merged.size();
-                subrange_iters[o] = std::make_pair(beg, sub_k);
-                subrange_sizes[o] = std::distance(beg, sub_k);
-                total_subrange_size += subrange_sizes[o];
-
-                // fprintf(stdout, "key %Zu, offset %Zu, added: %Zu, num_lines: %Zu\n",
-                //         k, o, part, merged.size());
-
-                prev_sub_k[o] = sub_k;
-            }
-
-            //now, reserve, populate, and iteratively merge
-
-            buf1.reserve(total_subrange_size);
-            buf2.reserve(total_subrange_size);
-
-            merged = & buf1;
-            swap = & buf2;
-
-            (*merged).resize(0);
-            (*swap).resize(total_subrange_size);
-
-            for (size_t o = 0; o != num_chunks; ++o)
-            {
-                merged->insert(merged->end(), subrange_iters[o].first, subrange_iters[o].second);
-            }
-
-            //here's the tricky part.
-            //iteratively merge consecutive ranges until there is only one.
-            //invariant: subrange_sizes valid, num_chunks valid, swap valid
-            size_t num_merge_chunks = num_chunks + (num_chunks % 2); // square it off
-
-            while (num_merge_chunks > 1)
-            {
-                std::swap(swap, merged);
-                std::vector<LineIndex>::iterator swapit = swap->begin();
-                std::vector<LineIndex>::iterator mergit = merged->begin();
-
-                for (size_t o = 0; o != num_merge_chunks; o += 2)
-                {
-                    std::merge(swapit, swapit + subrange_sizes[o],
-                               swapit + subrange_sizes[o],
-                               swapit + subrange_sizes[o] + subrange_sizes[o + 1],
-                               mergit, less_key);
-
-                    swapit += subrange_sizes[o] + subrange_sizes[o + 1];
-                    mergit += subrange_sizes[o] + subrange_sizes[o + 1];
-
-                    subrange_sizes[o / 2] = subrange_sizes[o] + subrange_sizes[o + 1];
-                }
-                num_merge_chunks /= 2;
-
-                if (num_merge_chunks > 1 && (num_merge_chunks % 2) != 0)
-                {
-                    num_merge_chunks += (num_merge_chunks % 2);
-                    subrange_sizes[num_merge_chunks - 1] = 0;
-                }
-            }
-            
-            num_total_lines += merged->size();
-            num_chunk_lines = merged->size();
-
-            write_pointer = chunk_buffer_out;
-
-            for (INDEX_ITER mit = merged->begin(); mit != merged->end(); ++mit)
-            {
-                memcpy(write_pointer, chunk_buffer_in + (*mit).start_offset,
-                       (*mit).line_length);
-
-                write_pointer += (*mit).line_length;
-            }
-
-            assert(static_cast<size_t>(std::distance(chunk_buffer_out, write_pointer)) 
-                   == key_quantile_sizes[k]);
-
-            fwrite(chunk_buffer_out, 1, key_quantile_sizes[k], sorted_sam_fh);
-
-            fprintf(stderr, " %zu", k);
-            fflush(stderr);
-
-        }
+        write_final_merge(line_index, offset_quantiles, tmp_fhs, num_chunks, sorted_sam_fh, NULL);
 
         fprintf(stderr, ".\n");
         fprintf(stderr, "Cleaning up...");
         fflush(stderr);
-
-        delete key_quantile_sizes;
-        delete subrange_iters;
-        delete subrange_sizes;
 
         for (size_t o = 0; o != num_chunks; ++o)
         {
