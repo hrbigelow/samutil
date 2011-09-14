@@ -180,8 +180,6 @@ int main_align_eval_sort(int argc, char ** argv)
 
     size_t const max_line = 10000;
 
-    char * write_pointer;
-
     gzFile alignment_sam_zfh = gzopen(alignment_sam_file, "r");
     std::vector<size_t> chunk_lengths = 
         FileUtils::ChunkLengths(alignment_sam_zfh, max_mem, max_line);
@@ -228,12 +226,16 @@ int main_align_eval_sort(int argc, char ** argv)
 
     for (size_t c = 0; c != num_chunks; ++c)
     {
-        FILE * out_fh = num_chunks == 1 ? sorted_sam_fh : tmp_fhs[c];
+        FILE * used_out_fh = num_chunks == 1 ? sorted_sam_fh : tmp_fhs[c];
+
+        size_t nbytes_read = fread(chunk_buffer_in, 1, chunk_lengths[c], alignment_sam_fh);
+        assert(nbytes_read == chunk_lengths[c]);
+        chunk_buffer_in[nbytes_read] = '\0';
+
         std::pair<size_t, size_t> chunk_info = 
             process_chunk(chunk_buffer_in, chunk_buffer_out,
                           chunk_lengths[c], sam_order,
-                          alignment_sam_fh,
-                          out_fh, & line_index);
+                          used_out_fh, & line_index);
 
         offset_quantile_sizes.push_back(chunk_info.first);
         chunk_num_lines.push_back(chunk_info.second);

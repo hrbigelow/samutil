@@ -39,36 +39,6 @@ struct partial_index_aux
 
 
 
-// populate and open tmp files
-/*
-void prepare_temp_files(char const* basename,
-                        size_t num_files,
-                        
-                        
-    size_t template_length = strlen(sorted_sam_file) + 8;
-    char * tmp_file_template = new char[template_length];
-    strcpy(tmp_file_template, sorted_sam_file);
-    strcat(tmp_file_template, ".XXXXXX");
-
-    char ** tmp_files = new char *[num_chunks];
-    FILE ** tmp_fhs = new FILE *[num_chunks];
-    char * tmp_file_buf = new char[num_chunks * (template_length + 1)];
-    for (size_t c = 0; c != num_chunks; ++c)
-    {
-        tmp_files[c] = tmp_file_buf + (c * (template_length + 1));
-        strcpy(tmp_files[c], tmp_file_template);
-        int fdes = mkstemp(tmp_files[c]);
-        tmp_fhs[c] = fdopen(fdes, "w+");
-        if (tmp_fhs[c] == NULL)
-        {
-            fprintf(stderr, "Error: couldn't open temporary chunk file %s for reading/writing.\n",
-                    tmp_files[c]);
-            exit(1);
-        }
-    }
-*/
-
-
 
 //tmp_fhs are open. 
 //chunk_buffer_in and chunk_buffer_out are allocated to
@@ -103,6 +73,11 @@ process_chunk(char * chunk_buffer_in,
 
     size_t S = samlines.size();
 
+    if (S == 0)
+    {
+        return std::pair<size_t, size_t>(0, 0);
+    }
+
     LineIndex * line_index_chunk = new LineIndex[S];
 
     std::vector<char *>::iterator sit;
@@ -131,8 +106,8 @@ process_chunk(char * chunk_buffer_in,
         write_pointer += (*lit).line_length;
     }
 
-    assert(static_cast<size_t>(std::distance(chunk_buffer_out, write_pointer)) 
-           == chunk_length);
+    size_t nbytes_written = std::distance(chunk_buffer_out, write_pointer);
+    assert(nbytes_written == chunk_length);
 
     fwrite(chunk_buffer_out, 1, chunk_length, chunk_tmp_fh);
     fflush(chunk_tmp_fh);
@@ -140,7 +115,7 @@ process_chunk(char * chunk_buffer_in,
     (*line_index).insert((*line_index).end(), line_index_chunk, line_index_chunk + S);
     delete line_index_chunk;
 
-    return std::make_pair(nbytes_read, S);
+    return std::make_pair(nbytes_written, S);
 }
 
 
@@ -183,14 +158,15 @@ get_key_quantiles(std::vector<LineIndex> const& line_index,
 // catenated_index populated and ordered as (O, K)
 // chunk_buffer populated to match catenated_index
 // prev_chunk_starts updated to next set of chunk starts for next call
-void catenate_subchunks(LineIndex const& query_key_quantile,
-                        FILE * tmp_fhs[],
-                        std::vector<INDEX_ITER> * prev_chunk_starts,
-                        std::vector<INDEX_ITER> const& chunk_ends, /* ends of each chunk ordered by (O, K) */
-                        size_t num_chunks,
-                        char ** chunk_buffer,
-                        std::vector<LineIndex> * catenated_index,
-                        size_t ** subrange_sizes)
+// returns number of bytes written
+size_t catenate_subchunks(LineIndex const& query_key_quantile,
+                          FILE * tmp_fhs[],
+                          std::vector<INDEX_ITER> * prev_chunk_starts,
+                          std::vector<INDEX_ITER> const& chunk_ends, /* ends of each chunk ordered by (O, K) */
+                          size_t num_chunks,
+                          char ** chunk_buffer,
+                          std::vector<LineIndex> * catenated_index,
+                          size_t ** subrange_sizes)
 {
     std::pair<INDEX_ITER, INDEX_ITER> * subrange_iters =
         new std::pair<INDEX_ITER, INDEX_ITER>[num_chunks];
@@ -198,6 +174,9 @@ void catenate_subchunks(LineIndex const& query_key_quantile,
     char * write_pointer = (*chunk_buffer);
     size_t buffer_pos = 0;
     size_t total_subrange_size = 0;
+
+    INDEX_ITER beg, end, sub_k;
+    size_t S;
 
     for (size_t o = 0; o != num_chunks; ++o)
     {
@@ -220,18 +199,10 @@ void catenate_subchunks(LineIndex const& query_key_quantile,
         write_pointer += S;
         buffer_pos += S;
 
-        if (buffer_pos > kq_size_max)
-        {
-            fprintf(stderr, "buffer_pos: %Zu, kq_size_max: %Zu, o: %Zu, k: %Zu\n",
-                    buffer_pos, kq_size_max, o, k);
-        }
-        assert(buffer_pos <= kq_size_max);
-            
-
         // last_merged_size = merged.size();
         subrange_iters[o] = std::make_pair(beg, sub_k);
-        subrange_sizes[o] = std::distance(beg, sub_k);
-        total_subrange_size += subrange_sizes[o];
+        (*subrange_sizes)[o] = std::distance(beg, sub_k);
+        total_subrange_size += (*subrange_sizes)[o];
 
         // fprintf(stdout, "key %Zu, offset %Zu, added: %Zu, num_lines: %Zu\n",
         //         k, o, part, merged.size());
@@ -250,6 +221,7 @@ void catenate_subchunks(LineIndex const& query_key_quantile,
     }
 
     delete subrange_iters;
+    return buffer_pos; // number of bytes written
 }
 
 
@@ -269,23 +241,25 @@ void merge_ok_index(size_t const* subrange_sizes,
     std::copy(subrange_sizes, subrange_sizes + num_ranges, sz_tmp);
     sz_tmp[num_ranges] = 0;
 
-    size_t total_size = std::sum(subrange_sizes, subrange_sizes + num_ranges);
+    size_t total_size = std::accumulate(subrange_sizes, subrange_sizes + num_ranges, 0);
 
     (*k_index)->reserve(total_size);
     (*k_index)->resize(total_size);
 
     //here's the tricky part.
     //iteratively merge consecutive ranges until there is only one.
-    //invariant: subrange_sizes valid, num_chunks valid, k_index valid
-    size_t num_merge_chunks = num_chunks + (num_chunks % 2); // square it off
+    //invariant: subrange_sizes valid, num_ranges valid, k_index valid
+    size_t num_merge_ranges = num_ranges + (num_ranges % 2); // square it off
 
-    while (num_merge_chunks > 1)
+    std::vector<LineIndex>::iterator swapit, mergit;
+
+    while (num_merge_ranges > 1)
     {
         std::swap((*k_index), (*ok_index));
-        std::vector<LineIndex>::iterator swapit = (*k_index)->begin();
-        std::vector<LineIndex>::iterator mergit = (*ok_index)->begin();
+        swapit = (*k_index)->begin();
+        mergit = (*ok_index)->begin();
 
-        for (size_t o = 0; o != num_merge_chunks; o += 2)
+        for (size_t o = 0; o != num_merge_ranges; o += 2)
         {
             __gnu_parallel::merge(swapit, swapit + sz_tmp[o],
                                   swapit + sz_tmp[o],
@@ -297,34 +271,56 @@ void merge_ok_index(size_t const* subrange_sizes,
 
             sz_tmp[o / 2] = sz_tmp[o] + sz_tmp[o + 1];
         }
-        num_merge_chunks /= 2;
+        num_merge_ranges /= 2;
 
-        if (num_merge_chunks > 1 && (num_merge_chunks % 2) != 0)
+        if (num_merge_ranges > 1 && (num_merge_ranges % 2) != 0)
         {
-            num_merge_chunks += (num_merge_chunks % 2);
-            sz_tmp[num_merge_chunks - 1] = 0;
+            num_merge_ranges += (num_merge_ranges % 2);
+            sz_tmp[num_merge_ranges - 1] = 0;
         }
     }
     delete sz_tmp;
+
 }
 
 //write blocks from 'unordered' to 'ordered' according to 'ordering'
 //index.  return number of bytes written
 size_t write_new_ordering(char const* unordered, 
-                          std::vector<LineIndex> const& ordering,
+                          std::vector<LineIndex> * ordering,
                           char * ordered)
 {
     char * write_pointer = ordered;
     
-    for (INDEX_ITER mit = ordering.begin(); mit != ordering.end(); ++mit)
+    std::vector<LineIndex>::iterator mit;
+    size_t S = 0;
+
+    for (mit = (*ordering).begin(); mit != (*ordering).end(); ++mit)
     {
         memcpy(write_pointer, unordered + (*mit).start_offset,
                (*mit).line_length);
         
         write_pointer += (*mit).line_length;
+        S += (*mit).line_length;
+        (*mit).start_offset = S;
     }
     return std::distance(ordered, write_pointer);
 }
+
+
+size_t set_start_offsets(std::vector<LineIndex>::iterator beg,
+                         std::vector<LineIndex>::iterator end,
+                         size_t initial_offset)
+{
+    std::vector<LineIndex>::iterator cur;
+    size_t off = initial_offset;
+    for (cur = beg; cur != end; ++cur)
+    {
+        (*cur).start_offset = off;
+        off += (*cur).line_length;
+    }
+    return off;
+}
+                         
 
 
 // Preconditions: 
@@ -364,6 +360,8 @@ void write_final_merge(std::vector<LineIndex> const& ok_index,
     fprintf(stderr, "Merging chunks [0-%zu]:", num_chunks - 1);
     fflush(stderr);
 
+    size_t chunk_offset = 0;
+
     for (size_t k = 0; k != num_chunks; ++k)
     {
 
@@ -371,19 +369,22 @@ void write_final_merge(std::vector<LineIndex> const& ok_index,
         std::vector<LineIndex> * ok_index_ptr = & buf1;
         std::vector<LineIndex> * k_index_ptr = & buf2;
 
-        catenate_subchunks(key_quantile_sentinels[k],
-                           tmp_fhs,
-                           & prev_sub_k,
-                           offset_quantiles,
-                           num_chunks,
-                           & chunk_buffer_in,
-                           & ok_index_ptr,
-                           & subrange_sizes);
+        size_t bytes_written = 
+            catenate_subchunks(key_quantile_sentinels[k],
+                               tmp_fhs,
+                               & prev_sub_k,
+                               offset_quantiles,
+                               num_chunks,
+                               & chunk_buffer_in,
+                               ok_index_ptr,
+                               & subrange_sizes);
+        
+        assert(bytes_written == key_quantile_sizes[k]);
 
         merge_ok_index(subrange_sizes, num_chunks, & ok_index_ptr, & k_index_ptr);
-            
-        size_t bytes_written = 
-            write_new_ordering(chunk_buffer_in, (*k_index_ptr), chunk_buffer_out);
+
+        bytes_written = 
+            write_new_ordering(chunk_buffer_in, k_index_ptr, chunk_buffer_out);
 
         assert(bytes_written == key_quantile_sizes[k]);
 
@@ -391,13 +392,15 @@ void write_final_merge(std::vector<LineIndex> const& ok_index,
 
         if (out_ind_fh != NULL)
         {
-            for (std::vector<LineIndex>::const_iterator i = (*k_index).begin();
-                 i != (*k_index).end(); ++i)
+            for (std::vector<LineIndex>::const_iterator i = (*k_index_ptr).begin();
+                 i != (*k_index_ptr).end(); ++i)
             {
-                fprintf(out_ind_fh, "%zu\t%zu\t%zu\n",
-                        (*i).index, (*i).start_offset, (*i).line_length);
+                fprintf(out_ind_fh, "%zu\t%zu\t%i\n",
+                        (*i).index, (*i).start_offset + chunk_offset, (*i).line_length);
             }
         }
+
+        chunk_offset += bytes_written;
 
         fprintf(stderr, " %zu", k);
         fflush(stderr);

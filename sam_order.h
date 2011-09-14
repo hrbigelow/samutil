@@ -33,6 +33,9 @@ class SamOrder
     SamOrder();
     ~SamOrder();
     SAM_QNAME_FORMAT InitFromFile(FILE * sam_fh);
+    SAM_QNAME_FORMAT InitFromFastqFile(char const* fq_file);
+    SAM_QNAME_FORMAT InitFromID(char const* id);
+
     void InitFromChoice(SAM_QNAME_FORMAT qname_format);
 
     SAM_ORDER order;
@@ -88,6 +91,7 @@ class SamOrder
     size_t samline_position_min_align_guide(char const* samline) const;
     size_t samline_position_align(char const* samline) const;
     size_t samline_read_id(char const* samline) const;
+    size_t samline_fragment_id(char const* samline) const;
 
 };
 

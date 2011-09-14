@@ -2,6 +2,7 @@
 #include "sam_helper.h"
 
 #include <set>
+#include <zlib.h>
 
 //!!! This is muddied in that it is partially up to the user, partly a nuissance.
 SamOrder::SamOrder(SAM_ORDER _so, char const* _sort_type) : 
@@ -49,6 +50,10 @@ SamOrder::SamOrder(SAM_ORDER _so, char const* _sort_type) :
     else if (strcmp(this->sort_type, "READ_ID_FLAG") == 0)
     {
         this->sam_index = &SamOrder::samline_read_id;
+    }
+    else if (strcmp(this->sort_type, "FRAGMENT_ID") == 0)
+    {
+        this->sam_index = &SamOrder::samline_fragment_id;
     }
     else if (strcmp(this->sort_type, "NONE") == 0)
     {
@@ -99,28 +104,64 @@ SAM_QNAME_FORMAT SamOrder::InitFromFile(FILE * sam_fh)
     SetToFirstDataLine(&sam_fh);
 
     char qname[1024];
+
+    if (fscanf(sam_fh, "%s\t", qname) != 1)
+    {
+        qname[0] = '\0';
+    }
+
+    rewind(sam_fh);
+
+    return InitFromID(qname);
+
+}
+
+
+//Call to initialize the proper READ ID parsing format
+SAM_QNAME_FORMAT SamOrder::InitFromFastqFile(char const* file)
+{
+    
+    char id[1024];
+
+    gzFile fh = gzopen(file, "r");
+    gzread(fh, id, 1023);
+    gzclose(fh);
+
+    // a fastq file has a single first line with '@' followed by the ID.
+    // that's why there is a '1' here and in the next statement.
+    char * nl = strchr(id, '\n');
+    nl == NULL ? id[1] = '\0' : *nl = '\0';
+
+    return InitFromID(id + 1);
+
+}
+
+
+SAM_QNAME_FORMAT SamOrder::InitFromID(char const* id)
+{
+
     int dum[5];
     char dum_string[30];
 
     SAM_QNAME_FORMAT qname_format;
 
-    if (fscanf(sam_fh, "%s\t", qname) != 1)
+    if (strlen(id) == 0)
     {
         this->parse_fragment_id = &parse_fragment_id_zero;
         qname_format = SAM_NON_INTERPRETED;
     }
-    else if (sscanf(qname, "%i", dum) == 1)
+    else if (sscanf(id, "%i", dum) == 1)
     {
         this->parse_fragment_id = &parse_fragment_id_numeric;
         qname_format = SAM_NUMERIC;
     }
-    else if (sscanf(qname, "%[^:]:%i:%i:%i:%i", dum_string, dum, dum + 1, dum + 2, dum + 3) == 5)
+    else if (sscanf(id, "%[^:]:%i:%i:%i:%i", dum_string, dum, dum + 1, dum + 2, dum + 3) == 5)
     {
         this->parse_fragment_id = &parse_fragment_id_illumina;
         qname_format = SAM_ILLUMINA;
     }
 
-    else if (sscanf(qname, "%*[^:]:%*[^:]:%[^:]:%i:%i:%i:%i", 
+    else if (sscanf(id, "%*[^:]:%*[^:]:%[^:]:%i:%i:%i:%i", 
                     dum_string, dum, dum + 1, dum + 2, dum + 3) == 5)
 
     {
@@ -130,10 +171,9 @@ SAM_QNAME_FORMAT SamOrder::InitFromFile(FILE * sam_fh)
     else
     {
         fprintf(stderr, "Error: SamOrder: Don't have a parser for this qname format: %s\n",
-                qname);
+                id);
         exit(1);
     }
-    rewind(sam_fh);
 
     return qname_format;
 }
@@ -470,6 +510,14 @@ size_t SamOrder::samline_read_id(char const* samline) const
     read_id += read_num;
 
     return read_id;
+}
+
+
+
+//compute the fragment id assuming a numeric read id format
+size_t SamOrder::samline_fragment_id(char const* samline) const
+{
+    return this->parse_fragment_id(samline);
 }
 
 

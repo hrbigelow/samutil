@@ -26,8 +26,7 @@ process_chunk(char * chunk_buffer_in,
               char * chunk_buffer_out,
               size_t chunk_length,
               SamOrder const& sam_order,
-              FILE * input_sam_fh,
-              FILE * output_fh,
+              FILE * chunk_tmp_fh,
               std::vector<LineIndex> * line_index);
 
 void
