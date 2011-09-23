@@ -350,7 +350,15 @@ int main_align_eval_raw(int argc, char ** argv)
 
     while (samline->parse_flag == DATA_LINE)
     {
-        ParseSimReadCoords(samline->qname, 
+        char guide_string[1024];
+        char type_dummy;
+        if (! samline->has_tag(GuideAlignmentTag, type_dummy, guide_string))
+        {
+            fprintf(stderr, "Error: SAM line didn't have guide alignment tag %s\n",
+                    GuideAlignmentTag);
+            exit(1);
+        }
+        ParseSimReadCoords(guide_string, 
                            samline->flag.first_fragment_in_template,
                            &guide_coords);
         
@@ -501,7 +509,7 @@ int main_align_eval_raw(int argc, char ** argv)
         if (require_primary_alignment && used_this_read)
         {
             fprintf(stderr, "Error: requiring primary alignment, but have used this template before:\n");
-            samline->print_sam(stderr);
+            samline->fprint(stderr);
             exit(1);
         }
                     
@@ -611,7 +619,7 @@ int main_align_eval_raw(int argc, char ** argv)
             */
             
             //assert(guide_read_pos == samline->raw_read_length());
-            assert(test_read_pos == samline->raw_read_length());
+            assert(test_read_pos == samline->template_length());
             num_trimmed_bases += this_num_guide_bases - test_read_pos;
 
         }
@@ -696,8 +704,8 @@ int main_align_eval_raw(int argc, char ** argv)
     }
     if (samline->parse_flag != END_OF_FILE)
     {
-        fprintf(stderr, "Error: samline is not the end of the file:\n%s\n\n",
-                samline->line);
+        fprintf(stderr, "Error: samline is not the end of the file:\n");
+        samline->fprint(stderr);
         exit(1);
     }
 

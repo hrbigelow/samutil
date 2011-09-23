@@ -92,12 +92,32 @@ size_t CountCorrectBases(SamLine const* samline,
                          size_t * num_test_bases);
 
 
+typedef std::vector<SamLine *> SAMVEC;
+typedef SAMVEC::iterator SAMIT;
+
+
+// inputs: SamLine ** [beg, end) range, and SamBuffer *
+// outputs: char * scored_rsam_line
+struct score_rsam_alloc_binary
+{
+    FragmentScore const* fragment_scoring;
+    score_rsam_alloc_binary(FragmentScore const* _fragment_scoring);
+    char * operator()(std::pair<SAMIT, SAMIT> const& range,
+                      SamBuffer * sam_buffer);
+};
+
+
+struct parse_sam_unary
+{
+    parse_sam_unary();
+    SamLine * operator()(char * sam_string);
+};
+
 void NextLine(FILE * unnscored_sam_fh, 
               SamBuffer & sam_buffer,
               bool * new_fragment, 
               bool * seen_a_read,
-              char * prev_rname,
-              size_t * prev_qid,
+              size_t * prev_fragment_id,
               SamLine ** low_bound);
 
 

@@ -148,7 +148,7 @@ int main_score_dist(int argc, char ** argv)
     SAM_QNAME_FORMAT qname_fmt = sam_order.InitFromFile(unscored_sam_fh);
     sam_order.AddHeaderContigStats(unscored_sam_fh);
 
-    SamLine::SetGlobalFlags(qname_fmt, expected_read_layout);
+    SamLine::SetGlobalFlags(qname_fmt, expected_read_layout, "", 0);
     
     //alignments from different physical fragments
     bool paired_reads_are_same_stranded = false;

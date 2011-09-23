@@ -5,6 +5,34 @@
 
 #include <cstring>
 #include <cassert>
+#include <cstdarg>
+
+
+
+//optionally prints to a string or a file.  to make a string behave
+//the same as a file, though, we need to increment it after printing.
+int FileUtils::switch_printf(bool is_file, void * & buf, char const* format, ...)
+{
+    va_list arg;
+    int done;
+    
+    va_start (arg, format);
+    
+    if (is_file)
+    {
+        done = vfprintf(static_cast<FILE *>(buf), format, arg);
+    }
+    else
+    {
+        char * stringbuf = static_cast<char *>(buf);
+        done = vsprintf(stringbuf, format, arg);
+        buf += done;
+    }
+
+    va_end (arg);
+
+    return done;
+}
 
 
 
@@ -71,7 +99,7 @@ void FileUtils::print_chunk_by_line(FILE * input_fh, size_t chunk,
         }
         ++cur_chunk;
     }
-    delete buf;
+    delete [] buf;
 }
 
 
@@ -100,32 +128,74 @@ std::vector<size_t> FileUtils::ChunkLengths(gzFile input_fh, size_t chunk_approx
             {
                 gzread(input_fh, tmp_buf, len);
             }
-            delete tmp_buf;
+            delete [] tmp_buf;
             pos = gzseek(input_fh, 0L, SEEK_CUR);
         }
         lengths.push_back(static_cast<size_t>(pos - prev_pos));
         prev_pos = pos;
     }
-    delete dummy_buf;
+    delete [] dummy_buf;
     gzrewind(input_fh);
 
     return lengths;
 }
 
 
-std::vector<char *> FileUtils::find_line_starts(char * lines)
+//
+std::vector<char *> 
+find_complete_lines_aux(char * lines, bool nullify_newlines, size_t * num_unused_bytes)
 {
     char * lines_tmp = lines;
     std::vector<char *> line_starts;
-
-    line_starts.push_back(lines_tmp);
-    while ((lines_tmp = strchr(lines_tmp, '\n')))
+    size_t total_length = strlen(lines);
+    if (total_length == 0)
     {
-        line_starts.push_back(++lines_tmp);
+        return line_starts;
     }
+
+    size_t first_line_length = 
+        std::max(100UL, 
+                 static_cast<size_t>(std::distance(lines_tmp, strchrnul(lines_tmp, '\n'))));
+
+    size_t est_num_lines = total_length / first_line_length;
+
+    line_starts.reserve(est_num_lines);
+        
+    line_starts.push_back(lines_tmp);
+
+    if (nullify_newlines)
+    {
+        while ((lines_tmp = strchr(lines_tmp, '\n')))
+        {
+            *lines_tmp = '\0';
+            line_starts.push_back(++lines_tmp);
+        }
+    }
+    else
+    {
+        while ((lines_tmp = strchr(lines_tmp, '\n')))
+        {
+            line_starts.push_back(++lines_tmp);
+        }
+    }
+    *num_unused_bytes = strlen(line_starts.back());
     line_starts.pop_back();
+
     return line_starts;
 }
+
+std::vector<char *> 
+FileUtils::find_complete_lines(char * lines, size_t * nbytes_unused)
+{
+    return find_complete_lines_aux(lines, false, nbytes_unused);
+}
+
+std::vector<char *> 
+FileUtils::find_complete_lines_nullify(char * lines, size_t * nbytes_unused)
+{
+    return find_complete_lines_aux(lines, true, nbytes_unused);
+}
+
 
 
 
@@ -150,8 +220,8 @@ BufferedFile::BufferedFile(char const* _file, size_t _chunk_size, size_t _max_li
 
 BufferedFile::~BufferedFile()
 {
-    delete this->file;
-    delete this->chunk_buffer;
+    delete [] this->file;
+    delete [] this->chunk_buffer;
     if (this->fh != NULL)
     {
         gzclose(this->fh);
@@ -195,6 +265,7 @@ char * BufferedFile::next_n_lines(size_t num_lines, bool * advanced_chunk, bool 
 {
     //is our current line_iter valid?  if not, we need to read another chunk
     size_t lines_left = std::distance(this->line_iter, this->line_starts.end());
+    size_t nbytes_unused;
 
     *advanced_chunk = lines_left < num_lines;
 
@@ -235,7 +306,7 @@ char * BufferedFile::next_n_lines(size_t num_lines, bool * advanced_chunk, bool 
         ++this->chunk_iter;
 
         this->chunk_buffer[num_bytes_read + carry_over] = '\0';
-        this->line_starts = FileUtils::find_line_starts(this->chunk_buffer);
+        this->line_starts = FileUtils::find_complete_lines(this->chunk_buffer, & nbytes_unused);
         this->line_iter = this->line_starts.begin();
 
         //replace newlines with nulls

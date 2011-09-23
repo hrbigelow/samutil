@@ -10,13 +10,16 @@ int usage()
             "samutil\n"
             "Author: Henry Bigelow (hbigelow@amgen.com)\n\n"
             "Usage:\n\n"
+            "samutil sort             sort a SAM, tSAM or rSAM file\n"
+            "samutil checksort        check sorted order\n"
             "samutil genome2tx        Condense reads-to-genome alignments to reads-to-transcriptome\n"
             "samutil tx2genome        Expand reads-to-transcriptome alignments to reads-to-genome alignments\n"
             "samutil get_tx_sequence  Get transcript sequence from genomic sequence\n"
             "samutil gen_qcal         Generate qcal file for use with 'samutil score'\n"
             "samutil score            Set mapq, XP, XY, XZ, and primary alignment flags from fragment-sorted SAM file\n"
             "samutil gen_header       Generate a projection-order transcript header\n"      
-            "samutil seqindex         Generate a sequence and index from fastq\n"
+            "samutil truncate         Truncate a SAM file, replacing QNAME, SEQ, QUAL\n"
+            "samutil seqindex         Generate a sequence and index from fastq, to recover QNAME, SEQ, QUAL\n"
 
             "\n\n"
             "Notes:\n\n"
@@ -50,6 +53,14 @@ int main(int argc, char *argv[])
     {
         return usage();
     }
+    else if (strcmp(argv[1], "sort") == 0)
+    {
+        return main_sam_sort(argc - 1, argv + 1);
+    }
+    else if (strcmp(argv[1], "checksort") == 0)
+    {
+        return main_sam_checksort(argc - 1, argv + 1);
+    }
     else if (strcmp(argv[1], "genome2tx") == 0)
     {
         fprintf(stderr, "Sorry, not implemented");
@@ -80,9 +91,17 @@ int main(int argc, char *argv[])
         exit(1);
         //return main_generate_projection_header(argc - 1, argv + 1);
     }
+    else if (strcmp(argv[1], "truncate") == 0)
+    {
+        return main_sam_truncate(argc - 1, argv + 1);
+    }
     else if (strcmp(argv[1], "seqindex") == 0)
     {
         return main_sam_index_fastq(argc - 1, argv + 1);
+    }
+    else if (strcmp(argv[1], "rejoin") == 0)
+    {
+        return main_sam_rejoin(argc - 1, argv + 1);
     }
     else
     {

@@ -16,7 +16,7 @@
 //Initialize std::vector<char const*> merged to
 //size_t m = 0
 
-#include "align_eval_sort.h"
+#include "sam_sort.h"
 
 #define __STDC_LIMIT_MACROS
 #include <stdint.h>
@@ -29,9 +29,7 @@
 
 #include <omp.h>
 
-//#include <algorithm>
 #include <parallel/algorithm>
-
 
 #include "align_eval_raw.h"
 #include "align_eval_aux.h"
@@ -42,18 +40,19 @@
 #include "sam_order.h"
 
 
-int align_eval_sort_usage(char const* sdef, size_t mdef)
+int sam_sort_usage(char const* sdef, size_t mdef)
 {
     fprintf(stderr,
             "Usage:\n\n"
-            "align_eval sort [OPTIONS] alignment.sam alignment_sorted.sam\n\n"
+            "samutil sort [OPTIONS] alignment.sam alignment_sorted.sam\n\n"
             "Options:\n\n"
             "-s  STRING    type of sorting to use {READ_ID_FLAG, ALIGN, GUIDE, MIN_ALIGN_GUIDE}[%s]\n"
             "-m  INT       number bytes of memory to use [%Zu]\n"
             "-t  INT       number of threads to use [1]\n"
             "-u  FLAG      (unique) if present, omit printing of all but one duplicate lines. [false]\n"
             "-h  STRING    optional sam header if alignment.sam header lacks SQ fields.\n"
-            "              If provided, any header lines in alignment.sam will be ignored.\n\n",
+            "              If provided, any header lines in alignment.sam will be ignored.\n"
+            "-C  STRING    work in the directory named here [.]\n",
             sdef, mdef);
 
     fprintf(stderr,
@@ -67,7 +66,7 @@ int align_eval_sort_usage(char const* sdef, size_t mdef)
 }
 
 
-int main_align_eval_sort(int argc, char ** argv)
+int main_sam_sort(int argc, char ** argv)
 {
 
     char const* sort_type_def = "MIN_ALIGN_GUIDE";
@@ -80,9 +79,10 @@ int main_align_eval_sort(int argc, char ** argv)
     size_t max_mem = max_mem_def;
 
     size_t num_threads = 1;
+    char const* working_dir = ".";
 
     char c;
-    while ((c = getopt(argc, argv, "s:m:t:uh:")) >= 0)
+    while ((c = getopt(argc, argv, "s:m:t:uh:C:")) >= 0)
     {
         switch(c)
         {
@@ -91,7 +91,8 @@ int main_align_eval_sort(int argc, char ** argv)
         case 't': num_threads = static_cast<size_t>(atof(optarg)); break;
         case 'u': filter_duplicates = true; break;
         case 'h': sam_header_file = optarg; break;
-        default: return align_eval_sort_usage(sort_type_def, max_mem_def); break;
+        case 'C': working_dir = optarg; break;
+        default: return sam_sort_usage(sort_type_def, max_mem_def); break;
         }
     }
 
@@ -102,11 +103,18 @@ int main_align_eval_sort(int argc, char ** argv)
     int arg_count = optind + 2;
     if (argc != arg_count)
     {
-        return align_eval_sort_usage(sort_type_def, max_mem_def);
+        return sam_sort_usage(sort_type_def, max_mem_def);
     }
 
     char const* alignment_sam_file = argv[optind];
     char const* sorted_sam_file = argv[optind + 1];
+
+    int chdir_success = chdir(working_dir);
+    if (chdir_success != 0)
+    {
+        fprintf(stderr, "Error: couldn't change directory to %s\n", working_dir);
+        exit(1);
+    }
 
     FILE * alignment_sam_fh = open_if_present(alignment_sam_file, "r");
     FILE * sorted_sam_fh = open_if_present(sorted_sam_file, "w");
@@ -127,7 +135,7 @@ int main_align_eval_sort(int argc, char ** argv)
     char * header_buf = new char[header_length];
     fread(header_buf, 1, header_length, used_header_fh);
     fwrite(header_buf, 1, header_length, sorted_sam_fh);
-    delete header_buf;
+    delete [] header_buf;
 
     fflush(sorted_sam_fh);
 
@@ -179,10 +187,11 @@ int main_align_eval_sort(int argc, char ** argv)
      */
 
     size_t const max_line = 10000;
+    size_t chunk_size = max_mem / 2;
 
     gzFile alignment_sam_zfh = gzopen(alignment_sam_file, "r");
     std::vector<size_t> chunk_lengths = 
-        FileUtils::ChunkLengths(alignment_sam_zfh, max_mem, max_line);
+        FileUtils::ChunkLengths(alignment_sam_zfh, chunk_size, max_line);
     gzclose(alignment_sam_zfh);
 
     size_t num_chunks = chunk_lengths.size();
@@ -211,8 +220,8 @@ int main_align_eval_sort(int argc, char ** argv)
     }
 
     // build the index, and output the
-    char * chunk_buffer_in = new char[max_mem];
-    char * chunk_buffer_out = new char[max_mem];
+    char * chunk_buffer_in = new char[chunk_size + 1];
+    char * chunk_buffer_out = new char[chunk_size + 1];
 
 
     chunk_lengths[0] -= header_length;
@@ -247,8 +256,8 @@ int main_align_eval_sort(int argc, char ** argv)
     fprintf(stderr, ".\n");
     fflush(stderr);
 
-    delete chunk_buffer_in;
-    delete chunk_buffer_out;
+    delete [] chunk_buffer_in;
+    delete [] chunk_buffer_out;
 
 
     // 0. Determine N quantiles based on file offset, offset_quantiles
@@ -290,11 +299,10 @@ int main_align_eval_sort(int argc, char ** argv)
     close_if_present(sorted_sam_fh);
     close_if_present(sam_header_fh);
 
-    delete chunk_buffer_in;
-    delete tmp_file_template;
-    delete tmp_files;
-    delete tmp_fhs;
-    delete tmp_file_buf;
+    delete [] tmp_file_template;
+    delete [] tmp_files;
+    delete [] tmp_fhs;
+    delete [] tmp_file_buf;
 
     fprintf(stdout, "%Zu lines printed.\n", line_index.size());
 

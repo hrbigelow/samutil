@@ -20,24 +20,25 @@ bool less_key(LineIndex const& a, LineIndex const& b)
 
 
 //unary function for computing index
-struct partial_index_aux
+partial_index_aux::partial_index_aux(SamOrder const* _sam_order) : sam_order(_sam_order) { }
+
+LineIndex partial_index_aux::operator()(char * samline)
 {
-    SamOrder const* sam_order;
-    partial_index_aux(SamOrder const* _sam_order) : sam_order(_sam_order) { }
-    LineIndex operator()(char * samline)
-    {
-        char * end = strchr(samline, '\n');
-        *end = '\0';
-
-        LineIndex index((this->sam_order->*(this->sam_order->sam_index))(samline), 
-                        0, strlen(samline) + 1);
-        *end = '\n';
-        return index;
-    }        
-};
+    LineIndex index((this->sam_order->*(this->sam_order->sam_index))(samline), 
+                    0, strlen(samline) + 1);
+    return index;
+}        
 
 
+truncate_sam_unary::truncate_sam_unary() { }
 
+char * truncate_sam_unary::operator()(char * full_samline)
+{
+    SamLine * sam = new SamLine(full_samline);
+    sam->sprint(full_samline);
+    delete sam;
+    return full_samline;
+}
 
 
 //tmp_fhs are open. 
@@ -68,8 +69,14 @@ process_chunk(char * chunk_buffer_in,
               std::vector<LineIndex> * line_index)
 {
 
+    size_t nbytes_unused;
+
     //this is really fast
-    std::vector<char *> samlines = FileUtils::find_line_starts(chunk_buffer_in);
+    std::vector<char *> samlines = 
+        FileUtils::find_complete_lines_nullify(chunk_buffer_in, & nbytes_unused);
+
+    // we are depending on the chunks to be separated at record boundaries
+    assert(nbytes_unused == 0);
 
     size_t S = samlines.size();
 
@@ -103,6 +110,7 @@ process_chunk(char * chunk_buffer_in,
         memcpy(write_pointer,
                chunk_buffer_in + (*lit).start_offset, (*lit).line_length);
 
+        write_pointer[(*lit).line_length - 1] = '\n';
         write_pointer += (*lit).line_length;
     }
 
@@ -113,7 +121,7 @@ process_chunk(char * chunk_buffer_in,
     fflush(chunk_tmp_fh);
 
     (*line_index).insert((*line_index).end(), line_index_chunk, line_index_chunk + S);
-    delete line_index_chunk;
+    delete [] line_index_chunk;
 
     return std::make_pair(nbytes_written, S);
 }
@@ -220,7 +228,7 @@ size_t catenate_subchunks(LineIndex const& query_key_quantile,
                                 subrange_iters[o].second);
     }
 
-    delete subrange_iters;
+    delete [] subrange_iters;
     return buffer_pos; // number of bytes written
 }
 
@@ -233,8 +241,8 @@ size_t catenate_subchunks(LineIndex const& query_key_quantile,
 
 void merge_ok_index(size_t const* subrange_sizes,
                     size_t num_ranges,
-                    std::vector<LineIndex> ** ok_index,
-                    std::vector<LineIndex> ** k_index)
+                    std::vector<LineIndex> ** pre_merge_index,
+                    std::vector<LineIndex> ** post_merge_index)
 {
 
     size_t * sz_tmp = new size_t[num_ranges + 1];
@@ -243,31 +251,36 @@ void merge_ok_index(size_t const* subrange_sizes,
 
     size_t total_size = std::accumulate(subrange_sizes, subrange_sizes + num_ranges, 0);
 
-    (*k_index)->reserve(total_size);
-    (*k_index)->resize(total_size);
+    (*post_merge_index)->reserve(total_size);
+    (*post_merge_index)->resize(total_size);
 
     //here's the tricky part.
     //iteratively merge consecutive ranges until there is only one.
     //invariant: subrange_sizes valid, num_ranges valid, k_index valid
     size_t num_merge_ranges = num_ranges + (num_ranges % 2); // square it off
 
-    std::vector<LineIndex>::iterator swapit, mergit;
-
+    std::vector<LineIndex>::iterator pre, post; //before and after a pairwise range merge.
+    
+    //precondition: pre_merge_index is (O, K) sorted, in sz_tmp partitions
+    //postcondition: post_merge_index is (O, K) sorted in half as many partitions as pre_merge_index
+    
+    //this makes it appear we had done at least one iteration.
+    std::swap((*post_merge_index), (*pre_merge_index));
     while (num_merge_ranges > 1)
     {
-        std::swap((*k_index), (*ok_index));
-        swapit = (*k_index)->begin();
-        mergit = (*ok_index)->begin();
+        std::swap((*post_merge_index), (*pre_merge_index));
+        pre = (*pre_merge_index)->begin();
+        post = (*post_merge_index)->begin();
 
         for (size_t o = 0; o != num_merge_ranges; o += 2)
         {
-            __gnu_parallel::merge(swapit, swapit + sz_tmp[o],
-                                  swapit + sz_tmp[o],
-                                  swapit + sz_tmp[o] + sz_tmp[o + 1],
-                                  mergit, less_key);
-                    
-            swapit += sz_tmp[o] + sz_tmp[o + 1];
-            mergit += sz_tmp[o] + sz_tmp[o + 1];
+            __gnu_parallel::merge(pre, pre + sz_tmp[o],
+                                  pre + sz_tmp[o],
+                                  pre + sz_tmp[o] + sz_tmp[o + 1],
+                                  post, less_key);
+
+            pre += sz_tmp[o] + sz_tmp[o + 1];
+            post += sz_tmp[o] + sz_tmp[o + 1];
 
             sz_tmp[o / 2] = sz_tmp[o] + sz_tmp[o + 1];
         }
@@ -279,7 +292,7 @@ void merge_ok_index(size_t const* subrange_sizes,
             sz_tmp[num_merge_ranges - 1] = 0;
         }
     }
-    delete sz_tmp;
+    delete [] sz_tmp;
 
 }
 
@@ -300,8 +313,8 @@ size_t write_new_ordering(char const* unordered,
                (*mit).line_length);
         
         write_pointer += (*mit).line_length;
-        S += (*mit).line_length;
         (*mit).start_offset = S;
+        S += (*mit).line_length;
     }
     return std::distance(ordered, write_pointer);
 }
@@ -383,6 +396,10 @@ void write_final_merge(std::vector<LineIndex> const& ok_index,
 
         merge_ok_index(subrange_sizes, num_chunks, & ok_index_ptr, & k_index_ptr);
 
+        bool is_sorted = std::is_sorted((*k_index_ptr).begin(), (*k_index_ptr).end(), less_key);
+
+        assert(is_sorted);
+
         bytes_written = 
             write_new_ordering(chunk_buffer_in, k_index_ptr, chunk_buffer_out);
 
@@ -406,10 +423,10 @@ void write_final_merge(std::vector<LineIndex> const& ok_index,
         fflush(stderr);
     }
 
-    delete chunk_buffer_in;
-    delete chunk_buffer_out;
-    delete key_quantile_sizes;
-    delete subrange_sizes;
+    delete [] chunk_buffer_in;
+    delete [] chunk_buffer_out;
+    delete [] key_quantile_sizes;
+    delete [] subrange_sizes;
 
 }
 

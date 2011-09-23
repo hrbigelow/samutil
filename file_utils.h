@@ -11,6 +11,7 @@
 
 namespace FileUtils
 {
+    int switch_printf(bool is_file, void * & buf, char const* format, ...);
 
     void cat(char * buf, 
              size_t bufsize, 
@@ -25,7 +26,9 @@ namespace FileUtils
     std::vector<size_t> ChunkLengths(gzFile input_fh, size_t chunk_approx_size,
                                      size_t max_line);
 
-    std::vector<char *> find_line_starts(char * lines);
+    std::vector<char *> find_complete_lines(char * lines, size_t * nbytes_unused);
+
+    std::vector<char *> find_complete_lines_nullify(char * lines, size_t * nbytes_unused);
 
     void print_until_delim(char const* data, char delim, FILE * out_fh);
 

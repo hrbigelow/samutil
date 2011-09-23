@@ -26,8 +26,8 @@ class SequenceProjection
 
     size_t total_block_length;
 
-    /* Cigar::CIGAR_VEC cigar; */
-    /* Cigar::CIGAR_INDEX cigar_index; */
+    size_t target_start_pos() const;
+    size_t target_end_pos() const;
 
     SequenceProjection(char const* _species,
                        char const* _source_dna,
@@ -37,6 +37,10 @@ class SequenceProjection
 
     bool operator<(SequenceProjection const& b) const;
 };
+
+bool ApplySequenceProjection(SequenceProjection const& projection,
+                             SamLine * samline,
+                             bool inserts_are_introns);
 
 
 bool ApplyProjectionToSAM(SequenceProjection const& projection,

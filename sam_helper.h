@@ -15,23 +15,13 @@
 #include <tr1/unordered_map>
 #endif
 
-//flag masks.  When set, these flags proclaim their name
-/* namespace SamFlags */
-/* { */
-/*     extern int const MULTI_FRAGMENT_TEMPLATE; */
-/*     extern int const ALL_FRAGMENTS_MAPPED; */
-/*     extern int const THIS_FRAGMENT_UNMAPPED; */
-/*     extern int const NEXT_FRAGMENT_UNMAPPED; */
-/*     extern int const THIS_FRAGMENT_ON_NEG_STRAND; */
-/*     extern int const NEXT_FRAGMENT_ON_NEG_STRAND; */
-/*     extern int const FIRST_FRAGMENT_IN_TEMPLATE; */
-/*     extern int const LAST_FRAGMENT_IN_TEMPLATE; */
-/*     extern int const ALIGNMENT_NOT_PRIMARY; */
-/*     extern int const FAILED_QUALITY_CHECK; */
-/*     extern int const PCR_OR_OPTICAL_DUPLICATE; */
-    
-/*     extern int const TEMPLATE_ON_NEG_STRAND; */
-/* }; */
+/*
+  Policy: Assume either a SAM or rSAM format when parsing, according
+  to the 'expect_rsam_format' flag.
+
+  In either case, do not store qname, seq, or qual fields.
+  Also, store 'unmapped' as 50S or 76S CIGAR (whatever the readlength is)
+ */
 
 enum SAM_PARSE
     {
@@ -86,9 +76,8 @@ typedef CONTIG_OFFSETS::const_iterator OFFSETS_ITER;
 
 
 
-#define AlignSpaceTag "XP"
-#define AlignSpaceType 'A'
-#define AlignSpaceMissing '-'
+// needed for buffer allocation estimate
+size_t const MAX_RSAM_LINE_LENGTH = 20 + 20 + 20 + 12 + 3 + 100 + 20 + 12 + 300;
 
 // The Not Applicable Read Layout used when parsing 
 #define ReadLayoutNA "-"
@@ -131,14 +120,8 @@ V parse_sam_tag(char const* tag_string,
   SAM Format (1.4-r983) (tab-separated, including optional tags, represented here by '.')
   QNAME.FLAG.RNAME.POS.MAPQ.CIGAR.RNEXT.PNEXT.TLEN.SEQ.QUAL[.TAG[.TAG[.TAG...]]]
 
-  Or, with zero-length SEQ and QUAL:
-  QNAME.FLAG.RNAME.POS.MAPQ.CIGAR.RNEXT.PNEXT.TLEN..[.TAG[.TAG[.TAG...]]]
-
-  Or, with no tags and zero length SEQ and QUAL:
-  QNAME.FLAG.RNAME.POS.MAPQ.CIGAR.RNEXT.PNEXT.TLEN..
-
   rSAM Format (recombinant, template-based SAM)
-  QNAME.FLAG.RNAME.POS.MAPQ.CIGAR.SEQ.QUAL[.TAG[.TAG[.TAG...]]]
+  FID.FLAG.RNAME.POS.MAPQ.CIGAR[.TAG[.TAG[.TAG...]]]
   
  */
 
@@ -146,42 +129,65 @@ union SamFlag
 {
     struct
     {
-        unsigned int multi_fragment_template : 1;
-        unsigned int all_fragments_mapped : 1;
-        unsigned int this_fragment_unmapped : 1;
-        unsigned int next_fragment_unmapped : 1;
-        unsigned int this_fragment_on_neg_strand : 1;
-        unsigned int next_fragment_on_neg_strand : 1;
-        unsigned int first_fragment_in_template : 1;
-        unsigned int last_fragment_in_template : 1;
-        unsigned int alignment_not_primary : 1;
-        unsigned int failed_quality_check : 1;
-        unsigned int pcr_or_optical_duplicate : 1;
-        unsigned int template_layout : 1;
+        unsigned int multi_fragment_template : 1;     // SAM
+        unsigned int all_fragments_mapped : 1;        // SAM and rSAM
+        unsigned int this_fragment_unmapped : 1;      // SAM
+        unsigned int next_fragment_unmapped : 1;      // SAM
+        unsigned int this_fragment_on_neg_strand : 1; // SAM
+        unsigned int next_fragment_on_neg_strand : 1; // SAM
+        unsigned int first_fragment_in_template : 1;  // SAM
+        unsigned int last_fragment_in_template : 1;   // SAM
+        unsigned int alignment_not_primary : 1;       // SAM and rSAM
+        unsigned int failed_quality_check : 1;        // SAM and rSAM
+        unsigned int pcr_or_optical_duplicate : 1;    // SAM and rSAM
+        unsigned int template_layout : 1;             //         rSAM
         unsigned int : 4; // padding to 16 bits
 
-        unsigned int is_rsam_format : 8;
-        unsigned int num_fragments_in_template : 8;
-        unsigned int read_layout : 32;
+        unsigned int is_rsam_format : 8;              //         rSAM
+        unsigned int num_fragments_in_template : 8;   //         rSAM
+        unsigned int read_layout : 32;                //         rSAM
     };
     size_t raw;
 
 };
 
+union SamTag
+{
+    struct
+    {
+        unsigned int raw_score : 8; // number of mismatches
+        unsigned char alignment_space : 8; // alignment space
+        unsigned int stratum_rank : 4; // stratum rank
+        unsigned int : 4; // padding
+        unsigned int stratum_size : 8; // stratum size
+
+        unsigned int : 32; // padding
+    };
+    size_t raw;
+};
+
+
+#define AlignSpaceTag "XP"
+#define StratumRankTag "XY"
+#define StratumSizeTag "XZ"
+
+#define AlignSpaceType 'A'
+#define AlignSpaceMissing '-'
+#define GuideAlignmentTag "XG"
+
+
 #define LAYOUT_FORWARD 0
 #define LAYOUT_REVERSE 1
 
 
-
-
 class SamLine
 {
+
+    void print_aux(void * print_buf, bool to_file) const;
+
 public:
 
-    size_t bytes_in_line;
-    char * line;
     SAM_PARSE parse_flag;
-    char * qname;
     size_t fragment_id;
     SamFlag flag;
     char * rname;
@@ -191,21 +197,16 @@ public:
     char * rnext;
     size_t pnext;
     int tlen;
-    char * seq;
-    char * qual;
+    SamTag tags;
     char * tag_string;
-    char * extra;
-    char * extra_tag;
     size_t flattened_pos; //position along a virtual concatenated meta-contig.
     char alignment_space;
-    
 
     SamLine(SAM_PARSE _parse_flag,
             char const* _qname, size_t _flag, 
             char const* _rname, size_t _pos,
             size_t _mapq, char const* cigar,
-            char const* _seq,
-            char const* _qual,
+            size_t _tagval,
             char const* _tag_string);
 
     SamLine(FILE * sam_fh);
@@ -220,11 +221,16 @@ public:
                               CONTIG_OFFSETS::const_iterator * contig_iter);
 
     static void SetGlobalFlags(SAM_QNAME_FORMAT _qname_format,
-                               char const* _expected_layout);
+                               char const* _expected_layout,
+                               char const* _raw_score_tag,
+                               size_t _worst_fragment_score);
 
     static SAM_QNAME_FORMAT sam_qname_format;
     static char expected_read_layout[256];
     static bool expect_rsam_format;
+    static bool brief_records; // prints records with numeric qnames, and '*' for SEQ and QUAL
+    static char raw_score_tag[3];
+    static size_t worst_fragment_score;
 
     static size_t (* parse_fragment_id)(char const* qname);
 
@@ -238,9 +244,15 @@ public:
 
     SAM_PARSE load(FILE * seqfile);
 
-    void print(FILE * samfile, bool print_rsam) const;
-    void print_sam(FILE * samfile) const;
-    void print_rsam(FILE * samfile) const;
+    /* void print(FILE * samfile, bool print_rsam) const; */
+
+    // print abbreviated SAM format to file
+    void fprint(FILE * sam_fh) const;
+
+    // print abbreviated SAM format to string
+    void sprint(char * sam_string) const;
+
+    void print_rsam_as_sam(char const* seq_data, char * out_string) const;
 
     void print_fastq(FILE * fastq_fh) const;
 
@@ -254,26 +266,12 @@ public:
     //adds the desired tag. 
     void add_tag(char const* tag_code, char type, char const* value_string);
 
-    size_t aligned_read_length();
-    size_t raw_read_length() const { return strlen(this->seq); }
+    size_t template_length() const;
     size_t ones_based_pos() const { return this->pos + 1; }
     size_t zero_based_pos() const { return this->pos; }
 
-    /* bool multi_fragment_template() const { return (this->flag & SamFlags::MULTI_FRAGMENT_TEMPLATE) != 0; } */
-    /* bool all_fragments_mapped() const { return (this->flag & SamFlags::ALL_FRAGMENTS_MAPPED) != 0; } */
-    /* bool this_fragment_unmapped() const { return ((this->flag & SamFlags::THIS_FRAGMENT_UNMAPPED)) != 0; } */
-    /* bool next_fragment_unmapped() const { return (this->flag & SamFlags::NEXT_FRAGMENT_UNMAPPED) != 0; } */
-
-    /* //strandedness flags are nonzero for the negative strand. */
-    /* bool template_on_pos_strand() const { return (this->flag & SamFlags::TEMPLATE_ON_NEG_STRAND) == 0; } */
-    /* bool this_fragment_on_pos_strand() const { return (this->flag & SamFlags::THIS_FRAGMENT_ON_NEG_STRAND) == 0; } */
-    /* bool next_fragment_on_pos_strand() const { return (this->flag & SamFlags::NEXT_FRAGMENT_ON_NEG_STRAND) == 0; } */
-
-    /* bool first_fragment_in_template() const { return (this->flag & SamFlags::FIRST_FRAGMENT_IN_TEMPLATE) != 0; } */
-    /* bool last_fragment_in_template() const { return (this->flag & SamFlags::LAST_FRAGMENT_IN_TEMPLATE) != 0; } */
-    /* bool alignment_not_primary() const { return (this->flag & SamFlags::ALIGNMENT_NOT_PRIMARY) != 0; } */
-    /* bool failed_quality_check() const { return (this->flag & SamFlags::FAILED_QUALITY_CHECK) != 0; } */
-    /* bool pcr_or_optical_duplicate() const { return (this->flag & SamFlags::PCR_OR_OPTICAL_DUPLICATE) != 0; } */
+    size_t ones_based_pnext() const { return this->pnext + 1; }
+    size_t zero_based_pnext() const { return this->pnext; }
 
     char const* next_fragment_ref_name() const;
 

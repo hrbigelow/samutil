@@ -161,11 +161,9 @@ void FragmentScore::init(char const* score_cal_file, char const* contig_space_fi
 
 int FragmentScore::raw_score(SamLine const* samline) const
 {
-    bool has_score;
     int fragment_score;
 
-    int unqual_score = 
-        samline->alignment_score(this->raw_score_tag, this->worst_fragment_score, &has_score);
+    int unqual_score = samline->tags.raw_score;
 
     size_t fragment_length = Cigar::Length(Cigar::FromString(samline->cigar, 0), false);
 
@@ -188,7 +186,8 @@ int FragmentScore::raw_score(SamLine const* samline) const
 
 char FragmentScore::alignment_space(SamLine const* a) const
 {
-    if (a->flag.this_fragment_unmapped)
+    if (a->flag.this_fragment_unmapped
+        || (a->flag.is_rsam_format && (! a->flag.all_fragments_mapped)))
     {
         return this->space_ordering[0];
     }
@@ -240,13 +239,14 @@ bool FragmentScoreWrap::operator()(ScoreSpace const& a, ScoreSpace const& b) con
 
 
 //Set mapq, primary alignment flag, XP, XY, and XZ tags
-void set_score_fields(SamBuffer const& sam_buffer, 
+void set_score_fields(SINGLE_READ_SET::iterator beg,
+                      SINGLE_READ_SET::iterator end,
                       FragmentScore const& fragment_scoring)
 {
 
-    SINGLE_READ_SET::const_iterator pit;
+    SINGLE_READ_SET::iterator pit;
 
-    size_t N = sam_buffer.unique_entries.size();
+    size_t N = std::distance(beg, end);
     int * raw_scores = new int[N];
     int * raw_scores_copy = new int[N + 2];
 
@@ -256,25 +256,20 @@ void set_score_fields(SamBuffer const& sam_buffer,
     std::map<ScoreSpace, size_t, FragmentScoreWrap>::iterator sit;
 
     size_t i = 0;
-    for (pit = sam_buffer.unique_entries.begin();
-         pit != sam_buffer.unique_entries.end(); ++pit, ++i)
+    for (pit = beg; pit != end; ++pit, ++i)
     {
         SamLine * samline = const_cast<SamLine *>((*pit));
 
         raw_scores[i] = fragment_scoring.raw_score(samline);
 
-        if (samline->alignment_space == AlignSpaceMissing)
+        if (samline->tags.alignment_space == AlignSpaceMissing)
         {
             char as = fragment_scoring.alignment_space(samline);
-            samline->alignment_space = as;
-            char space_string[] = "-";
-            space_string[0] = as;
-
-            samline->add_tag("XP", 'A', space_string);
+            samline->tags.alignment_space = as;
         }
 
         
-        ScoreSpace ss(raw_scores[i], samline->alignment_space);
+        ScoreSpace ss(raw_scores[i], samline->tags.alignment_space);
         sit = stratum_hist.find(ss);
         if (sit == stratum_hist.end())
         {
@@ -299,20 +294,17 @@ void set_score_fields(SamBuffer const& sam_buffer,
     int new_mapq;
     int fragment_score;
     char fragment_space;
-    char rank_tag_value[10];
-    char size_tag_value[10];
 
     size_t num_strata = stratum_hist.size();
 
     bool first_encountered_top_stratum = true;
 
-    for (i = 0, pit = sam_buffer.unique_entries.begin();
-         pit != sam_buffer.unique_entries.end(); ++pit, ++i)
+    for (i = 0, pit = beg; pit != end; ++pit, ++i)
     {
         SamLine * samline = const_cast<SamLine *>((*pit));
 
         fragment_score = raw_scores[i];
-        fragment_space = samline->alignment_space;
+        fragment_space = samline->tags.alignment_space;
 
         size_t table_index = 
             fragment_scoring.score_table_index(top_fragment_score, sec_fragment_score, fragment_score);
@@ -327,22 +319,16 @@ void set_score_fields(SamBuffer const& sam_buffer,
         assert(sit != stratum_hist.end());
 
         size_t index = std::distance(stratum_hist.begin(), sit);
-        size_t stratum_size = (*sit).second;
-        size_t stratum_rank = num_strata - index;
+        samline->tags.stratum_size = (*sit).second;
+        samline->tags.stratum_rank = num_strata - index;
 
         //set mapq
         samline->mapq = new_mapq;
 
-        sprintf(rank_tag_value, "%zu", stratum_rank);
-        sprintf(size_tag_value, "%zu", stratum_size);
-
-        //set rank tag
-        samline->add_tag("XY", 'i', rank_tag_value);
-        samline->add_tag("XZ", 'i', size_tag_value);
-
-        
         //set primary flag
-        if (stratum_rank == 1 && samline->flag.all_fragments_mapped && first_encountered_top_stratum)
+        if (samline->tags.stratum_rank == 1 
+            && samline->flag.all_fragments_mapped 
+            && first_encountered_top_stratum)
         {
             //alignment is primary.
             samline->flag.alignment_not_primary = 0;
@@ -401,107 +387,76 @@ size_t CountCorrectBases(SamLine const* samline,
 }
 
 
-//parse the next SAM entry and load it into sam_buffer.  assume
-//entries are sorted by SAM_RID_POSITION.  upon the occurrence of an
-//entry whose fragment is new (or end of file), check that all
-//pervious entries are properly paired.
-void NextLine(FILE * unscored_sam_fh, 
-              SamBuffer & sam_buffer,
-              bool * new_fragment, 
-              bool * seen_a_read,
-              char * prev_qname,
-              size_t * prev_fragment_id,
-              SamLine ** low_bound)
+score_rsam_alloc_binary::score_rsam_alloc_binary(FragmentScore const* _fragment_scoring) : 
+    fragment_scoring(_fragment_scoring) { }
+
+
+char * 
+score_rsam_alloc_binary::operator()(std::pair<SAMIT, SAMIT> const& range,
+                                    SamBuffer * sam_buffer)
 {
-    SamLine * samline = new SamLine(unscored_sam_fh);
-
-    switch (samline->parse_flag)
+    if (range.first == range.second)
     {
-    case END_OF_FILE: 
-        delete samline;
-        if ((*low_bound) != NULL)
-        {
-            // last time around; purge everything.
-            delete (*low_bound);
-        }
-
-        *new_fragment = true;
-        if (! sam_buffer.incomplete_entries.empty())
-        {
-            //all entries should be properly paired when we encounter a new fragment.  violation.
-            fprintf(stderr, "Error: Reached end of file, yet this entry is paired in sequencing"
-                    " but as yet have not found its mate:\n");
-            (*sam_buffer.incomplete_entries.begin())->print_sam(stderr);
-            exit(1);
-        }
-        break;
-
-    case PARSE_ERROR:
-        fprintf(stderr, "Parse error in input sam file");
-        exit(1);
-        break;
-
-    case HEADER:
-        delete samline;
-        *new_fragment = false;
-        *seen_a_read = false;
-        break;
-
-    case DATA_LINE:
-        *new_fragment = *prev_fragment_id != samline->fragment_id && *seen_a_read;
-        
-        if (*new_fragment && ! sam_buffer.incomplete_entries.empty())
-        {
-            //all entries should be properly paired when we encounter a new fragment.  violation.
-            fprintf(stderr, "Error: input SAM buffer not sorted by read_id, fragment pair\n"
-                    "This entry is incomplete:\n");
-            (*sam_buffer.incomplete_entries.begin())->print_sam(stderr);
-            fprintf(stderr, "\nand this entry, on a different fragment, was found, violating the ordering\n");
-            samline->print_sam(stderr);
-                
-            exit(1);
-        }
-
-        //check sort order
-        if (! (*prev_fragment_id <= samline->fragment_id))
-        {
-            fprintf(stderr,
-                    "Error: input SAM file not sorted by fragment_id\n"
-                    "Previous query name: %s\n"
-                    "Current query name: %s\n",
-                    prev_qname, samline->qname);
-            exit(1);
-        }
-
-        strcpy(prev_qname, samline->qname);
-        *prev_fragment_id = samline->fragment_id;
-
-        CONTIG_OFFSETS::const_iterator contig_iter = sam_buffer.sam_order->contig_offsets.begin();
-
-        samline->SetFlattenedPosition(sam_buffer.sam_order->contig_offsets, & contig_iter);
-        std::pair<SamLine const*, bool> 
-            insert_result = sam_buffer.insert(samline);
-
-        *seen_a_read = true;
-
-        if (*new_fragment)
-        {
-            if ((*low_bound) != NULL)
-            {
-                delete (*low_bound);
-            }
-            (*low_bound) = new SamLine(*insert_result.first);
-        }
-        break;
+        char * dummy = new char[1];
+        dummy[0] = '\0';
+        return dummy;
     }
+
+    SAMIT cur;
+    for (cur = range.first; cur != range.second; ++cur)
+    {
+        sam_buffer->insert(*cur);
+    }
+    // At this point, the buffer should have joined everything together
+    if (! sam_buffer->incomplete_entries.empty())
+    {
+        fprintf(stderr, "Error: at a fragment boundary but there are still incomplete SAM entries\n");
+        exit(1);
+    }
+    size_t num_entries = sam_buffer->unique_entries.size();
+    char * out_buffer = new char[num_entries * MAX_RSAM_LINE_LENGTH];
+
+    // score them.
+    SINGLE_READ_SET::iterator beg, sit, end;
+    beg = sam_buffer->unique_entries.begin();
+
+    for (end = sam_buffer->unique_entries.begin(); 
+         end != sam_buffer->unique_entries.end(); ++end)
+    {
+        if ((*beg)->fragment_id != (*end)->fragment_id)
+        {
+            set_score_fields(beg, end, *this->fragment_scoring);
+            beg = end;
+        }
+    }
+    set_score_fields(beg, end, *this->fragment_scoring);
+
+    char * write_pointer = out_buffer;
+    for (sit = sam_buffer->unique_entries.begin(); 
+         sit != sam_buffer->unique_entries.end(); ++sit)
+    {
+        (*sit)->sprint(write_pointer);
+        write_pointer += strlen(write_pointer);
+        delete (*sit);
+    }
+    sam_buffer->unique_entries.clear();
+
+    return out_buffer;
 }
 
 
-// typedef std::map<int, size_t> LENGTH_HISTO;
-// typedef std::map<int, size_t, RawScoreBetter> SCORE_HISTO;
-// typedef std::map<int, LENGTH_HISTO, RawScoreBetter> LENGTH_HISTO_BY_SCORE; // key: score, value: length histo
+parse_sam_unary::parse_sam_unary() { }
 
-//initialize these so that the best scores are at the beginning.
+SamLine * parse_sam_unary::operator()(char * sam_string)
+{
+    SamLine * rec = new SamLine(sam_string);
+    if (rec->parse_flag == PARSE_ERROR)
+    {
+        fprintf(stderr, "Encountered formatting error in 'parse_sam_unary'.\n");
+        exit(1);
+    }
+    return rec;
+}
 
 
 /*

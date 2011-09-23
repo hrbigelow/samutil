@@ -81,20 +81,21 @@ SamOrder::SamOrder() : order(SAM_RID)
 
 SamOrder::~SamOrder()
 {
-    char const** keys = new char const*[contig_offsets.size()];
+    // char const** keys = new char const*[contig_offsets.size()];
     size_t k;
     CONTIG_OFFSETS::iterator ci;
     for (ci = contig_offsets.begin(), k = 0; ci != contig_offsets.end(); ++ci, ++k)
     {
-        keys[k] = (*ci).first;
+        delete (*ci).first;
+        //keys[k] = (*ci).first;
     }
     contig_offsets.clear();
 
-    for (size_t k = 0; k != contig_offsets.size(); ++k)
-    {
-        delete keys[k];
-    }
-    delete keys;
+    // for (size_t k = 0; k != contig_offsets.size(); ++k)
+    // {
+    //     delete keys[k];
+    // }
+    // delete keys;
 }
 
 
@@ -275,7 +276,7 @@ bool SamOrder::less_position(SamLine const& a, SamLine const& b) const
                    this->flattened_position_mate(&b, &dummy)) < 0 ||
               (icmp(this->flattened_position_mate(&a, &dummy),
                     this->flattened_position_mate(&b, &dummy)) == 0 &&
-               a.alignment_space < b.alignment_space)))))));
+               a.tags.alignment_space < b.tags.alignment_space)))))));
         
 }
 
@@ -289,7 +290,7 @@ bool SamOrder::equal_position(SamLine const& a, SamLine const& b) const
         a.flag.this_fragment_on_neg_strand == b.flag.this_fragment_on_neg_strand &&
         strcmp(a.cigar, b.cigar) == 0 &&
         flattened_position_mate(&a, &dummy) == flattened_position_mate(&b, &dummy) &&
-        a.alignment_space == b.alignment_space;
+        a.tags.alignment_space == b.tags.alignment_space;
 
         // flattened_position(&a, &dummy) == flattened_position(&b, &dummy) &&
         // a.this_fragment_on_pos_strand() == b.this_fragment_on_pos_strand() &&
@@ -402,31 +403,27 @@ bool SamOrder::equal_fragment_id_position(SamLine const& a, SamLine const& b) co
 //rewinds sam_fh to beginning
 void SamOrder::AddHeaderContigStats(FILE * sam_fh)
 {
-    SamLine * samline;
     size_t contig_offset = 0;
 
-    while (1)
-    {
-        samline = new SamLine(sam_fh);
+    char line[4096 + 1];
 
-        if (samline->parse_flag != HEADER)
+    while (! feof(sam_fh))
+    {
+        fgets(line, 4096, sam_fh);
+
+        if (line[0] != '@')
         {
-            //SamLine::line does not have a newline at the end.  But we want to count it.
-            delete samline;
             rewind(sam_fh);
             break;
-            // long last_line_length = strlen(samline->line) + 1;
-            // fseek(sam_fh, - last_line_length, std::ios::cur);
-            // break;
         }
         //if there is a SQ tag, parse and record
-        else if (strncmp(samline->tag_string, "SQ", 2) == 0)
+        else if (strncmp(line, "@SQ", 3) == 0)
         {
             //this is a SQ line
             char contig_name[1000];
             
             size_t contig_length;
-            sscanf(samline->tag_string, "SQ\tSN:%s\tLN:%zu", contig_name, &contig_length);
+            sscanf(line, "@SQ\tSN:%s\tLN:%zu", contig_name, &contig_length);
             this->contig_lengths[std::string(contig_name)] = contig_length;
 
             char * contig_name_copy = new char[strlen(contig_name) + 1];
@@ -435,7 +432,6 @@ void SamOrder::AddHeaderContigStats(FILE * sam_fh)
             this->contig_offsets[contig_name_copy] = contig_offset;
             contig_offset += contig_length;
         }
-        delete samline;
     }
 
     this->contig_lengths[std::string("*")] = 0;
@@ -458,6 +454,7 @@ void SamOrder::AddHeaderContigStats(FILE * sam_fh)
             this->contig_offsets.size(),
             this->contig_offsets.bucket_count(),
             this->contig_offsets.load_factor());
+
     std::map<size_t, size_t> bucket_hist;
     for (size_t i = 0; i != this->contig_offsets.bucket_count(); ++i)
     {

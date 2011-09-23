@@ -28,6 +28,10 @@ namespace cis {
         static string iupac;
         static string iupac_comp;
 
+        static char base_to_complement[256];
+        static char base_to_uppercase_complement[256];
+
+
         class named_stream : public litestream {
         public:
             std::string p;

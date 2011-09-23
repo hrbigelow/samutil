@@ -177,8 +177,8 @@ SamBuffer::insert(SamLine const* entry)
                     fprintf(stderr, "SAM format error: inappropriate 'tlen' fields.  Should be "
                             "positive for left and negative for right-most reads\n"
                             "Entries:\n");
-                    left->print_sam(stderr);
-                    right->print_sam(stderr);
+                    left->fprint(stderr);
+                    right->fprint(stderr);
                     exit(1);
                 }
 
@@ -310,11 +310,12 @@ void SamBuffer::purge(FILE * output_sam_fh,
         {
             if (output_rsam_format)
             {
-                samline->print_rsam(output_sam_fh);
+                samline->fprint(output_sam_fh);
             }
             else
             {
-                samline->print_sam(output_sam_fh);
+                assert(false);
+                //samline->print_sam(output_sam_fh);
             }
             // first->print(output_sam_fh, 
             //              this->output_pairs_as_same_strand 
@@ -341,11 +342,12 @@ void SamBuffer::purge(FILE * output_sam_fh,
         {
             if (output_rsam_format)
             {
-                samline->print_rsam(output_sam_fh);
+                samline->fprint(output_sam_fh);
             }
             else
             {
-                samline->print_sam(output_sam_fh);
+                assert(false);
+                //samline->print_sam(output_sam_fh);
             }
         }
         delete samline;

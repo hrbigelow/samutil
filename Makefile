@@ -108,13 +108,13 @@ sim: $(sim_OBJS)
 
 
 
-samutil_OBJS = $(addprefix $(OBJDIR)/, samutil.o					\
-	sam_transcript_to_genome.o dep/tools.o cisortho/dna.o			\
-	sam_score_mapq.o sam_index_fastq.o align_eval_aux.o				\
-	sam_score_aux.o seq_projection.o gtf.o align_eval_raw.o			\
-	cisortho/region.o file_utils.o sam_buffer.o sam_helper.o		\
-	sam_order.o cigar_ops.o cisortho/nested.o cisortho/litestream.o	\
-	cisortho/enum.o cisortho/dnacol.o)
+samutil_OBJS = $(addprefix $(OBJDIR)/, samutil.o						\
+	sam_transcript_to_genome.o dep/tools.o sam_score_mapq.o				\
+	sam_truncate.o sam_index_fastq.o sam_rejoin.o sam_sort.o			\
+	sam_checksort.o align_eval_aux.o sam_score_aux.o sam_aux.o			\
+	seq_projection.o gtf.o align_eval_raw.o file_utils.o sam_buffer.o	\
+	sam_helper.o sam_order.o cigar_ops.o)
+
 
 samutil: $(samutil_OBJS)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -lz -lpthread -o $@ $^
@@ -139,8 +139,8 @@ pretty_plot: $(pretty_plot_OBJS)
 align_eval_OBJS = $(addprefix $(OBJDIR)/, align_eval.o				\
 	align_eval_raw.o align_eval_sort.o align_eval_aux.o				\
 	align_eval_checksort.o align_eval_mask.o align_eval_coverage.o	\
-	align_eval_stats.o cigar_ops.o seq_projection.o file_utils.o	\
-	sam_helper.o sam_order.o dep/tools.o)
+	align_eval_stats.o cigar_ops.o seq_projection.o	\
+	file_utils.o sam_helper.o sam_order.o dep/tools.o)
 
 align_eval: $(align_eval_OBJS)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -lz -o $@ $^

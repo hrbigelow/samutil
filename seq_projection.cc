@@ -47,15 +47,73 @@ std::vector<block_offsets> InitFromMDString(char const* md_string)
 }
 
 
+SequenceProjection::SequenceProjection(char const* _species,
+                                       char const* _source_dna,
+                                       char const* _target_dna,
+                                       char _strand_char,
+                                       std::vector<block_offsets> const& _blocks)
+{
+    species = std::string(_species);
+    source_dna = std::string(_source_dna);
+    target_dna = std::string(_target_dna);
+    same_strand = _strand_char == '+';
+    transformation = _blocks;
+    total_block_length = 0;
+}
+
+
+//order by coordinates of 
+bool SequenceProjection::operator<(SequenceProjection const& b) const
+{
+    
+    int64_t a_left_offset = this->transformation.empty() ? 0 : this->transformation[0].jump_length;
+    int64_t b_left_offset = b.transformation.empty() ? 0 : b.transformation[0].jump_length;
+
+    // int64_t a_right_neg_offset = - Cigar::RightOffset(this->cigar, true);
+    // int64_t b_right_neg_offset = - Cigar::RightOffset(b.cigar, true);
+
+    return this->source_dna < b.source_dna ||
+        (this->source_dna == b.source_dna &&
+         (a_left_offset < b_left_offset ||
+          (a_left_offset == b_left_offset &&
+           // (a_right_neg_offset < b_right_neg_offset ||
+           //  (a_right_neg_offset == b_right_neg_offset &&
+             (this->target_dna < b.target_dna ||
+              (this->target_dna == b.target_dna &&
+               (this->same_strand < b.same_strand))))));
+}
+
+
+size_t SequenceProjection::target_start_pos() const
+{
+    assert(! this->transformation.empty());
+    return this->transformation[0].jump_length;
+}
+
+size_t SequenceProjection::target_end_pos() const
+{
+    assert(! this->transformation.empty());
+    size_t end = 0;
+    std::vector<block_offsets>::const_iterator bit;
+    for (bit = this->transformation.begin();
+         bit != this->transformation.end(); ++bit)
+    {
+        end += (*bit).jump_length + (*bit).block_length;
+    }
+    return end;
+}
+
+
+
 
 //apply a partial projection to rSAM line
 //this is a helper function for ApplyProjectionToSAM
 //returns true if projection successfully applied
-bool apply_projection_aux(SequenceProjection const& projection,
-                          SamLine * samline,
-                          bool inserts_are_introns)
+bool ApplySequenceProjection(SequenceProjection const& projection,
+                             SamLine * samline,
+                             bool inserts_are_introns)
 {
-    if (samline->flag.this_fragment_unmapped)
+    if (! samline->flag.all_fragments_mapped)
     {
         return false;
     }
@@ -94,45 +152,26 @@ bool apply_projection_aux(SequenceProjection const& projection,
 
     if (overlap > 0)
     {
-        char bufstring[1024];
-        Cigar::ToString(trimmed_left, trimmed_right, bufstring);
-        assert(samline->extra == NULL);
-        assert(strlen(bufstring) < 1024);
+        char cigar_new[1024];
+        Cigar::ToString(trimmed_left, trimmed_right, cigar_new);
 
-        size_t new_field_size = 
-            strlen(bufstring) 
-            + projection.target_dna.size()
-            + 3;
+        char const* rname_new = projection.target_dna.c_str();
+        if (strlen(samline->rname) < strlen(rname_new))
+        {
+            delete samline->rname;
+            samline->rname = new char[strlen(rname_new) + 1];
+        }
+        strcpy(samline->rname, rname_new);
 
-        samline->extra = new char[new_field_size];
-        samline->cigar = samline->extra;
-        samline->rname = samline->extra + strlen(bufstring) + 1;
+        if (strlen(samline->cigar) < strlen(cigar_new))
+        {
+            delete samline->cigar;
+            samline->cigar = new char[strlen(cigar_new) + 1];
+        }
+        strcpy(samline->cigar, cigar_new);
 
-        strcpy(samline->cigar, bufstring);
         samline->pos = expanded_start_offset;
-        strcpy(samline->rname, projection.target_dna.c_str());
     }
     return overlap > 0;
 
-}
-
-
-
-bool ApplyProjectionToSAM(SequenceProjection const& projection,
-                          char const* alignment_space,
-                          SamLine * samline,
-                          bool inserts_are_introns,
-                          bool add_cufflinks_xs_tag)
-{
-    bool projected = apply_projection_aux(projection, samline, inserts_are_introns);
-
-    samline->add_tag(AlignSpaceTag, AlignSpaceType, alignment_space);
-    
-    if (add_cufflinks_xs_tag)
-    {
-        char const* sense = projection.same_strand ? "+" : "-";
-        
-        samline->add_tag("XS", 'A', sense);
-    }
-    return projected;
 }

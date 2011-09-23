@@ -21,6 +21,24 @@ typedef std::vector<LineIndex>::iterator INDEX_ITER;
 bool less_offset(LineIndex const& a, LineIndex const& b);
 bool less_key(LineIndex const& a, LineIndex const& b);
 
+
+struct partial_index_aux
+{
+    SamOrder const* sam_order;
+    partial_index_aux(SamOrder const* _sam_order);
+    LineIndex operator()(char * samline);
+};
+
+
+// input: full_samline raw string
+// output: in-place modified string containing truncated string
+struct truncate_sam_unary
+{
+    truncate_sam_unary();
+    char * operator()(char * full_samline);
+};
+
+
 std::pair<size_t, size_t> 
 process_chunk(char * chunk_buffer_in,
               char * chunk_buffer_out,
@@ -49,16 +67,6 @@ std::vector<INDEX_ITER>
 get_quantiles(std::vector<LineIndex> * line_index,
               bool (less_fcn)(LineIndex const&, LineIndex const&),
               size_t num_chunks);
-
-
-/* std::vector<LineIndex>  */
-/* build_index(char const* sam_file, */
-/*             char * chunk_buffer, */
-/*             size_t max_mem, */
-/*             size_t max_line, */
-/*             SamOrder const& sam_order, */
-/*             /\* size_t (* samline_pos)(char const*),  *\/ */
-/*             size_t * num_chunks); */
 
 
 #endif // _ALIGN_EVAL_AUX_H
