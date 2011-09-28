@@ -161,9 +161,13 @@ void FragmentScore::init(char const* score_cal_file, char const* contig_space_fi
 
 int FragmentScore::raw_score(SamLine const* samline) const
 {
+    assert(samline->flag.is_rsam_format);
+
     int fragment_score;
 
-    int unqual_score = samline->tags.raw_score;
+    int unqual_score = samline->tags.raw_score_present 
+        ? samline->tags.raw_score
+        : this->worst_fragment_score;
 
     size_t fragment_length = Cigar::Length(Cigar::FromString(samline->cigar, 0), false);
 
@@ -262,10 +266,11 @@ void set_score_fields(SINGLE_READ_SET::iterator beg,
 
         raw_scores[i] = fragment_scoring.raw_score(samline);
 
-        if (samline->tags.alignment_space == AlignSpaceMissing)
+        if (! samline->tags.alignment_space_present)
         {
             char as = fragment_scoring.alignment_space(samline);
             samline->tags.alignment_space = as;
+            samline->tags.alignment_space_present = true;
         }
 
         
@@ -295,7 +300,7 @@ void set_score_fields(SINGLE_READ_SET::iterator beg,
     int fragment_score;
     char fragment_space;
 
-    size_t num_strata = stratum_hist.size();
+    // size_t num_strata = stratum_hist.size();
 
     bool first_encountered_top_stratum = true;
 
@@ -319,8 +324,12 @@ void set_score_fields(SINGLE_READ_SET::iterator beg,
         assert(sit != stratum_hist.end());
 
         size_t index = std::distance(stratum_hist.begin(), sit);
+
         samline->tags.stratum_size = (*sit).second;
-        samline->tags.stratum_rank = num_strata - index;
+        samline->tags.stratum_size_present = true;
+
+        samline->tags.stratum_rank = index + 1;
+        samline->tags.stratum_rank_present = true;
 
         //set mapq
         samline->mapq = new_mapq;
@@ -403,9 +412,14 @@ score_rsam_alloc_binary::operator()(std::pair<SAMIT, SAMIT> const& range,
     }
 
     SAMIT cur;
+
     for (cur = range.first; cur != range.second; ++cur)
     {
-        sam_buffer->insert(*cur);
+        InsertResult ins = sam_buffer->insert(*cur);
+        if (! ins.was_inserted)
+        {
+            delete ins.remaining_entry;
+        }
     }
     // At this point, the buffer should have joined everything together
     if (! sam_buffer->incomplete_entries.empty())
@@ -450,6 +464,7 @@ parse_sam_unary::parse_sam_unary() { }
 SamLine * parse_sam_unary::operator()(char * sam_string)
 {
     SamLine * rec = new SamLine(sam_string);
+
     if (rec->parse_flag == PARSE_ERROR)
     {
         fprintf(stderr, "Encountered formatting error in 'parse_sam_unary'.\n");
@@ -458,6 +473,21 @@ SamLine * parse_sam_unary::operator()(char * sam_string)
     return rec;
 }
 
+
+set_flattened_pos_unary::set_flattened_pos_unary(SamOrder const* _sam_order) :
+    sam_order(_sam_order)
+{
+}
+
+void set_flattened_pos_unary::operator()(SamLine * rec)
+{
+    // hack.  should really be semi-sequential for max efficiency
+    CONTIG_OFFSETS::const_iterator contig_iter = 
+        this->sam_order->contig_offsets.begin();
+
+    rec->SetFlattenedPosition(this->sam_order->contig_offsets, 
+                              & contig_iter);
+}
 
 /*
 std::vector<size_t>

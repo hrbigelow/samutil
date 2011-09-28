@@ -109,6 +109,16 @@ typedef std::pair<SINGLE_READ_SET::iterator, bool> SINGLE_READ_INS;
 typedef std::multiset<SamLine const*, LessSAMLineFragmentIDPtr> SINGLE_READ_ID_MSET;
 
 
+struct InsertResult
+{
+    SINGLE_READ_SET::iterator surviving_entry;
+    bool was_inserted;
+    SamLine * remaining_entry;
+    InsertResult(SINGLE_READ_SET::iterator _iter, bool _wi, SamLine * _sam);
+    InsertResult();
+};
+
+
 class SamBuffer
 {
     bool output_pairs_as_same_strand;
@@ -137,8 +147,14 @@ class SamBuffer
     /* bool safe_advance_lowbound(SamLine const* _proposed_new_low_bound); */
     /* void update_lowbound(SamLine const* _low_bound); */
 
-    //insert an entry, checking whether it is a duplicate.
-    std::pair<SamLine const*, bool> insert(SamLine const* entry);
+    // insert an entry, checking whether it is a duplicate.
+    // this follows the same logic as std::set::insert() in its return type.
+
+
+    InsertResult insert(SamLine * entry);
+
+    void replace(SINGLE_READ_SET::iterator iter,
+                 SamLine * replacement_entry);
 
     //print entries preceding low_bound, and delete them from memory
     //if low_bound == NULL, purge all remaining entries

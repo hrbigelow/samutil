@@ -22,7 +22,8 @@ int score_mapq_usage(size_t ldef, size_t Ldef, size_t mdef)
             "Options:\n\n"
             "-l     INT     min allowed fragment length for paired alignment [%Zu]\n"
             "-L     INT     max allowed fragment length for paired alignment [%Zu]\n"
-            "-y     STRING  expected read layout. If parsing traditional SAM, this is required []\n"
+            "-y     STRING  expected read layout. If parsing traditional SAM, this is required. \n"
+            "               If parsing rSAM, this must be absent or blank. []\n"
             "-m     INT     number bytes of memory to use [%Zu]\n"
             "-t     INT     number of threads to use [1]\n"
             "-C     STRING  work in the directory named here [.]\n"
@@ -150,7 +151,11 @@ int main_score_mapq(int argc, char ** argv)
 
         std::vector<SamLine *> sam_records(sam_lines.size());
         __gnu_parallel::transform(sam_lines.begin(), sam_lines.end(), 
-                                  sam_records.begin(), parse_sam_unary());
+                                  sam_records.begin(), 
+                                  parse_sam_unary());
+
+        __gnu_parallel::for_each(sam_records.begin(), sam_records.end(), 
+                                 set_flattened_pos_unary(& sam_order));
 
         size_t min_range = 1000; // arbitrarily set the single work unit size to 1000
         size_t est_num_work_units = 1 + (sam_lines.size() / min_range);
@@ -198,7 +203,7 @@ int main_score_mapq(int argc, char ** argv)
             }
         }
 
-        sam_buffers.resize(ranges.size());
+         sam_buffers.resize(ranges.size());
         for (size_t i = 0; i != ranges.size(); ++i)
         {
             sam_buffers[i] = new SamBuffer(& sam_order, false);

@@ -16,8 +16,6 @@
 //Initialize std::vector<char const*> merged to
 //size_t m = 0
 
-#include "sam_sort.h"
-
 #define __STDC_LIMIT_MACROS
 #include <stdint.h>
 
@@ -40,24 +38,24 @@
 #include "sam_order.h"
 
 
-int sam_sort_usage(char const* sdef, size_t mdef)
+int sam_sort_usage(size_t mdef)
 {
     fprintf(stderr,
             "Usage:\n\n"
-            "samutil sort [OPTIONS] alignment.sam alignment_sorted.sam\n\n"
+            "samutil sort [OPTIONS] sort_order alignment.sam alignment_sorted.sam\n\n"
             "Options:\n\n"
-            "-s  STRING    type of sorting to use {READ_ID_FLAG, ALIGN, GUIDE, MIN_ALIGN_GUIDE}[%s]\n"
             "-m  INT       number bytes of memory to use [%Zu]\n"
             "-t  INT       number of threads to use [1]\n"
             "-u  FLAG      (unique) if present, omit printing of all but one duplicate lines. [false]\n"
             "-h  STRING    optional sam header if alignment.sam header lacks SQ fields.\n"
             "              If provided, any header lines in alignment.sam will be ignored.\n"
-            "-C  STRING    work in the directory named here [.]\n",
-            sdef, mdef);
+            "-C  STRING    work in the directory named here [.]\n"
+            "-T  STRING    path/and/prefix of temp files [name of output file]\n\n",
+            mdef);
 
     fprintf(stderr,
-            "Sort orders are:\n"
-            "READ_ID_FLAG: sort by read id / pair flag (uniquely identifies the physical fragment)\n"
+            "sort_order must be one of:\n"
+            "FRAGMENT: sort by read id / pair flag (uniquely identifies the physical fragment)\n"
             "ALIGN: sort by alignment position\n"
             "GUIDE: sort by read-id encoded guide alignment position\n"
             "MIN_ALIGN_GUIDE: sort by the minimum of ALIGN or GUIDE\n\n");
@@ -69,8 +67,6 @@ int sam_sort_usage(char const* sdef, size_t mdef)
 int main_sam_sort(int argc, char ** argv)
 {
 
-    char const* sort_type_def = "MIN_ALIGN_GUIDE";
-    char const* sort_type = sort_type_def;
     char const* sam_header_file = "/dev/null";
 
     bool filter_duplicates = false;
@@ -81,18 +77,20 @@ int main_sam_sort(int argc, char ** argv)
     size_t num_threads = 1;
     char const* working_dir = ".";
 
+    char const* tmp_file_prefix = NULL;
+
     char c;
-    while ((c = getopt(argc, argv, "s:m:t:uh:C:")) >= 0)
+    while ((c = getopt(argc, argv, "m:t:uh:C:T:")) >= 0)
     {
         switch(c)
         {
-        case 's': sort_type = optarg; break;
         case 'm': max_mem = static_cast<size_t>(atof(optarg)); break;
         case 't': num_threads = static_cast<size_t>(atof(optarg)); break;
         case 'u': filter_duplicates = true; break;
         case 'h': sam_header_file = optarg; break;
         case 'C': working_dir = optarg; break;
-        default: return sam_sort_usage(sort_type_def, max_mem_def); break;
+        case 'T': tmp_file_prefix = optarg; break;
+        default: return sam_sort_usage(max_mem_def); break;
         }
     }
 
@@ -100,20 +98,26 @@ int main_sam_sort(int argc, char ** argv)
     omp_set_num_threads(num_threads);
 
 
-    int arg_count = optind + 2;
+    int arg_count = optind + 3;
     if (argc != arg_count)
     {
-        return sam_sort_usage(sort_type_def, max_mem_def);
+        return sam_sort_usage(max_mem_def);
     }
 
-    char const* alignment_sam_file = argv[optind];
-    char const* sorted_sam_file = argv[optind + 1];
+    char const* sort_type = argv[optind];
+    char const* alignment_sam_file = argv[optind + 1];
+    char const* sorted_sam_file = argv[optind + 2];
 
     int chdir_success = chdir(working_dir);
     if (chdir_success != 0)
     {
         fprintf(stderr, "Error: couldn't change directory to %s\n", working_dir);
         exit(1);
+    }
+
+    if (tmp_file_prefix == NULL)
+    {
+        tmp_file_prefix = sorted_sam_file;
     }
 
     FILE * alignment_sam_fh = open_if_present(alignment_sam_file, "r");
@@ -197,25 +201,29 @@ int main_sam_sort(int argc, char ** argv)
     size_t num_chunks = chunk_lengths.size();
 
     //prepare temporary files
-    size_t template_length = strlen(sorted_sam_file) + 8;
+    size_t template_length = strlen(tmp_file_prefix) + 8;
     char * tmp_file_template = new char[template_length];
-    strcpy(tmp_file_template, sorted_sam_file);
+    strcpy(tmp_file_template, tmp_file_prefix);
     strcat(tmp_file_template, ".XXXXXX");
 
     char ** tmp_files = new char *[num_chunks];
     FILE ** tmp_fhs = new FILE *[num_chunks];
     char * tmp_file_buf = new char[num_chunks * (template_length + 1)];
-    for (size_t c = 0; c != num_chunks; ++c)
+
+    if (num_chunks > 1)
     {
-        tmp_files[c] = tmp_file_buf + (c * (template_length + 1));
-        strcpy(tmp_files[c], tmp_file_template);
-        int fdes = mkstemp(tmp_files[c]);
-        tmp_fhs[c] = fdopen(fdes, "w+");
-        if (tmp_fhs[c] == NULL)
+        for (size_t c = 0; c != num_chunks; ++c)
         {
-            fprintf(stderr, "Error: couldn't open temporary chunk file %s for reading/writing.\n",
-                    tmp_files[c]);
-            exit(1);
+            tmp_files[c] = tmp_file_buf + (c * (template_length + 1));
+            strcpy(tmp_files[c], tmp_file_template);
+            int fdes = mkstemp(tmp_files[c]);
+            tmp_fhs[c] = fdopen(fdes, "w+");
+            if (tmp_fhs[c] == NULL)
+            {
+                fprintf(stderr, "Error: couldn't open temporary chunk file %s for reading/writing.\n",
+                        tmp_files[c]);
+                exit(1);
+            }
         }
     }
 
@@ -224,7 +232,7 @@ int main_sam_sort(int argc, char ** argv)
     char * chunk_buffer_out = new char[chunk_size + 1];
 
 
-    chunk_lengths[0] -= header_length;
+    chunk_lengths[0] -= ftell(alignment_sam_fh);
 
     std::vector<size_t> chunk_num_lines;
     std::vector<size_t> offset_quantile_sizes;
@@ -304,7 +312,7 @@ int main_sam_sort(int argc, char ** argv)
     delete [] tmp_fhs;
     delete [] tmp_file_buf;
 
-    fprintf(stdout, "%Zu lines printed.\n", line_index.size());
+    fprintf(stderr, "%Zu lines printed.\n", line_index.size());
 
     return 0;
 }

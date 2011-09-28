@@ -1,10 +1,78 @@
 #include "sam_aux.h"
 
+
+/*
+  pseudo-code:
+
+  precondition: start_iter is a valid start bound.  (i.e. it is at the
+  beginning of tx_projections, or the previous one does not overlap in
+  genome extent.
+
+  precondition: tx_projections are sorted by contig, contig_start.
+
+  end_iter = start_iter;
+  iter max_iter = end_iter;
+  while (end_iter.contig == start_iter.contig 
+         && end_iter.start < start_iter.end
+         && end_iter != tx_projections.end())
+  {
+       max_iter = end_iter.end > max_iter.end ? end_iter : max_iter;
+       ++end_iter;
+  }
+  if (max_iter != start_iter)
+  {
+     // recurse on max_iter
+  }
+  else
+  {
+     // return end_iter
+  }    
+
+  postcondition: returned value is a valid bound, such that [start, end) and [end, ...)
+  do not overlap in extent on genome.
+
+*/
+
+SEQ_PROJ_ITER 
+non_overlapping_range(SEQ_PROJ_ITER start, SEQ_PROJ_ITER set_end)
+{
+    SEQ_PROJ_ITER end = start;
+    SEQ_PROJ_ITER max = start;
+    
+    if (start == set_end)
+    {
+        return start;
+    }
+
+    while (strcmp((*start).target_dna.c_str(), (*end).target_dna.c_str()) == 0
+           && ((*end).target_start_pos() < (*start).target_end_pos())
+           && end != set_end)
+    {
+        max = ((*end).target_end_pos() > (*max).target_end_pos())
+            ? end
+            : max;
+        ++end;
+    }
+    
+    if (max != start)
+    {
+        return non_overlapping_range(max, set_end);
+    }
+    else
+    {
+        return end;
+    }
+}
+
+
+
+
 /*
   returns true if the named contigs do not have overlapping
   projections on the genome. by definition, unmapped contigs have no
   projection, and are thus non-overlapping.
  */
+/*
 bool tx_nonoverlapping_or_passthrough(PROJ_MAP const& tx_projections,
                                       char const* tx1, char const* tx2)
 {
@@ -35,37 +103,27 @@ bool tx_nonoverlapping_or_passthrough(PROJ_MAP const& tx_projections,
         || sp1.target_end_pos() <= sp2.target_start_pos()
         || sp2.target_end_pos() <= sp1.target_start_pos();
 }
+*/
 
 
 project_dedup_print::project_dedup_print(PROJ_MAP const* _proj_map,
                                          SamOrder const* _tx_ord,
                                          SamOrder const* _genome_ord,
                                          bool _inserts_are_introns,
+                                         bool _retain_unseq,
                                          size_t _avg_len)
     : projections(_proj_map), 
       tx_sam_order(_tx_ord),
       genome_sam_order(_genome_ord),
       inserts_are_introns(_inserts_are_introns),
+      retain_unsequenced_projection(_retain_unseq),
       average_rsam_line_length(_avg_len) { }
 
 
 std::vector<char> * 
 project_dedup_print::operator()(std::pair<SAMIT, SAMIT> const& range)
 {
-    // SamBuffer input_buf(this->tx_sam_order, false);
     SamBuffer output_buf(this->genome_sam_order, false);
-
-    // SAMIT cur;
-    // for (cur = range.first; cur != range.second; ++cur)
-    // {
-    //     input_buf.insert(*cur);
-    // }
-    // // At this point, the buffer should have joined everything together
-    // if (! input_buf.incomplete_entries.empty())
-    // {
-    //     fprintf(stderr, "Error: at a fragment boundary but there are still incomplete SAM entries\n");
-    //     exit(1);
-    // }
 
     // project them
     SINGLE_READ_SET::iterator beg, sit, end;
@@ -73,37 +131,64 @@ project_dedup_print::operator()(std::pair<SAMIT, SAMIT> const& range)
     PROJ_MAP::const_iterator proj_iter;
 
     char last_contig[256] = "";
-    CONTIG_OFFSETS::const_iterator contig_iter;
+    CONTIG_OFFSETS::const_iterator contig_iter = 
+        this->genome_sam_order->contig_offsets.begin();
 
-    // for (sit = input_buf.unique_entries.begin(); 
-    //      sit != input_buf.unique_entries.end(); ++sit)
+    char transcript_strand[2] = "";
+
     SAMIT cur;
     for (cur = range.first; cur != range.second; ++cur)
     {
         SamLine * samline = const_cast<SamLine *>(*cur);
 
+        // here is where we should efficiently compare and replace / ignore based on
+        // mapping quality.
         if (strcmp(last_contig, (*cur)->rname) != 0)
         {
-            contig_iter = this->tx_sam_order->contig_offsets.find((*cur)->rname);
-            assert(contig_iter != this->tx_sam_order->contig_offsets.end());
-
-            if ((*cur)->flag.all_fragments_mapped)
-            {
-                proj_iter = this->projections->find((*cur)->rname);
-                if (proj_iter != this->projections->end())
-                {
-                    ApplySequenceProjection(*(*proj_iter).second, samline, 
-                                            this->inserts_are_introns);
-                }
-            }
-            strcpy(last_contig, (*cur)->rname);
-
+            // update proj_iter if necessary
+            proj_iter = this->projections->find((*cur)->rname);
+            transcript_strand[0] = proj_iter == this->projections->end()
+                ? '.' 
+                : ((*(*proj_iter).second).same_strand ? '+' : '-');
         }
 
-        if (output_buf.insert(samline).second)
+        if ((*cur)->flag.all_fragments_mapped)
         {
-            samline->SetFlattenedPosition(this->genome_sam_order->contig_offsets, & contig_iter);
+            if (proj_iter != this->projections->end())
+            {
+                ApplySequenceProjection(*(*proj_iter).second, samline, 
+                                        this->inserts_are_introns);
+
+                samline->add_tag("XS", 'A', transcript_strand);
+            }
         }
+        
+        samline->SetFlattenedPosition(this->genome_sam_order->contig_offsets, 
+                                      & contig_iter);
+
+        if (! this->retain_unsequenced_projection)
+        {
+            samline->SetCigarCompared();
+        }
+
+        InsertResult ins = output_buf.insert(samline);
+        
+        strcpy(last_contig, (*ins.surviving_entry)->rname);
+
+        if (! ins.was_inserted)
+        {
+            // there is a collision.  now we must prioritize.
+            if (ins.remaining_entry->mapq > (*ins.surviving_entry)->mapq)
+            {
+                output_buf.replace(ins.surviving_entry, ins.remaining_entry);
+            }
+            else
+            {
+                delete ins.remaining_entry;
+            }
+        }
+
+
     }
 
     size_t num_entries = output_buf.unique_entries.size();

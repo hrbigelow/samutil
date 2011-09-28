@@ -20,18 +20,6 @@ bool LessSAMLinePtr::operator()(SamLine const* a,
     return (this->sam_order->*(this->sam_order->less))(*a, *b);
 }
 
-//sorts paired sam records with the same logic as the above
-//'LessSAMLinePtr' hierarchically
-
-/*
-bool LessSAMLinePair::operator()(SAMPTR_PAIR const& a,
-                                 SAMPTR_PAIR const& b)
-{
-    return (this->sam_order->*(this->sam_order->less))(*a.first, *b.first)
-        || ((this->sam_order->*(this->sam_order->equal))(*a.first, *b.first)
-            && (this->sam_order->*(this->sam_order->less))(*a.second, *b.second));
-}
-*/
 
 //sort on fragment ID (qid or qname)
 bool LessSAMLineFragmentIDPtr::operator()(SamLine const* a,
@@ -55,7 +43,6 @@ SamBuffer::SamBuffer(SamOrder const* _sam_order, bool pairs_same_strand) :
     less_ordering(_sam_order),
     less_entry_matepair(_sam_order),
     sam_order(_sam_order),
-    // low_bound(NULL),
     unique_entries(LessSAMLinePtr(_sam_order)),
     incomplete_entries(LessSAMLineFragmentIDPtr(_sam_order))
 {
@@ -90,40 +77,41 @@ void SamBuffer::update_lowbound(SamLine const* _low_bound)
 }
 */
 
+InsertResult::InsertResult(SINGLE_READ_SET::iterator _se, bool _wi, SamLine * _sam)
+    : surviving_entry(_se), was_inserted(_wi), remaining_entry(_sam) { }
+
+InsertResult::InsertResult() : 
+    surviving_entry(), was_inserted(false), remaining_entry(NULL) { }
+
 
 //returns pair, with a pointer to the inserted entry or a pre-existing
 //duplicate entry, and a bool indicating whether insertion was
 //successful. This is the same logic as with STL container insert()
 //but with a pointer to the actual item rather than an iterator
-std::pair<SamLine const*, bool>
-SamBuffer::insert(SamLine const* entry)
+InsertResult SamBuffer::insert(SamLine * entry)
 {
-    std::pair<SamLine const*, bool> result(static_cast<SamLine const*>(NULL), false);
+    InsertResult result;
 
     if (entry->flag.is_rsam_format)
     {
         //entry is already in rSAM format.  Simply insert
-        std::pair<SINGLE_READ_SET::iterator, bool> insert = 
+        std::pair<SINGLE_READ_SET::iterator, bool> ins = 
             this->unique_entries.insert(entry);
 
-        assert(insert.second);
-
-        result = std::make_pair(entry, true);
+        result = InsertResult(ins.first, ins.second, entry);
     }
     else if ((! entry->flag.is_rsam_format) && ! entry->flag.multi_fragment_template)
     {
         //we have traditional SAM, and it is a singleton.  convert it to rSAM
         SamLine const* line_array[] = { entry };
         SamLine * merged = new SamLine(line_array, 1, SamLine::expected_read_layout);
-
-        //this entry is 
-        std::pair<SINGLE_READ_SET::iterator, bool> insert = 
-            this->unique_entries.insert(merged);
-
-        assert(insert.second);
         delete entry;
 
-        result = std::make_pair(entry, true);
+        //this entry is 
+        std::pair<SINGLE_READ_SET::iterator, bool> ins = 
+            this->unique_entries.insert(merged);
+
+        result = InsertResult(ins.first, ins.second, merged);
     }
     else
     {
@@ -191,13 +179,9 @@ SamBuffer::insert(SamLine const* entry)
                 this->incomplete_entries.erase(unmerged_iter);
                     
                 std::pair<SINGLE_READ_SET::iterator, bool> 
-                    insert_success = this->unique_entries.insert(merged);
+                    ins = this->unique_entries.insert(merged);
 
-                if (! insert_success.second)
-                {
-                    delete merged;
-                }
-                result = std::make_pair(*insert_success.first, insert_success.second);
+                result = InsertResult(ins.first, ins.second, merged);
 
                 break;
             }
@@ -205,14 +189,40 @@ SamBuffer::insert(SamLine const* entry)
         }
         if (! mate_found)
         {
-            //treat as yet unmerged
+            // treat as yet unmerged.  insertion will always succeed
+            // because it is a multi-set.
             this->incomplete_entries.insert(entry);
-            result = std::make_pair(entry, true);
+
+            // how to we signal that the iterator is meaningless?
+            // we don't.  just note that, if insertion succeeded, we don't expect
+            // the caller to fuss with the iterator.
+            result = InsertResult(this->unique_entries.end(), true, entry);
         }
     }
-    assert(result.first != NULL);
 
     return result;
+}
+
+
+
+void SamBuffer::replace(SINGLE_READ_SET::iterator iter,
+                        SamLine * replacement_entry)
+{
+    SINGLE_READ_SET::iterator prec = iter;
+
+    // correct for a valid prec iterator
+    if (iter == this->unique_entries.begin())
+    {
+        prec = this->unique_entries.end();
+    }
+    else
+    {
+        --prec;
+    }
+    
+    delete *iter;
+    this->unique_entries.erase(iter);
+    this->unique_entries.insert(prec, replacement_entry);
 }
 
 /*

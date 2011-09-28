@@ -19,7 +19,8 @@ int sam_index_fastq_usage(size_t mdef)
             "Options:\n\n"
             "-m  INT       number bytes of memory to use [%Zu]\n"
             "-t  INT       number of threads to use [1]\n"
-            "-C  STRING    work in the directory named here [.]\n\n",
+            "-C  STRING    work in the directory named here [.]\n"
+            "-T  STRING    path/and/prefix of temp files [name of output fqd data file]\n\n",
             mdef);
 
     return 1;
@@ -33,16 +34,21 @@ int main_sam_index_fastq(int argc, char ** argv)
     size_t max_mem = max_mem_def;
 
     size_t num_threads = 1;
+    char const* working_dir = ".";
+
+    char const* tmp_file_prefix = NULL;
 
     std::vector<std::string> fastq_files;
 
     char c;
-    while ((c = getopt(argc, argv, "-m:t:")) >= 0)
+    while ((c = getopt(argc, argv, "-m:t:C:T:")) >= 0)
     {
         switch(c)
         {
         case 'm': max_mem = static_cast<size_t>(atof(optarg)); break;
         case 't': num_threads = static_cast<size_t>(atof(optarg)); break;
+        case 'C': working_dir = optarg; break;
+        case 'T': tmp_file_prefix = optarg; break;
         case 1: fastq_files.push_back(std::string(optarg)); break;
         default: return sam_index_fastq_usage(max_mem_def); break;
         }
@@ -55,6 +61,18 @@ int main_sam_index_fastq(int argc, char ** argv)
     
     char const* out_index_file = argv[optind];
     char const* out_data_file = argv[optind + 1];
+
+    int chdir_success = chdir(working_dir);
+    if (chdir_success != 0)
+    {
+        fprintf(stderr, "Error: couldn't change directory to %s\n", working_dir);
+        exit(1);
+    }
+
+    if (tmp_file_prefix == NULL)
+    {
+        tmp_file_prefix = out_data_file;
+    }
 
     FILE * out_index_fh = open_if_present(out_index_file, "w");
     FILE * out_data_fh = open_if_present(out_data_file, "w");
@@ -90,8 +108,8 @@ int main_sam_index_fastq(int argc, char ** argv)
 
     std::pair<size_t, size_t> chunk_stats;
 
-    char * tmp_file_template = new char[strlen(out_data_file) + 8];
-    strcpy(tmp_file_template, out_data_file);
+    char * tmp_file_template = new char[strlen(tmp_file_prefix) + 8];
+    strcpy(tmp_file_template, tmp_file_prefix);
     strcat(tmp_file_template, ".XXXXXX");
 
     std::vector<char *> tmp_files;
@@ -107,7 +125,7 @@ int main_sam_index_fastq(int argc, char ** argv)
     }
 
     //this is hard-coded because we only ever want to sort by read id.
-    SamOrder sam_order(SAM_RID, "FRAGMENT_ID");
+    SamOrder sam_order(SAM_RID, "FRAGMENT");
     sam_order.InitFromFastqFile(fastq_files[0].c_str());
 
     std::vector<size_t> chunk_num_lines;

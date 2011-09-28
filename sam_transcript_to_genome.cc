@@ -37,7 +37,7 @@ If our input is samlines aligned to transcripts, and the transcripts are ordered
 by start on the genome, then we just keep track of new transcripts in the SamLine input.
 
 */
-int transcript_to_genome_usage()
+int transcript_to_genome_usage(size_t mdef)
 {
     fprintf(stderr,
             "\nUsage:\n\n"
@@ -45,8 +45,10 @@ int transcript_to_genome_usage()
             "Options:\n\n"
             "-h     STRING   input genome SAM header file\n"
             "-n     FLAG     If present, use CIGAR 'N' to represent introns.  Otherwise use 'D'\n"
-            "-x     FLAG     If present, add Cufflinks XS:A: tag (+/-) denotes source RNA strand.\n"
+            "-x     FLAG     If present, add Cufflinks XS:A: tag (+/-) denotes source RNA strand\n"
+            "-u     FLAG     If present, retain inferred alignment of unsequenced portion [false]\n"
             "-t     INT      Number of threads to use\n"
+            "-m     INT      number bytes of memory to use [%Zu]\n"
             "-C     STRING   work in the directory named here [.]\n"
             "\n"
             "Only one of each group of identical fragment alignments is output.\n"
@@ -57,7 +59,8 @@ int transcript_to_genome_usage()
             "reads.vs.tx.asort.sam must be sorted by alignment position, with contigs (transcript)\n"
             "ordered by projection order according to genomic contig order as specified.\n"
             "expected read layout is a sequenced of 'f' and 'r' denoting whether each read is\n"
-            "on the forward or reverse strand of the template molecule.\n"
+            "on the forward or reverse strand of the template molecule.\n",
+            mdef
             );
     return 1;
 }
@@ -156,6 +159,8 @@ int main_transcript_to_genome(int argc, char ** argv)
     char const* input_genome_sam_header_file = "";
     bool inserts_are_introns = false;
     bool add_cufflinks_xs_tag = false;
+    bool retain_unsequenced_projection = false;
+
     char const* working_dir = ".";
 
     size_t num_threads = 1;
@@ -163,24 +168,25 @@ int main_transcript_to_genome(int argc, char ** argv)
     size_t max_mem = mdef;
 
 
-    while ((c = getopt(argc, argv, "h:nxt:m:C:")) >= 0)
+    while ((c = getopt(argc, argv, "h:nxut:m:C:")) >= 0)
     {
         switch(c)
         {
         case 'h': input_genome_sam_header_file = optarg; break;
         case 'n': inserts_are_introns = true; break;
         case 'x': add_cufflinks_xs_tag = true; break;
+        case 'u': retain_unsequenced_projection = true; break;
         case 't': num_threads = static_cast<size_t>(atof(optarg)); break;
         case 'm': max_mem = static_cast<size_t>(atof(optarg)); break;
         case 'C': working_dir = optarg; break;
-        default: return transcript_to_genome_usage(); break;
+        default: return transcript_to_genome_usage(mdef); break;
         }
     }
 
     //printf("optind: %i\n", optind);
     if (argc != 3 + optind)
     {
-        return transcript_to_genome_usage();
+        return transcript_to_genome_usage(mdef);
     }
 
     omp_set_dynamic(false);
@@ -215,14 +221,20 @@ int main_transcript_to_genome(int argc, char ** argv)
 
     char const* species = "dummy";
 
-    std::set<SequenceProjection> tx_to_genome = 
+    std::set<SequenceProjection> tx_to_genome_tmp = 
         gtf_to_sequence_projection(gtf_file, species);
+
+    less_seq_projection lsp(& genome_sam_order);
+    std::set<SequenceProjection, less_seq_projection> tx_to_genome(lsp);
+    std::set<SequenceProjection, less_seq_projection>::iterator tx_iter;
+
+    tx_to_genome.insert(tx_to_genome_tmp.begin(), tx_to_genome_tmp.end());
 
     PROJ_MAP tx_projections;
 
     // 1. tx_to_genome  (projections of transcripts to the genome)
     // 2. tx_projections.  (tx names pointing to tx_to_genome iterators)
-    for (SP_ITER t = tx_to_genome.begin(); t != tx_to_genome.end(); ++t)
+    for (SEQ_PROJ_ITER t = tx_to_genome.begin(); t != tx_to_genome.end(); ++t)
     {
         char * tx_name = new char[(*t).source_dna.size() + 1];
         strcpy(tx_name, (*t).source_dna.c_str());
@@ -248,7 +260,7 @@ int main_transcript_to_genome(int argc, char ** argv)
     bool consistent_order = 
         CheckProjectionOrder(genome_sam_order.contig_offsets,
                              tx_sam_order.contig_offsets,
-                             tx_to_genome);
+                             tx_to_genome_tmp);
 
     if (! consistent_order)
     {
@@ -312,6 +324,10 @@ int main_transcript_to_genome(int argc, char ** argv)
                                   sam_records.begin() + prev_num_records,
                                   parse_sam_unary());
 
+        __gnu_parallel::for_each(sam_records.begin() + prev_num_records, 
+                                 sam_records.end(), 
+                                 set_flattened_pos_unary(& tx_sam_order));
+
         //compute average printed line length of first 100 records
         size_t average_rsam_line_length = 200; // reasonable value in absence of any other information
         size_t n_sampled_records = std::min(100UL, sam_records.size());
@@ -333,50 +349,75 @@ int main_transcript_to_genome(int argc, char ** argv)
         std::vector<std::pair<SAMIT, SAMIT> > ranges;
         ranges.reserve(est_num_work_units);
 
-        SAMIT pre = sam_records.begin();
-        SAMIT cur;
-        size_t skip = 0;
+        SAMIT cur = sam_records.begin();
+        SAMIT pre;
 
-        char pre_contig[256];
-        strcpy(pre_contig, (*pre)->rname);
+        SEQ_PROJ_ITER cur_proj_iter;
+        size_t n_records_left = sam_records.size();
 
-        for (cur = pre; cur != sam_records.end(); ++cur, ++skip)
+        CONTIG_OFFSETS::const_iterator dummy = 
+            tx_sam_order.contig_offsets.begin();
+
+        while (cur != sam_records.end())
         {
-            if (skip >= min_range)
+            pre = cur;
+            size_t jump = std::min(min_range, n_records_left);
+            std::advance(cur, jump);
+
+            // find the projection map iterator corresponding to this
+            // record, if it exists
+            PROJ_MAP::const_iterator p = 
+                (cur == sam_records.end())
+                ? tx_projections.end()
+                : tx_projections.find((*cur)->rname);
+
+            // find the projection iterator, if it exists
+            cur_proj_iter = 
+                (p == tx_projections.end()) 
+                ? tx_to_genome.end()
+                : (*p).second;
+            
+            // find the next valid bound projection iterator if it exists
+            cur_proj_iter = non_overlapping_range(cur_proj_iter, tx_to_genome.end());
+            
+            // compute the lowest flattened position for this valid bound
+
+            if (cur_proj_iter == tx_to_genome.end())
             {
-                if (tx_nonoverlapping_or_passthrough(tx_projections, pre_contig, (*cur)->rname))
-                {
-                    // projections do not overlap. safe to split here.
-                    ranges.push_back(std::make_pair(pre, cur));
-                    pre = cur;
-                    skip = 0;
-                }
-                strcpy(pre_contig, (*cur)->rname);
+                // do nothing
+            }
+            else
+            {
+                size_t flat_lowbound = 
+                    flattened_position_aux((*cur_proj_iter).source_dna.c_str(),
+                                           0,
+                                           tx_sam_order.contig_offsets,
+                                           & dummy);
+                                           
+                for ( ; cur != sam_records.end()
+                          && (*cur)->flattened_pos < flat_lowbound; ++cur) { }
+
+                assert(cur == sam_records.end() || (*cur)->flattened_pos >= flat_lowbound);
+            }
+            // postcondition: cur represents the valid bound
+            // corresponding to the projection bound.
+
+
+            if (cur != sam_records.end() || feof(input_tx_sam_fh))
+            {
+                // either cur is a valid boundary or it's the end
+                ranges.push_back(std::make_pair(pre, cur));
+                n_records_left -= std::distance(pre, cur);
             }
         }
+        // postcondition: pre is the last valid bound found.
 
+        // unless we're at the end of the file, we don't want to use
+        // up all remaining records. (because we can't find a valid
+        // bound then)
+        assert(feof(input_tx_sam_fh) || n_records_left > 0);
 
-        // if this is the last chunk, consume the entire range,
-        // otherwise, look for a fragment boundary
-        SAMVEC::reverse_iterator revit = sam_records.rbegin();
-
-        if (nbytes_unused > 0)
-        {
-            //adjust revit to point to the highest position that comes
-            //just before a boundary of non-overlap in transcripts.
-            strcpy(pre_contig, (*revit)->rname);
-            for (revit = sam_records.rbegin(); revit.base() != pre; ++revit)
-            {
-                if (tx_nonoverlapping_or_passthrough(tx_projections, pre_contig, (*revit)->rname))
-                {
-                    break;
-                }
-            }
-        }
-        if (pre != revit.base())
-        {
-            ranges.push_back(std::make_pair(pre, revit.base()));
-        }
+        // Where did we account for unused SAM records??? This is n_records_left
 
         if(ranges.empty())
         {
@@ -394,6 +435,12 @@ int main_transcript_to_genome(int argc, char ** argv)
             }
         }
 
+        // now re-set flattened pos according to transcriptome meta-contig
+        // __gnu_parallel::for_each(sam_records.begin() + prev_num_records, 
+        //                          sam_records.end(), 
+        //                          set_flattened_pos_unary(& tx_sam_order));
+
+
         __gnu_parallel::_Settings psettings;
         psettings.transform_minimal_n = 2;
         __gnu_parallel::_Settings::set(psettings);
@@ -404,6 +451,7 @@ int main_transcript_to_genome(int argc, char ** argv)
                                     &tx_sam_order,
                                     &genome_sam_order,
                                     inserts_are_introns,
+                                    retain_unsequenced_projection,
                                     average_rsam_line_length);
 
         // 5. project, load to buffer, string_alloc, string_print, delete (transform)
@@ -418,7 +466,9 @@ int main_transcript_to_genome(int argc, char ** argv)
 
             delete projected_sam_records[r];
         }
-        sam_records.clear();
+        // now we want to copy the range [pre, end) into sam_records
+        sam_records.swap(std::vector<SamLine *>(pre, sam_records.end()));
+
         cumul_nbytes_read = 0;
     }
 
@@ -431,6 +481,7 @@ int main_transcript_to_genome(int argc, char ** argv)
     {
         delete (*tn).first;
     }
+
     
     return 0;
 }

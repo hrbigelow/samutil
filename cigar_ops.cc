@@ -14,6 +14,7 @@ namespace Cigar
 {
     char const* OpName = "MIDNSHPTU";
 
+    // code, name, ref, temp, seq
     Op Ops[] = 
         { 
             { M, 'M', 1, 1, 1 },
@@ -325,7 +326,7 @@ Cigar::Expand(std::vector<block_offsets> const& blocks,
     assert(! blocks.empty());
 
     Cigar::Op mskip = use_N_as_insert ? Ops[Cigar::N] : Ops[Cigar::D];
-    Cigar::Op ins;
+    //Cigar::Op ins;
 
     //initialize
     std::vector<block_offsets>::const_iterator cur_block = blocks.begin();
@@ -345,8 +346,8 @@ Cigar::Expand(std::vector<block_offsets> const& blocks,
         if (offset_remain < block_remain)
         {
             *expanded_start_offset += offset_remain;
-            offset_remain = 0;
             block_remain -= offset_remain;
+            offset_remain = 0;
         }
         else
         {
@@ -359,6 +360,12 @@ Cigar::Expand(std::vector<block_offsets> const& blocks,
     
     while (1)
     {
+        // each iteration of this loop does the following:
+        // 1) uses up any pending jump between two blocks
+        // 2) decide between finishing a CIGAR op or a block.
+        //    a) if the remain CIGAR op length is contained within a block,
+        //       use up the op.
+        //    b) otherwise, use up the block
         if (cur_block == blocks.end())
         {
             //while we are in the loop, there must be at least one
@@ -369,7 +376,6 @@ Cigar::Expand(std::vector<block_offsets> const& blocks,
         
         if (op_remain <= block_remain)
         {
-            //Remaining piece of op
             result.push_back(Cigar::Unit((*cur_op).op, op_remain * mult));
             block_remain -= op_remain;
             if (++cur_op == cigar.end())
@@ -379,9 +385,7 @@ Cigar::Expand(std::vector<block_offsets> const& blocks,
             op_remain = abs((*cur_op).length);
             if (is_reverse != ((*cur_op).length < 0))
             {
-                //flip block_remain only if we are *reversing*
-                //direction, not if we are currently moving forward or
-                //reverse.
+                // invert block_remain
                 block_remain = (*cur_block).block_length - block_remain;
             }
             is_reverse = (*cur_op).length < 0;
@@ -390,14 +394,19 @@ Cigar::Expand(std::vector<block_offsets> const& blocks,
         }
         else
         {
-            //CIGAR op is broken up into two pieces
-            ins = (*cur_op).op.code == Cigar::T ? Ops[Cigar::U] : mskip;
-
             result.push_back(Cigar::Unit((*cur_op).op, block_remain * mult));
-            result.push_back(Cigar::Unit(ins, (*cur_block).jump_length * mult));
-
-            is_reverse ? --cur_block : ++cur_block;
             op_remain -= block_remain;
+            block_remain = 0;
+        }
+
+        if (block_remain == 0)
+        {
+            int64_t jump_length = is_reverse
+                ? (*cur_block--).jump_length
+                : (*++cur_block).jump_length;
+
+            result.push_back(Cigar::Unit(mskip, jump_length * mult));
+
             block_remain = (*cur_block).block_length;
         }
     }
@@ -982,6 +991,41 @@ Cigar::CIGAR_VEC Cigar::Consolidate(Cigar::CIGAR_VEC const& source)
     return condensed;
 }
 
+
+void Cigar::Consolidate(char const* cigar, char * cigar_cons)
+{
+    char const* in = cigar;
+    char * out = cigar_cons;
+
+    out[0] = '\0';
+
+    if (strlen(cigar) == 0)
+    {
+        return;
+    }
+
+    char op_cur, op;
+    int64_t len_cur, len;
+    int next;
+    sscanf(in, "%zi%c%n", &len_cur, &op_cur, &next);
+    in += next;
+    while (sscanf(in, "%zi%c%n", &len, &op, &next) == 2)
+    {
+        if (op == op_cur)
+        {
+            // this is done so that when
+            len += len_cur;
+        }
+        else
+        {
+            out += sprintf(out, "%zi%c", len_cur, op_cur);
+        }
+        op_cur = op;
+        len_cur = len;
+        in += next;
+    }
+    out += sprintf(out, "%zi%c", len_cur, op_cur);
+}
 
 
 void Cigar::Trim(Cigar::CIGAR_VEC const& source, 

@@ -110,7 +110,18 @@ struct score_rsam_alloc_binary
 struct parse_sam_unary
 {
     parse_sam_unary();
+
     SamLine * operator()(char * sam_string);
+};
+
+
+
+struct set_flattened_pos_unary
+{
+    SamOrder const* sam_order;
+    /* CONTIG_OFFSETS::const_iterator contig_iter; */
+    set_flattened_pos_unary(SamOrder const* _sam_order);
+    void operator()(SamLine * rec);
 };
 
 void NextLine(FILE * unnscored_sam_fh, 

@@ -2,6 +2,7 @@
 #define _SAM_ORDER_H
 
 #include "sam_helper.h"
+#include "seq_projection.h"
 #include "gtf.h"
 
 #include <map>
@@ -16,15 +17,6 @@ enum SAM_ORDER
         SAM_POSITION,
         SAM_FID_POSITION
     };
-
-/* enum SAM_INDEX_TYPE */
-/*     { */
-/*         SAM_POS_MIN_ALIGN_GUIDE, */
-/*         SAM_POS_ALIGN, */
-/*         SAM_READ_ID, */
-/*         SAM_READ_ID_ILLUMINA */
-/*     }; */
-
 
 class SamOrder
 {
@@ -90,10 +82,28 @@ class SamOrder
 
     size_t samline_position_min_align_guide(char const* samline) const;
     size_t samline_position_align(char const* samline) const;
-    size_t samline_read_id(char const* samline) const;
+    /* size_t samline_read_id(char const* samline) const; */
     size_t samline_fragment_id(char const* samline) const;
 
 };
+
+
+struct less_seq_projection
+{
+    SamOrder const* sam_order;
+
+    less_seq_projection(SamOrder const* _so);
+
+    // sort order by target start position
+    bool operator()(SequenceProjection const& a,
+                    SequenceProjection const& b) const;
+};
+
+
+size_t flattened_position_aux(char const* contig,
+                              size_t position, 
+                              CONTIG_OFFSETS const& contig_offsets,
+                              CONTIG_OFFSETS::const_iterator * contig_iter);
 
 
 void GenerateProjectionHeader(CONTIG_OFFSETS const& genome_contig_order,

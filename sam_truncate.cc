@@ -122,8 +122,6 @@ int main_sam_truncate(int argc, char ** argv)
             fseek(input_sam_fh, -1 * static_cast<off_t>(nbytes_unused), SEEK_CUR);
         }
 
-        assert(! sam_lines.empty());
-
         // do not use the last line. it is incomplete.
         truncate_sam_unary truncate_aux;
         __gnu_parallel::transform(sam_lines.begin(), sam_lines.end(), 

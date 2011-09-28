@@ -90,19 +90,25 @@ void encode_tags(char const* tag_string,
     {
         if (strcmp(tag_name, raw_score_tag) == 0)
         {
+            (*tags).raw_score_tag1 = raw_score_tag[0];
+            (*tags).raw_score_tag2 = raw_score_tag[1];
             (*tags).raw_score = atoi(tag_value);
+            (*tags).raw_score_present = true;
         }
         else if (strcmp(tag_name, AlignSpaceTag) == 0)
         {
             (*tags).alignment_space = tag_value[0];
+            (*tags).alignment_space_present = true;
         }
         else if (strcmp(tag_name, StratumRankTag) == 0)
         {
             (*tags).stratum_rank = atoi(tag_value);
+            (*tags).stratum_rank_present = true;
         }
         else if (strcmp(tag_name, StratumSizeTag) == 0)
         {
             (*tags).stratum_size = atoi(tag_value);
+            (*tags).stratum_size_present = true;
         }
         else
         {
@@ -254,7 +260,8 @@ SamLine::SamLine(SamLine const& s) :
     tlen(s.tlen),
     tags(s.tags),
     tag_string(NULL),
-    flattened_pos(s.flattened_pos)
+    flattened_pos(s.flattened_pos),
+    cigar_compared(NULL)
 {
     if (s.rname != NULL)
     {
@@ -265,6 +272,11 @@ SamLine::SamLine(SamLine const& s) :
     {
         this->cigar = new char[strlen(s.cigar) + 1];
         strcpy(this->cigar, s.cigar);
+    }
+    if (s.cigar_compared != NULL)
+    {
+        this->cigar_compared = new char[strlen(s.cigar_compared) + 1];
+        strcpy(this->cigar_compared, s.cigar_compared);
     }
     if (s.rnext != NULL)
     {
@@ -288,7 +300,9 @@ SamLine::SamLine(SamLine const* samlines[], size_t n_lines, char const* read_lay
       rnext(NULL),
       pnext(0),
       tlen(0),
-      flattened_pos(samlines[0]->flattened_pos)
+      flattened_pos(samlines[0]->flattened_pos),
+      cigar_compared(NULL) // since we are merging SAM (not rSAM), we
+                           // don't yet have a use for cigar_compared
 {
     this->flag.raw = 0;
 
@@ -312,12 +326,12 @@ SamLine::SamLine(SamLine const* samlines[], size_t n_lines, char const* read_lay
 
     Cigar::CIGAR_VEC cur_cigar;
 
+    // take an 'innocent until proven guilty strategy here
+    // 
+    this->flag.all_fragments_mapped = (! sl->flag.this_fragment_unmapped);
+
     for (size_t i = 1; i != n_lines; ++i)
     {
-        assert(samlines[i]->tags.alignment_space == this->tags.alignment_space);
-        assert(samlines[i]->tags.stratum_rank == this->tags.stratum_rank);
-        assert(samlines[i]->tags.stratum_size == this->tags.stratum_size);
-
         this->tags.raw_score += samlines[i]->tags.raw_score;
 
         int64_t inter_seq_jump = 
@@ -332,6 +346,10 @@ SamLine::SamLine(SamLine const* samlines[], size_t n_lines, char const* read_lay
         strcat(merged_cigar, Cigar::ToString(cur_cigar).c_str());
 
         prev_cigar = cur_cigar;
+
+        this->flag.all_fragments_mapped = 
+            this->flag.all_fragments_mapped &&
+            (! samlines[i]->flag.this_fragment_unmapped);
     }
     // c. merge tags appropriately (complicated!)  perhaps for now, we
     // simply can catenate tag strings together in fragment alignment
@@ -350,8 +368,6 @@ SamLine::SamLine(SamLine const* samlines[], size_t n_lines, char const* read_lay
 
     this->tag_string = new char[strlen(sl->tag_string) + 1];
     strcpy(this->tag_string, sl->tag_string);
-
-    this->flag.raw = 0;
 
     this->flag.is_rsam_format = 1;
     this->flag.num_fragments_in_template = n_lines;
@@ -385,7 +401,6 @@ SamLine::SamLine(SamLine const* samlines[], size_t n_lines, char const* read_lay
 
     // c. initialize flag. assume (but do not check) that these flags
     // have the same values for all records on this template.
-    this->flag.all_fragments_mapped = sl->flag.all_fragments_mapped;
     this->flag.alignment_not_primary = sl->flag.alignment_not_primary;
 
     // these fields are not applicable to rSAM format
@@ -396,7 +411,7 @@ SamLine::SamLine(SamLine const* samlines[], size_t n_lines, char const* read_lay
     this->flag.next_fragment_on_neg_strand = 0;
     this->flag.first_fragment_in_template = 0;
     this->flag.last_fragment_in_template = 0;
-    
+
 }
 
 
@@ -459,10 +474,10 @@ void SamLine::Init(char const* samline_string)
                        &seq_start, &seq_end,
                        &tag_start);
 
-            this->tags.raw_score = SamLine::worst_fragment_score;
-            this->tags.alignment_space = AlignSpaceMissing;
-            this->tags.stratum_rank = 0;
-            this->tags.stratum_size = 0;
+            this->tags.raw_score_present = false;
+            this->tags.alignment_space_present = false;
+            this->tags.stratum_rank_present = false;
+            this->tags.stratum_size_present = false;
 
             if (num_fields != 9)
             {
@@ -516,7 +531,7 @@ void SamLine::Init(char const* samline_string)
         this->parse_flag = DATA_LINE;
 
         this->flattened_pos = 0;
-
+        this->cigar_compared = NULL;
     }
 }
 
@@ -544,9 +559,35 @@ void SamLine::SetFlattenedPosition(CONTIG_OFFSETS const& contig_offsets,
 }
 
 
+// splice out zero-length 
+void SamLine::SetCigarCompared()
+{
+    assert(this->cigar_compared == NULL);
+
+    // convert 'T' to 'N' and consolidate.  T and N are the only ops
+    // that consume ref but not seq.  They differ in whether template
+    // is consumed.  By collapsing T to N, two CIGARs that differ in
+    // the alignment of their unsequenced portion only, will be made
+    // identical.
+    char cigar_in[512];
+    char cigar_out[512];
+    strcpy(cigar_in, this->cigar);
+
+    char * c = cigar_in;
+    while ((c = strchr(c, 'T')) != NULL)
+    {
+        *c++ = 'N';
+    }
+    Cigar::Consolidate(cigar_in, cigar_out);
+    this->cigar_compared = new char[strlen(cigar_out) + 1];
+    strcpy(this->cigar_compared, cigar_out);
+}
+
 SamLine::~SamLine()
 {
-    char ** fields[] = { & this->rname, & this->cigar, & this->rnext, & this->tag_string, NULL };
+    char ** fields[] = { & this->rname, & this->cigar, 
+                         & this->rnext, & this->tag_string, 
+                         & this->cigar_compared, NULL };
 
     for (char *** f = fields; *f != NULL; ++f)
     {
@@ -623,14 +664,15 @@ void SamLine::print_aux(void * print_buf, bool to_file) const
 void SamLine::print_rsam_as_sam(char const* seq_data, char * out_string) const
 {
     int64_t cur_read_start = this->pos;
-    int64_t pnext;
+
     char rnext[2] = "=";
     
     Cigar::CIGAR_VEC cigar_v = Cigar::FromString(this->cigar, 0);
 
-    Cigar::CIGAR_ITER start = cigar_v.begin();
-    Cigar::CIGAR_ITER end = cigar_v.begin();
-
+    Cigar::CIGAR_ITER read_start = cigar_v.begin();
+    Cigar::CIGAR_ITER read_end = cigar_v.begin();
+    Cigar::CIGAR_ITER unseq_end = cigar_v.begin();
+    
     int64_t tlen = Cigar::Length(cigar_v, false);
 
     char cigar_substring[1024];
@@ -672,7 +714,10 @@ void SamLine::print_rsam_as_sam(char const* seq_data, char * out_string) const
     int this_fragment_layout;
     int next_fragment_layout;
 
-    while (start != cigar_v.end())
+    size_t reported_pos;
+    size_t reported_pnext;
+
+    while (read_start != cigar_v.end())
     {
         layout_index = (this->flag.template_layout == LAYOUT_FORWARD) 
             ? align_index 
@@ -681,36 +726,33 @@ void SamLine::print_rsam_as_sam(char const* seq_data, char * out_string) const
         this_fragment_layout = 1 & (this->flag.read_layout>>layout_index);
         next_fragment_layout = 1 & (this->flag.read_layout>>((layout_index + 1) % num_fragments));
 
-        //construct the next [start, end) range for [^TU] CIGAR ops
-        while (end != cigar_v.end() 
-               && (*end).op.code != Cigar::T
-               && (*end).op.code != Cigar::U)
+        //construct the next [read_start, read_end) sequenced portion range
+        assert((*read_start).op.seq); // want to be within the sequenced portion
+        while (read_end != cigar_v.end() && (*read_end).op.temp == (*read_end).op.seq)
         {
-            ++end;
+            ++read_end;
         }
-        //now 'end' points to the real end or to a 'T' operator
-        size_t read_length = Cigar::Length(start, end, false);
-
+        unseq_end = read_end;
+        while (unseq_end != cigar_v.end() && ! (*unseq_end).op.seq)
+        {
+            ++unseq_end;
+        }
+        // now [read_start, read_end) is a read alignment range
+        // and [read_end, unseq_end) is the unsequenced portion alignment range
+        size_t start_to_start_dist = Cigar::Length(read_start, unseq_end, true);
         if (this->flag.all_fragments_mapped)
         {
-            Cigar::ToString(start, end, cigar_substring);
+            Cigar::ToString(read_start, read_end, cigar_substring);
+            reported_pos = cur_read_start + 1;
+            reported_pnext = (read_end == cigar_v.end())
+                ? this->pos + 1
+                : this->pos + start_to_start_dist + 1;
         }
         else
         {
             strcpy(cigar_substring, "*");
-        }
-
-        if (end == cigar_v.end())
-        {
-            //we're at the end of the series of reads.
-            //set pnext to point back to the first pos
-            pnext = this->pos;
-        }
-        else
-        {
-            //multi-fragment template
-            int64_t t_oplen = (*end).length;
-            pnext = cur_read_start + read_length + t_oplen;
+            reported_pos = 0;
+            reported_pnext = 0;
         }
 
         flag.this_fragment_unmapped = 1 - this->flag.all_fragments_mapped;
@@ -734,7 +776,8 @@ void SamLine::print_rsam_as_sam(char const* seq_data, char * out_string) const
         
         // definition of tlen in SAM 1.4 Spec
         int64_t used_tlen;
-        if (num_fragments == 1 
+        if ((! this->flag.all_fragments_mapped)
+            || num_fragments == 1 
             || (layout_index != 0 && layout_index != (num_fragments - 1)))
         {
             used_tlen = 0;
@@ -750,8 +793,8 @@ void SamLine::print_rsam_as_sam(char const* seq_data, char * out_string) const
         out_string += 
             sprintf(out_string, 
                     "\t%zu\t%s\t%Zu\t%Zu\t%s\t%s\t%Zu\t%zi",
-                    flag.raw, this->rname, cur_read_start + 1,
-                    this->mapq, cigar_substring, rnext, pnext + 1, used_tlen);
+                    flag.raw, this->rname, reported_pos,
+                    this->mapq, cigar_substring, rnext, reported_pnext, used_tlen);
         
         size_t seq_len = std::distance(seqs[layout_index], quals[layout_index]) - 1;
         if (flag.this_fragment_on_neg_strand)
@@ -774,33 +817,39 @@ void SamLine::print_rsam_as_sam(char const* seq_data, char * out_string) const
         }
         
         //now about the tags.
-        out_string += 
-            sprintf(out_string, "%s:i:%i\t%s:A:%c\t%s:i:%i\t%s:i:%i",
-                    SamLine::raw_score_tag, this->tags.raw_score, 
-                    AlignSpaceTag, this->tags.alignment_space,
-                    StratumRankTag, this->tags.stratum_rank, 
-                    StratumSizeTag, this->tags.stratum_size);
-
+        // this should be optional, 
+        if (this->tags.raw_score_present)
+        {
+            out_string += sprintf(out_string, "\t%c%c:i:%i", 
+                                  this->tags.raw_score_tag1, 
+                                  this->tags.raw_score_tag2,
+                                  this->tags.raw_score);
+        }
+        if (this->tags.alignment_space_present)
+        {
+            out_string += sprintf(out_string, "\t%s:A:%c", 
+                                  AlignSpaceTag, this->tags.alignment_space);
+        }
+        if (this->tags.stratum_rank_present)
+        {
+            out_string += sprintf(out_string, "\t%s:i:%i", 
+                                  StratumRankTag, this->tags.stratum_rank);
+        }
+        if (this->tags.stratum_size_present)
+        {
+            out_string += sprintf(out_string, "\t%s:i:%i", 
+                                  StratumSizeTag, this->tags.stratum_size);
+        }
         if (this->tag_string != NULL)
         {
-            sprintf(out_string, "\t%s", this->tag_string);
+            out_string += sprintf(out_string, "\t%s", this->tag_string);
         }
 
-        strcat(out_string, "\n");
-        out_string += strlen(out_string);
+        out_string += sprintf(out_string, "\n");
 
-        // update cur_read_start. [start, end) is a [^TU] range
-        cur_read_start += Cigar::Length(start, end, true);
-        start = end;
-        while (end != cigar_v.end() 
-               && ((*end).op.code == Cigar::T || (*end).op.code == Cigar::U))
-        {
-            ++end;
-        }
-        // update cur_read_start. [start, end) is a [TU] range
-        cur_read_start += Cigar::Length(start, end, true);
-        start = end;
-
+        cur_read_start += start_to_start_dist;
+        read_start = unseq_end;
+        read_end = unseq_end;
         ++align_index;
     }
     delete [] seqs;
@@ -982,6 +1031,13 @@ char const* SamLine::next_fragment_ref_name() const
     return strcmp(this->rnext, "=") == 0 ? this->rname : this->rnext;
 }
 
+
+char const* SamLine::cigar_for_comparison() const
+{
+    return this->cigar_compared == NULL
+        ? this->cigar
+        : this->cigar_compared;
+}
 
 void PrintSAMHeader(FILE ** input_sam_fh, FILE * output_fh)
 {

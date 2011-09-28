@@ -248,6 +248,12 @@ int main_sam_rejoin(int argc, char ** argv)
                 {
                     ++lit;
                 }
+                if ((*lit).index != (*rec_iter)->fragment_id)
+                {
+                    fprintf(stderr, "Error: couldn't find read index %Zu in fastq index file\n",
+                            (*rec_iter)->fragment_id);
+                    exit(1);
+                }
                 (*ii_iter) = lit;
             }
 

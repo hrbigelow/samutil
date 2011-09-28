@@ -11,19 +11,19 @@
 #include "align_eval_aux.h"
 
 
-typedef std::set<SequenceProjection>::const_iterator SP_ITER;
+typedef std::set<SequenceProjection, less_seq_projection>::const_iterator SEQ_PROJ_ITER;
 
 #ifdef __GXX_EXPERIMENTAL_CXX0X__
-typedef std::unordered_map<char const*, SP_ITER, to_integer, eqstr> PROJ_MAP;
+typedef std::unordered_map<char const*, SEQ_PROJ_ITER, to_integer, eqstr> PROJ_MAP;
 #else
-typedef std::tr1::unordered_map<char const*, SP_ITER, to_integer, eqstr> PROJ_MAP;
+typedef std::tr1::unordered_map<char const*, SEQ_PROJ_ITER, to_integer, eqstr> PROJ_MAP;
 #endif
 
 typedef PROJ_MAP::const_iterator NP_ITER;
 
 
-bool tx_nonoverlapping_or_passthrough(PROJ_MAP const& tx_projections,
-                                      char const* tx1, char const* tx2);
+SEQ_PROJ_ITER 
+non_overlapping_range(SEQ_PROJ_ITER start, SEQ_PROJ_ITER set_end);
 
 
 // inputs: SamLine * [beg, end) range, SamBuffer *
@@ -35,12 +35,14 @@ struct project_dedup_print
     SamOrder const* tx_sam_order;
     SamOrder const* genome_sam_order;
     bool inserts_are_introns;
+    bool retain_unsequenced_projection;
     size_t average_rsam_line_length;
 
     project_dedup_print(PROJ_MAP const* _proj_map,
                         SamOrder const* _tx_order,
                         SamOrder const* _genome_order,
                         bool _inserts_are_introns,
+                        bool _retain_unseq,
                         size_t _ave_len);
 
     std::vector<char> * operator()(std::pair<SAMIT, SAMIT> const& range);

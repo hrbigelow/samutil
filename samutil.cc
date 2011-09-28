@@ -19,6 +19,7 @@ int usage()
             "samutil score            Set mapq, XP, XY, XZ, and primary alignment flags from fragment-sorted SAM file\n"
             "samutil gen_header       Generate a projection-order transcript header\n"      
             "samutil truncate         Truncate a SAM file, replacing QNAME, SEQ, QUAL\n"
+            "samutil rejoin           Convert rSAM to SAM (rejoin QNAME, SEQ, and QUAL)\n"
             "samutil seqindex         Generate a sequence and index from fastq, to recover QNAME, SEQ, QUAL\n"
 
             "\n\n"

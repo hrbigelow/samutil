@@ -165,6 +165,8 @@ namespace Cigar
     
     CIGAR_VEC Consolidate(CIGAR_VEC const& source);
 
+    void Consolidate(char const* cigar, char * cigar_cons);
+
     //remove blocks from the ends of source that have zero-length on the top
     //or bottom sequence (top if 'retain_top_extent' is true)
     //after trimming, Length(trimmed, retain_top_extent) will be the same

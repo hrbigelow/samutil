@@ -10,21 +10,18 @@
 
 #include <getopt.h>
 
-int align_eval_checksort_usage(char const* sdef)
+int sam_checksort_usage()
 {
     fprintf(stderr,
             "Usage:\n\n"
-            "align_eval checksort [OPTIONS] alignment_sorted.sam\n\n"
+            "samutil checksort [OPTIONS] sort_order alignment_sorted.sam\n\n"
             "Options:\n\n"
-            "-s  STRING    type of sorting to use {READ_ID_FLAG, ALIGN, GUIDE, MIN_ALIGN_GUIDE}[%s]\n"
             "-t  INT       number of threads to use [1]\n"
-            "-C  STRING    work in the directory named here [.]\n"
-            ,
-            sdef);
+            "-C  STRING    work in the directory named here [.]\n");
 
     fprintf(stderr,
-            "Sort orders are:\n"
-            "READ_ID_FLAG: sort by read id\n"
+            "sort_order must be one of:\n"
+            "FRAGMENT: sort by read id\n"
             "ALIGN: sort by alignment position\n"
             "GUIDE: sort by read-id encoded guide alignment position\n"
             "MIN_ALIGN_GUIDE: sort by the minimum of ALIGN or GUIDE\n\n");
@@ -33,37 +30,34 @@ int align_eval_checksort_usage(char const* sdef)
 }
 
 
-int main_align_eval_checksort(int argc, char ** argv)
+int main_sam_checksort(int argc, char ** argv)
 {
-
-    char const* sort_type_def = "MIN_ALIGN_GUIDE";
-    char const* sort_type = sort_type_def;
 
     size_t num_threads = 1;
     char const* working_dir = ".";
 
     char c;
-    while ((c = getopt(argc, argv, "s:t:C:")) >= 0)
+    while ((c = getopt(argc, argv, "t:C:")) >= 0)
     {
         switch(c)
         {
-        case 's': sort_type = optarg; break;
         case 't': num_threads = static_cast<size_t>(atof(optarg)); break;
         case 'C': working_dir = optarg; break;
-        default: return align_eval_checksort_usage(sort_type_def); break;
+        default: return sam_checksort_usage(); break;
         }
     }
 
     omp_set_dynamic(false);
     omp_set_num_threads(num_threads);
 
-    int arg_count = optind + 1;
+    int arg_count = optind + 2;
     if (argc != arg_count)
     {
-        return align_eval_checksort_usage(sort_type_def);
+        return sam_checksort_usage();
     }
 
-    char const* sorted_sam_file = argv[optind];
+    char const* sort_type = argv[optind];
+    char const* sorted_sam_file = argv[optind + 1];
 
     int chdir_success = chdir(working_dir);
     if (chdir_success != 0)

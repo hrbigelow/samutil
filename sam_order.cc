@@ -47,11 +47,7 @@ SamOrder::SamOrder(SAM_ORDER _so, char const* _sort_type) :
     {
         this->sam_index = &SamOrder::samline_position_align;
     }
-    else if (strcmp(this->sort_type, "READ_ID_FLAG") == 0)
-    {
-        this->sam_index = &SamOrder::samline_read_id;
-    }
-    else if (strcmp(this->sort_type, "FRAGMENT_ID") == 0)
+    else if (strcmp(this->sort_type, "FRAGMENT") == 0)
     {
         this->sam_index = &SamOrder::samline_fragment_id;
     }
@@ -270,8 +266,8 @@ bool SamOrder::less_position(SamLine const& a, SamLine const& b) const
         (flattened_cmp == 0 && 
          (a.flag.this_fragment_on_neg_strand < b.flag.this_fragment_on_neg_strand ||
           (a.flag.this_fragment_on_neg_strand == b.flag.this_fragment_on_neg_strand &&
-           (strcmp(a.cigar, b.cigar) < 0 ||
-            (strcmp(a.cigar, b.cigar) == 0 &&
+           (strcmp(a.cigar_for_comparison(), b.cigar_for_comparison()) < 0 ||
+            (strcmp(a.cigar_for_comparison(), b.cigar_for_comparison()) == 0 &&
              (icmp(this->flattened_position_mate(&a, &dummy),
                    this->flattened_position_mate(&b, &dummy)) < 0 ||
               (icmp(this->flattened_position_mate(&a, &dummy),
@@ -288,13 +284,13 @@ bool SamOrder::equal_position(SamLine const& a, SamLine const& b) const
     return 
         a.flattened_pos == b.flattened_pos &&
         a.flag.this_fragment_on_neg_strand == b.flag.this_fragment_on_neg_strand &&
-        strcmp(a.cigar, b.cigar) == 0 &&
+        strcmp(a.cigar_for_comparison(), b.cigar_for_comparison()) == 0 &&
         flattened_position_mate(&a, &dummy) == flattened_position_mate(&b, &dummy) &&
         a.tags.alignment_space == b.tags.alignment_space;
 
         // flattened_position(&a, &dummy) == flattened_position(&b, &dummy) &&
         // a.this_fragment_on_pos_strand() == b.this_fragment_on_pos_strand() &&
-        // strcmp(a.cigar, b.cigar) == 0 &&
+        // strcmp(a.cigar_for_comparison(), b.cigar_for_comparison()) == 0 &&
         // flattened_position_mate(&a, &dummy) == flattened_position_mate(&b, &dummy);
 }
 
@@ -319,7 +315,7 @@ bool SamOrder::less_fposition(SamLine const& a, SamLine const& b) const
         (flattened_cmp == 0 && 
          (a.flag.this_fragment_on_neg_strand < b.flag.this_fragment_on_neg_strand ||
           (a.flag.this_fragment_on_neg_strand == b.flag.this_fragment_on_neg_strand &&
-           (strcmp(a.cigar, b.cigar) < 0))));
+           (strcmp(a.cigar_for_comparison(), b.cigar_for_comparison()) < 0))));
 
 }
 
@@ -440,7 +436,7 @@ void SamOrder::AddHeaderContigStats(FILE * sam_fh)
     char * contig_name_copy = new char[2];
     strcpy(contig_name_copy, "*");
 
-    this->contig_offsets[contig_name_copy] = 0;
+    this->contig_offsets[contig_name_copy] = contig_offset;
 
     if (contig_offset == 0)
     {
@@ -450,10 +446,10 @@ void SamOrder::AddHeaderContigStats(FILE * sam_fh)
 
     this->contig_offsets.rehash(this->contig_offsets.size() * 10);
 
-    fprintf(stderr, "size()=%zu, bucket_count()=%zu, load_factor()=%f\n", 
-            this->contig_offsets.size(),
-            this->contig_offsets.bucket_count(),
-            this->contig_offsets.load_factor());
+    // fprintf(stderr, "size()=%zu, bucket_count()=%zu, load_factor()=%f\n", 
+    //         this->contig_offsets.size(),
+    //         this->contig_offsets.bucket_count(),
+    //         this->contig_offsets.load_factor());
 
     std::map<size_t, size_t> bucket_hist;
     for (size_t i = 0; i != this->contig_offsets.bucket_count(); ++i)
@@ -463,8 +459,7 @@ void SamOrder::AddHeaderContigStats(FILE * sam_fh)
     for (std::map<size_t, size_t>::const_iterator it = bucket_hist.begin();
          it != bucket_hist.end(); ++it)
     {
-        fprintf(stderr, "size %zu buckets: %zu\n",
-                (*it).first, (*it).second);
+        //fprintf(stderr, "size %zu buckets: %zu\n", (*it).first, (*it).second);
     }
 
 }
@@ -484,6 +479,7 @@ size_t SamOrder::samline_position_align(char const* samline) const
 
 
 //compute the fragment id assuming a numeric read id format
+/*
 size_t SamOrder::samline_read_id(char const* samline) const
 {
 
@@ -508,6 +504,7 @@ size_t SamOrder::samline_read_id(char const* samline) const
 
     return read_id;
 }
+*/
 
 
 
@@ -515,6 +512,29 @@ size_t SamOrder::samline_read_id(char const* samline) const
 size_t SamOrder::samline_fragment_id(char const* samline) const
 {
     return this->parse_fragment_id(samline);
+}
+
+
+less_seq_projection::less_seq_projection(SamOrder const* _so) :
+    sam_order(_so) { }
+
+
+bool less_seq_projection::operator()(SequenceProjection const& a,
+                                     SequenceProjection const& b) const
+{
+    CONTIG_OFFSETS::const_iterator dummy;
+    size_t a_pos = flattened_position_aux(a.target_dna.c_str(), a.target_start_pos(), 
+                                          this->sam_order->contig_offsets, &dummy);
+
+    size_t b_pos = flattened_position_aux(b.target_dna.c_str(), b.target_start_pos(), 
+                                          this->sam_order->contig_offsets, &dummy);
+
+    return 
+        (a_pos < b_pos
+        || (a_pos == b_pos
+            && (a.target_end_pos() < b.target_end_pos()
+                || (a.target_end_pos() == b.target_end_pos()
+                    && (strcmp(a.source_dna.c_str(), b.source_dna.c_str()) < 0)))));
 }
 
 

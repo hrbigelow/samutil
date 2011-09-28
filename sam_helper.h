@@ -161,7 +161,17 @@ union SamTag
         unsigned int : 4; // padding
         unsigned int stratum_size : 8; // stratum size
 
-        unsigned int : 32; // padding
+        bool raw_score_present : 1;
+        bool alignment_space_present : 1;
+        bool stratum_rank_present : 1;
+        bool stratum_size_present : 1;
+
+        unsigned : 4; // padding
+
+        char raw_score_tag1 : 8;
+        char raw_score_tag2 : 8;
+
+        unsigned int : 12; // padding
     };
     size_t raw;
 };
@@ -200,7 +210,7 @@ public:
     SamTag tags;
     char * tag_string;
     size_t flattened_pos; //position along a virtual concatenated meta-contig.
-    char alignment_space;
+    char * cigar_compared; // if not NULL, used for positional comparison
 
     SamLine(SAM_PARSE _parse_flag,
             char const* _qname, size_t _flag, 
@@ -219,6 +229,8 @@ public:
     void Init(char const* samline_string);
     void SetFlattenedPosition(CONTIG_OFFSETS const& contig_offsets,
                               CONTIG_OFFSETS::const_iterator * contig_iter);
+
+    void SetCigarCompared();
 
     static void SetGlobalFlags(SAM_QNAME_FORMAT _qname_format,
                                char const* _expected_layout,
@@ -275,6 +287,7 @@ public:
 
     char const* next_fragment_ref_name() const;
 
+    char const* cigar_for_comparison() const;
 };
 
 
