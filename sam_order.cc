@@ -550,6 +550,8 @@ size_t SamOrder::samline_position_min_align_guide(char const* samline) const
     char align_chrom[32];
     size_t align_pos;
 
+    size_t flag_raw;
+
     sscanf(samline, 
            "%*[^:]:" // id field.  ignored
            "read%i:%[^:]:%*c:%zu:%*[^:]:%*u"  //read chunk
@@ -557,8 +559,10 @@ size_t SamOrder::samline_position_min_align_guide(char const* samline) const
            "%zu\t%s\t%zu", //part of alignment
            &read_num_left, guide_chrom_left, &guide_pos_left, 
            &read_num_right, guide_chrom_right, &guide_pos_right,
-           &flag.raw, align_chrom, &align_pos);
-    
+           &flag_raw, align_chrom, &align_pos);
+
+    flag.set_raw(flag_raw);
+
     int read_num = flag.first_fragment_in_template ? 1 : 2;
 
     char * guide_chrom = read_num == read_num_left ? guide_chrom_left : guide_chrom_right;

@@ -15,6 +15,141 @@
 #include <string>
 #include <algorithm>
 
+
+SamFilter::SamFilter(char const* _tag_filter,
+                     size_t _min_mapq,
+                     size_t _max_stratum_rank,
+                     size_t _max_stratum_size,
+                     char const* _align_space_filt) :
+
+    min_mapping_quality(_min_mapq),
+    max_stratum_rank(_max_stratum_rank),
+    max_stratum_size(_max_stratum_size),
+    alignment_space_filter(_align_space_filt)
+{ 
+    // set masking flags
+    this->comb.set_raw(0);
+    this->values.set_raw(0);
+    
+    for (char const* c = _tag_filter; *c != '\0'; ++c)
+    {
+        bool v = isupper(*c);
+        
+        switch (toupper(*c))
+        {
+        case 'M': this->comb.all_fragments_mapped = true; this->values.all_fragments_mapped = v; break;
+        case 'P': this->comb.alignment_not_primary = true; this->values.alignment_not_primary = ! v; break;
+        case 'Q': this->comb.failed_quality_check = true; this->values.failed_quality_check = ! v; break;
+        case 'D': this->comb.pcr_or_optical_duplicate = true; this->values.pcr_or_optical_duplicate = ! v; break;
+        default: 
+            fprintf(stderr, "Error: SamFilter: tag filter '%s' has bad content. Should be\n"
+                    "[Mm][Pp][Qq][Dd]\n", _tag_filter);
+            exit(1);
+            break;
+        }
+    }
+}
+
+
+
+bool SamFilter::pass(SamLine const* samline) const
+{
+    return (samline->flag.get_raw() & this->comb.get_raw()) == this->values.get_raw()
+        
+        && samline->mapq >= this->min_mapping_quality
+        
+        && ((! samline->tags.stratum_rank_present)
+            || samline->tags.stratum_rank <= this->max_stratum_rank)
+
+        && ((! samline->tags.stratum_size_present)
+            || samline->tags.stratum_size <= this->max_stratum_size)
+
+        && ((! samline->tags.alignment_space_present)
+            || this->alignment_space_filter == NULL
+            || strchr(this->alignment_space_filter, samline->tags.alignment_space) != NULL);
+
+}
+
+
+size_t SamFlag::get_raw() const
+{
+    size_t raw = static_cast<size_t>
+        (this->multi_fragment_template % 2
+         | (this->all_fragments_mapped % 2)<<1
+         | (this->this_fragment_unmapped % 2)<<2
+         | (this->next_fragment_unmapped % 2)<<3
+         | (this->this_fragment_on_neg_strand % 2)<<4
+         | (this->next_fragment_on_neg_strand % 2)<<5
+         | (this->first_fragment_in_template % 2)<<6
+         | (this->last_fragment_in_template % 2)<<7
+         | (this->alignment_not_primary % 2)<<8
+         | (this->failed_quality_check % 2)<<9
+         | (this->pcr_or_optical_duplicate % 2)<<10
+         | (this->template_layout % 2)<<11
+         )
+        | static_cast<size_t>(this->is_rsam_format % (1<<8))<<16
+        | static_cast<size_t>(this->num_fragments_in_template % (1<<8))<<24
+        | static_cast<size_t>(this->read_layout % (1L<<32))<<32;
+
+    return raw;
+}
+
+
+void SamFlag::set_raw(size_t raw)
+{
+    this->multi_fragment_template = static_cast<unsigned int>(raw % 2);
+    this->all_fragments_mapped = static_cast<unsigned int>((raw>>1) % 2);
+    this->this_fragment_unmapped = static_cast<unsigned int>((raw>>2) % 2);
+    this->next_fragment_unmapped = static_cast<unsigned int>((raw>>3) % 2);
+    this->this_fragment_on_neg_strand = static_cast<unsigned int>((raw>>4) % 2);
+    this->next_fragment_on_neg_strand = static_cast<unsigned int>((raw>>5) % 2);
+    this->first_fragment_in_template = static_cast<unsigned int>((raw>>6) % 2);
+    this->last_fragment_in_template = static_cast<unsigned int>((raw>>7) % 2);
+    this->alignment_not_primary = static_cast<unsigned int>((raw>>8) % 2);
+    this->failed_quality_check = static_cast<unsigned int>((raw>>9) % 2);
+    this->pcr_or_optical_duplicate = static_cast<unsigned int>((raw>>10) % 2);
+    this->template_layout = static_cast<unsigned int>((raw>>11) % 2);
+
+    this->is_rsam_format = static_cast<unsigned int>((raw>>16) % (1<<8));
+    this->num_fragments_in_template = static_cast<unsigned int>((raw>>24) % (1<<8));
+    this->read_layout = static_cast<unsigned int>((raw>>32) % (1<<8));
+
+}
+
+
+size_t SamTag::get_raw() const
+{
+    size_t raw =
+        (this->raw_score % (1<<12))
+        | static_cast<size_t>(this->stratum_rank % (1<<10))<<12
+        | static_cast<size_t>(this->stratum_size % (1<<12))<<22
+        | static_cast<size_t>(this->alignment_space)<<34
+        | static_cast<size_t>(this->raw_score_present % (1<<1))<<42
+        | static_cast<size_t>(this->alignment_space_present % (1<<1))<<43
+        | static_cast<size_t>(this->stratum_rank_present % (1<<1))<<44
+        | static_cast<size_t>(this->stratum_size_present % (1<<1))<<45
+        | static_cast<size_t>(this->raw_score_tag[0])<<46
+        | static_cast<size_t>(this->raw_score_tag[1])<<54;
+
+    return raw;
+}
+
+
+void SamTag::set_raw(size_t raw)
+{
+    this->raw_score = static_cast<uint16_t>(raw % (1<<12));
+    this->stratum_rank = static_cast<uint16_t>((raw>>12) % (1<<10));
+    this->stratum_size = static_cast<uint16_t>((raw>>22) % (1<<12));
+    this->alignment_space = static_cast<char>((raw>>34) % (1<<8));
+    this->raw_score_present = static_cast<bool>((raw>>42) % (1<<1));
+    this->alignment_space_present = static_cast<bool>((raw>>43) % (1<<1));
+    this->stratum_rank_present = static_cast<bool>((raw>>44) % (1<<1));
+    this->stratum_size_present = static_cast<bool>((raw>>45) % (1<<1));
+
+    this->raw_score_tag[0] = static_cast<char>((raw>>46) % (1<<8));
+    this->raw_score_tag[1] = static_cast<char>((raw>>54) % (1<<8));
+}
+
 bool eqstr::operator()(const char* s1, const char* s2) const
 {
     return strcmp(s1, s2) == 0;
@@ -90,8 +225,7 @@ void encode_tags(char const* tag_string,
     {
         if (strcmp(tag_name, raw_score_tag) == 0)
         {
-            (*tags).raw_score_tag1 = raw_score_tag[0];
-            (*tags).raw_score_tag2 = raw_score_tag[1];
+            strcpy((*tags).raw_score_tag, raw_score_tag);
             (*tags).raw_score = atoi(tag_value);
             (*tags).raw_score_present = true;
         }
@@ -189,7 +323,7 @@ SamLine::SamLine(SAM_PARSE _parse_flag,
         return;
     }
     SamFlag flag;
-    flag.raw = _flagval;
+    flag.set_raw(_flagval);
 
     size_t reported_pos = flag.this_fragment_unmapped ? 0 : _pos + 1;
 
@@ -209,7 +343,7 @@ SamLine::SamLine(SAM_PARSE _parse_flag,
         size_t pnext = 0;
         int tlen = 0;
         sprintf(line, "%s\t%Zu\t%s\t%Zu\t%Zu\t%s\t%s\t%Zu\t%i\t%s\t%s",
-                _qname, flag.raw, _rname, reported_pos,
+                _qname, flag.get_raw(), _rname, reported_pos,
                 _mapq, _cigar, rnext, pnext, tlen, "*", "*");
     }
 
@@ -304,7 +438,7 @@ SamLine::SamLine(SamLine const* samlines[], size_t n_lines, char const* read_lay
       cigar_compared(NULL) // since we are merging SAM (not rSAM), we
                            // don't yet have a use for cigar_compared
 {
-    this->flag.raw = 0;
+    this->flag.set_raw(0);
 
     //assume at least one line
     assert(n_lines > 0);
@@ -440,12 +574,18 @@ void SamLine::Init(char const* samline_string)
         if (SamLine::expect_rsam_format)
         {
             //FID.FLAG.RNAME.POS.MAPQ.CIGAR.TAGRAW[.TAG[.TAG[.TAG...]]]
+            size_t tag_raw;
+            size_t flag_raw;
+
             int num_fields =
                 sscanf(samline_string, 
                        "%zu\t" "%zu\t" "%as\t" "%zu\t" "%zu\t"
                        "%as\t" "%zu%n",
-                       &this->fragment_id, &this->flag.raw, &this->rname, &this->pos, &this->mapq, 
-                       &this->cigar, &this->tags.raw, &tag_start);
+                       &this->fragment_id, &flag_raw, &this->rname, &this->pos, &this->mapq, 
+                       &this->cigar, &tag_raw, &tag_start);
+
+            this->flag.set_raw(flag_raw);
+            this->tags.set_raw(tag_raw);
 
             if (num_fields != 7)
             {
@@ -462,6 +602,7 @@ void SamLine::Init(char const* samline_string)
             //QNAME.FLAG.RNAME.POS.MAPQ.CIGAR.RNEXT.PNEXT.TLEN.SEQ.QUAL[.TAG[.TAG[.TAG...]]]
             char * qname;
             int seq_start, seq_end;
+            size_t flag_raw;
 
             int num_fields =
                 sscanf(samline_string, 
@@ -469,10 +610,12 @@ void SamLine::Init(char const* samline_string)
                        "%as\t" "%as\t" "%zu\t" "%i\t"
                        "%n%*s%n\t%*s" 
                        "%n",
-                       &qname, &this->flag.raw, &this->rname, &this->pos, &this->mapq, 
+                       &qname, &flag_raw, &this->rname, &this->pos, &this->mapq, 
                        &this->cigar, &this->rnext, &this->pnext, &this->tlen,
                        &seq_start, &seq_end,
                        &tag_start);
+
+            this->flag.set_raw(flag_raw);
 
             this->tags.raw_score_present = false;
             this->tags.alignment_space_present = false;
@@ -622,9 +765,9 @@ void SamLine::print_aux(void * print_buf, bool to_file) const
     {
         size_t reported_pos = this->flag.this_fragment_unmapped ? 0 : this->ones_based_pos();
         
-        FileUtils::switch_printf(to_file, print_buf, "%zu\t%Zu\t%s\t%Zu\t%Zu\t%s\t%Zu",
-                                 this->fragment_id, this->flag.raw, this->rname, reported_pos,
-                                 this->mapq, this->cigar, this->tags.raw);
+        FileUtils::switch_printf(to_file, print_buf, "%zu\t%zu\t%s\t%zu\t%zu\t%s\t%zu",
+                                 this->fragment_id, this->flag.get_raw(), this->rname, reported_pos,
+                                 this->mapq, this->cigar, this->tags.get_raw());
         
         if (this->tag_string != NULL)
         {
@@ -640,8 +783,8 @@ void SamLine::print_aux(void * print_buf, bool to_file) const
 
         // QNAME.FLAG.RNAME.POS.MAPQ.CIGAR.RNEXT.PNEXT.TLEN.SEQ.QUAL[.TAG[.TAG[.TAG...]]]
         FileUtils::switch_printf(to_file, print_buf, 
-                                 "%Zu\t%Zu\t%s\t%Zu\t%Zu\t%s\t%s\t%Zu\t%i\t%s\t%s",
-                                 this->fragment_id, flag.raw, this->rname, reported_pos,
+                                 "%zu\t%zu\t%s\t%zu\t%zu\t%s\t%s\t%zu\t%i\t%s\t%s",
+                                 this->fragment_id, flag.get_raw(), this->rname, reported_pos,
                                  this->mapq, this->cigar, this->rnext, reported_pnext, this->tlen,
                                  ".", ".");
         
@@ -677,12 +820,16 @@ void SamLine::print_rsam_as_sam(char const* seq_data, char * out_string) const
 
     char cigar_substring[1024];
 
-    SamFlag flag = this->flag;
-    flag.raw &= 255;
+    SamFlag outflag = this->flag;
+
+    outflag.template_layout = 0;
+    outflag.is_rsam_format = 0;
+    outflag.num_fragments_in_template = 0;
+    outflag.read_layout = 0;
 
     size_t num_fragments = this->flag.num_fragments_in_template;
 
-    flag.multi_fragment_template = (num_fragments > 1) ? 1 : 0;
+    outflag.multi_fragment_template = (num_fragments > 1) ? 1 : 0;
 
     // find all seqs and quals in 'seq_data'
     char const** seqs = new char const*[num_fragments];
@@ -755,24 +902,24 @@ void SamLine::print_rsam_as_sam(char const* seq_data, char * out_string) const
             reported_pnext = 0;
         }
 
-        flag.this_fragment_unmapped = 1 - this->flag.all_fragments_mapped;
-        flag.next_fragment_unmapped = 1 - this->flag.all_fragments_mapped;
+        outflag.this_fragment_unmapped = 1 - this->flag.all_fragments_mapped;
+        outflag.next_fragment_unmapped = 1 - this->flag.all_fragments_mapped;
 
         //fragment_layout is fragment-to-template.
         //template_layout is template-to-reference.
         //we want to calculate fragment-to-reference.
-        flag.this_fragment_on_neg_strand =
+        outflag.this_fragment_on_neg_strand =
             (this_fragment_layout == this->flag.template_layout) 
             ? LAYOUT_FORWARD
             : LAYOUT_REVERSE;
 
-        flag.next_fragment_on_neg_strand =
+        outflag.next_fragment_on_neg_strand =
             (next_fragment_layout == this->flag.template_layout) 
             ? LAYOUT_FORWARD
             : LAYOUT_REVERSE;
 
-        flag.first_fragment_in_template = (layout_index == 0);
-        flag.last_fragment_in_template = (layout_index == num_fragments - 1);
+        outflag.first_fragment_in_template = (layout_index == 0);
+        outflag.last_fragment_in_template = (layout_index == num_fragments - 1);
         
         // definition of tlen in SAM 1.4 Spec
         int64_t used_tlen;
@@ -793,7 +940,7 @@ void SamLine::print_rsam_as_sam(char const* seq_data, char * out_string) const
         out_string += 
             sprintf(out_string, 
                     "\t%zu\t%s\t%Zu\t%Zu\t%s\t%s\t%Zu\t%zi",
-                    flag.raw, this->rname, reported_pos,
+                    outflag.get_raw(), this->rname, reported_pos,
                     this->mapq, cigar_substring, rnext, reported_pnext, used_tlen);
         
         size_t seq_len = std::distance(seqs[layout_index], quals[layout_index]) - 1;
@@ -821,8 +968,8 @@ void SamLine::print_rsam_as_sam(char const* seq_data, char * out_string) const
         if (this->tags.raw_score_present)
         {
             out_string += sprintf(out_string, "\t%c%c:i:%i", 
-                                  this->tags.raw_score_tag1, 
-                                  this->tags.raw_score_tag2,
+                                  this->tags.raw_score_tag[0], 
+                                  this->tags.raw_score_tag[1],
                                   this->tags.raw_score);
         }
         if (this->tags.alignment_space_present)

@@ -210,28 +210,33 @@ project_dedup_print::operator()(std::pair<SAMIT, SAMIT> const& range)
 
 
 rsam_to_sam_binary::rsam_to_sam_binary(char const* _seq_buffer,
-                                       size_t _data_buffer_offset)
+                                       size_t _data_buffer_offset,
+                                       SamFilter const* _sf)
     : seq_buffer(_seq_buffer), 
-      data_buffer_offset(_data_buffer_offset) { }
+      data_buffer_offset(_data_buffer_offset),
+      sam_filter(_sf)
+{ }
                                        
 
 // convert an rsam-formatted line into a string holding the printed
 // set of SAM records, with joined QNAME, SEQ, and QUAL fields
 char * rsam_to_sam_binary::operator()(SamLine * samline, INDEX_ITER li_iter)
 {
-    char tmp_buf[4096 * 8];
     
     assert((*li_iter).start_offset >= this->data_buffer_offset);
+    char * alloc_buf = NULL;
 
-    // find the zero-terminated seq_data from this iter and an offset
-    char const* seq_data = 
-        this->seq_buffer + (*li_iter).start_offset - this->data_buffer_offset;
+    if (this->sam_filter->pass(samline))
+    {
+        // find the zero-terminated seq_data from this iter and an offset
+        char const* seq_data = 
+            this->seq_buffer + (*li_iter).start_offset - this->data_buffer_offset;
 
-    samline->print_rsam_as_sam(seq_data, tmp_buf);
-
-    char * alloc_buf = new char[strlen(tmp_buf) + 1];
-    strcpy(alloc_buf, tmp_buf);
-
+        char tmp_buf[4096 * 8];
+        samline->print_rsam_as_sam(seq_data, tmp_buf);
+        alloc_buf = new char[strlen(tmp_buf) + 1];
+        strcpy(alloc_buf, tmp_buf);
+    }
     delete samline;
 
     return alloc_buf;

@@ -264,6 +264,8 @@ void set_score_fields(SINGLE_READ_SET::iterator beg,
     {
         SamLine * samline = const_cast<SamLine *>((*pit));
 
+        assert(samline->flag.is_rsam_format);
+
         raw_scores[i] = fragment_scoring.raw_score(samline);
 
         if (! samline->tags.alignment_space_present)
@@ -343,7 +345,7 @@ void set_score_fields(SINGLE_READ_SET::iterator beg,
             samline->flag.alignment_not_primary = 0;
             first_encountered_top_stratum = false;
         }
-        else if (samline->flag.this_fragment_unmapped)
+        else if (! samline->flag.all_fragments_mapped)
         {
             //alignment is 'primary' per downstream weird interpretations
             samline->flag.alignment_not_primary = 0;

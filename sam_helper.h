@@ -125,56 +125,51 @@ V parse_sam_tag(char const* tag_string,
   
  */
 
-union SamFlag
+struct SamFlag
 {
-    struct
-    {
-        unsigned int multi_fragment_template : 1;     // SAM
-        unsigned int all_fragments_mapped : 1;        // SAM and rSAM
-        unsigned int this_fragment_unmapped : 1;      // SAM
-        unsigned int next_fragment_unmapped : 1;      // SAM
-        unsigned int this_fragment_on_neg_strand : 1; // SAM
-        unsigned int next_fragment_on_neg_strand : 1; // SAM
-        unsigned int first_fragment_in_template : 1;  // SAM
-        unsigned int last_fragment_in_template : 1;   // SAM
-        unsigned int alignment_not_primary : 1;       // SAM and rSAM
-        unsigned int failed_quality_check : 1;        // SAM and rSAM
-        unsigned int pcr_or_optical_duplicate : 1;    // SAM and rSAM
-        unsigned int template_layout : 1;             //         rSAM
-        unsigned int : 4; // padding to 16 bits
+    unsigned int multi_fragment_template : 1;     // SAM
+    unsigned int all_fragments_mapped : 1;        // SAM and rSAM
+    unsigned int this_fragment_unmapped : 1;      // SAM
+    unsigned int next_fragment_unmapped : 1;      // SAM
+    unsigned int this_fragment_on_neg_strand : 1; // SAM
+    unsigned int next_fragment_on_neg_strand : 1; // SAM
+    unsigned int first_fragment_in_template : 1;  // SAM
+    unsigned int last_fragment_in_template : 1;   // SAM
+    unsigned int alignment_not_primary : 1;       // SAM and rSAM
+    unsigned int failed_quality_check : 1;        // SAM and rSAM
+    unsigned int pcr_or_optical_duplicate : 1;    // SAM and rSAM
+    unsigned int template_layout : 1;             //         rSAM
+    unsigned int : 4; // padding to 16 bits
 
-        unsigned int is_rsam_format : 8;              //         rSAM
-        unsigned int num_fragments_in_template : 8;   //         rSAM
-        unsigned int read_layout : 32;                //         rSAM
-    };
-    size_t raw;
+    unsigned int is_rsam_format : 8;              //         rSAM
+    unsigned int num_fragments_in_template : 8;   //         rSAM
+    unsigned int read_layout : 32;                //         rSAM
+
+    size_t get_raw() const;
+    void set_raw(size_t raw);
 
 };
 
-union SamTag
+struct SamTag
 {
-    struct
-    {
-        unsigned int raw_score : 8; // number of mismatches
-        unsigned char alignment_space : 8; // alignment space
-        unsigned int stratum_rank : 4; // stratum rank
-        unsigned int : 4; // padding
-        unsigned int stratum_size : 8; // stratum size
+    uint16_t raw_score;
+    uint16_t stratum_rank;
+    uint16_t stratum_size;
 
-        bool raw_score_present : 1;
-        bool alignment_space_present : 1;
-        bool stratum_rank_present : 1;
-        bool stratum_size_present : 1;
+    char alignment_space;
 
-        unsigned : 4; // padding
+    bool raw_score_present;
+    bool alignment_space_present;
+    bool stratum_rank_present;
+    bool stratum_size_present;
 
-        char raw_score_tag1 : 8;
-        char raw_score_tag2 : 8;
+    char raw_score_tag[2];
 
-        unsigned int : 12; // padding
-    };
-    size_t raw;
+    size_t get_raw() const;
+    void set_raw(size_t raw);
+
 };
+
 
 
 #define AlignSpaceTag "XP"
@@ -188,6 +183,8 @@ union SamTag
 
 #define LAYOUT_FORWARD 0
 #define LAYOUT_REVERSE 1
+
+
 
 
 class SamLine
@@ -289,6 +286,28 @@ public:
 
     char const* cigar_for_comparison() const;
 };
+
+
+struct SamFilter
+{
+    size_t min_mapping_quality;
+    size_t max_stratum_rank;
+    size_t max_stratum_size;
+    char const* alignment_space_filter;
+
+    SamFlag comb;
+    SamFlag values;
+
+    SamFilter(char const* _tf,
+              size_t _mmq,
+              size_t _msr,
+              size_t _mss,
+              char const* _asf);
+
+    bool pass(SamLine const* samline) const;
+};
+
+
 
 
 void SetToFirstDataLine(FILE ** sam_fh);

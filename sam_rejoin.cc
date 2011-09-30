@@ -9,7 +9,7 @@
 #include "sam_score_aux.h"
 #include "sam_aux.h"
 
-int sam_rejoin_usage(size_t mdef)
+int sam_rejoin_usage(size_t mdef, char const* fdef, size_t qdef)
 {
     fprintf(stderr,
             "\nUsage:\n\n"
@@ -18,10 +18,25 @@ int sam_rejoin_usage(size_t mdef)
             "-m     INT     number bytes of memory to use [%zu]\n"
             "-t     INT     number of threads to use [1]\n"
             "-C     STRING  work in the directory named here [.]\n"
+            "-f     STRING  symbolic record filtering string [%s]\n"
+            "-q     INT     minimum mapping quality to output a record [%Zu]\n"
+            "-A     STRING  if present, output only records from these alignment spaces [absent]\n"
+            "-r     INT     if present, output only records with this stratum rank or better [absent]\n"
+            "-S     INT     if present, output only records with this stratum size or better [absent]\n"
             "\n\n"
-            "NOTES: seq.{fqi,fqd} are produced from 'samutil seqindex' on the fastq\n"
-            "       data used to generate input.rsam\n\n",
-            mdef);
+            "NOTES:\n"
+            "       seq.{fqi,fqd} are produced from 'samutil seqindex' on the fastq\n"
+            "       data used to generate input.rsam\n"
+            "\n"
+            "       The symbolic filtering string has format [Mm][Pp][Qq][Dd].\n"
+            "       M (m) means output only mapped (unmapped) fragments (all_fragments_mapped flag)\n"
+            "       P (p) means output only primary (non-primary) alignments (inverse of 'alignment_not_primary' flag)\n"
+            "       Q (q) means output only passing (failing) quality check (inverse of 'failed_quality_check' flag)\n"
+            "       D (d) means output only non-duplicate (duplicate) entries (inverse of 'pcr_or_optical_duplicate' flag)\n"
+            "       Missing letters denote that no filtering occurs on that field and both categories are output\n"
+            "\n"
+            ""
+            , mdef, fdef, qdef);
     return 1;
 }
 
@@ -54,23 +69,40 @@ int main_sam_rejoin(int argc, char ** argv)
 
     size_t mdef = 1024l * 1024l * 1024l * 4l; // 4 GB memory
     size_t max_mem = mdef;
+    char const* fdef = "MPQD";
+    char const* tag_filter = fdef;
+
+    size_t qdef = 0;
+    size_t min_mapping_quality = qdef;
+
+    char const* alignment_space_filter = NULL;
+
+    size_t max_stratum_rank = 1000;
+    size_t max_stratum_size = 1000;
+
     size_t num_threads = 1;
     char const* working_dir = ".";
 
-    while ((c = getopt(argc, argv, "m:t:C:")) >= 0)
+
+    while ((c = getopt(argc, argv, "m:t:C:f:q:A:r:S:")) >= 0)
     {
         switch(c)
         {
         case 'm': max_mem = static_cast<size_t>(atof(optarg)); break;
         case 't': num_threads = static_cast<size_t>(atof(optarg)); break;
         case 'C': working_dir = optarg; break;
-        default: return sam_rejoin_usage(mdef); break;
+        case 'f': tag_filter = optarg; break;
+        case 'q': min_mapping_quality = static_cast<size_t>(atof(optarg)); break;
+        case 'A': alignment_space_filter = optarg; break;
+        case 'r': max_stratum_rank = static_cast<size_t>(atof(optarg)); break;
+        case 'S': max_stratum_size = static_cast<size_t>(atof(optarg)); break;
+        default: return sam_rejoin_usage(mdef, fdef, qdef); break;
         }
     }
 
     if (argc != optind + 4)
     {
-        return sam_rejoin_usage(mdef);
+        return sam_rejoin_usage(mdef, fdef, qdef);
     }
 
     omp_set_dynamic(false);
@@ -158,6 +190,11 @@ int main_sam_rejoin(int argc, char ** argv)
     fwrite(header_buf, 1, header_length, output_sam_fh);
     delete [] header_buf;
 
+    SamFilter sam_filter(tag_filter, 
+                         min_mapping_quality,
+                         max_stratum_rank,
+                         max_stratum_size,
+                         alignment_space_filter);
 
     while (! feof(input_rsam_fh))
     {
@@ -257,10 +294,12 @@ int main_sam_rejoin(int argc, char ** argv)
                 (*ii_iter) = lit;
             }
 
+            rsam_to_sam_binary rsb(seq_buffer, data_buffer_offset, & sam_filter);
+
             __gnu_parallel::transform(beg, end, 
                                       index_iters.begin(),
                                       sam_strings.begin() + beg_elem,
-                                      rsam_to_sam_binary(seq_buffer, data_buffer_offset));
+                                      rsb);
 
             beg = end;
         }
@@ -275,8 +314,11 @@ int main_sam_rejoin(int argc, char ** argv)
             for (sit = sam_strings.begin(); sit != sam_strings.end(); ++sit)
             {
                 char * sam_string = *sit;
-                fputs(sam_string, output_sam_fh);
-                delete sam_string;
+                if (sam_string != NULL)
+                {
+                    fputs(sam_string, output_sam_fh);
+                    delete sam_string;
+                }
             }
             rsam_records.clear();
             beg = rsam_records.end();

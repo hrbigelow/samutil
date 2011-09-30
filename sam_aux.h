@@ -56,8 +56,9 @@ struct rsam_to_sam_binary
 {
     char const* seq_buffer; // generated from 'samutil seqindex'
     size_t data_buffer_offset; // the start_offset corresponding to the beginning of this seq_buffer
+    SamFilter const* sam_filter;
 
-    rsam_to_sam_binary(char const* _seq_buffer, size_t _dbo);
+    rsam_to_sam_binary(char const* _seq_buffer, size_t _dbo, SamFilter const* _sf);
     char * operator()(SamLine * samline, INDEX_ITER li_iter);
 
 };
