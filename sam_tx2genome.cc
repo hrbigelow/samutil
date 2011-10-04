@@ -37,13 +37,12 @@ If our input is samlines aligned to transcripts, and the transcripts are ordered
 by start on the genome, then we just keep track of new transcripts in the SamLine input.
 
 */
-int transcript_to_genome_usage(size_t mdef)
+int tx2genome_usage(size_t mdef)
 {
     fprintf(stderr,
             "\nUsage:\n\n"
-            "samutil tx2genome [OPTIONS] transcripts.gtf reads.vs.tx.asort.rsam reads.vs.genome.sam\n\n"
+            "samutil tx2genome [OPTIONS] transcripts.gtf genome.samheader reads.vs.tx.asort.rsam reads.vs.genome.sam\n\n"
             "Options:\n\n"
-            "-h     STRING   input genome SAM header file\n"
             "-n     FLAG     If present, use CIGAR 'N' to represent introns.  Otherwise use 'D'\n"
             "-x     FLAG     If present, add Cufflinks XS:A: tag (+/-) denotes source RNA strand\n"
             "-u     FLAG     If present, retain inferred alignment of unsequenced portion [false]\n"
@@ -66,6 +65,9 @@ int transcript_to_genome_usage(size_t mdef)
 }
 
 
+PROJ_MAP 
+LoadProjectionMap(std::set<SequenceProjection, less_seq_projection> const& tx_to_genome,
+                  SamOrder const& genome_sam_order);
 
 
 //call at the end of loading the input_buffer with all alignments to a
@@ -73,90 +75,11 @@ int transcript_to_genome_usage(size_t mdef)
 
 
 
-//check that the genome contig order implied by the combination of
-//transcript projections and transcript contig order is the same as
-//that given by genome_contig_order
-bool CheckProjectionOrder(CONTIG_OFFSETS const& genome_contig_order,
-                          CONTIG_OFFSETS const& tx_contig_order,
-                          std::set<SequenceProjection> const& tx_to_genome)
-{
-    //1. Compute a flattened genome coordinate for each transcript
-    std::multimap<size_t, char const*> tx_implied_genomic_offsets;
-    std::multimap<size_t, char const*>::const_iterator tit;
 
-    std::set<SequenceProjection>::const_iterator pit;
-    OFFSETS_ITER oit;
-    for (pit = tx_to_genome.begin(); pit != tx_to_genome.end(); ++pit)
-    {
-        char const* tx_contig = (*pit).source_dna.c_str();
-        char const* tx_proj_contig = (*pit).target_dna.c_str();
-        oit = genome_contig_order.find(tx_proj_contig);
-        if (oit == genome_contig_order.end())
-        {
-            fprintf(stderr, "Error: CheckProjectionOrder: didn't find genome contig %s "
-                    "that was found in transcript-to-genome projection from gtf file\n",
-                    tx_proj_contig);
-            exit(1);
-        }
-        size_t genome_contig_offset = (*oit).second;
-        size_t tx_local_offset = (*pit).transformation[0].jump_length;
-
-        tx_implied_genomic_offsets.insert(std::make_pair(genome_contig_offset + tx_local_offset, tx_contig));
-    }
-
-    size_t last_implied_offset = SIZE_MAX;
-    size_t last_given_offset = 0;
-    char const* last_tx_contig = "";
-
-    //tx implied offsets are partially ordered.  given offsets are
-    //fully ordered.  here, we merely check that if a consecutive pair
-    //of contigs are implied strictly increasing, they are increasing
-    //by given offset as well. 
-    for (tit = tx_implied_genomic_offsets.begin(); tit != tx_implied_genomic_offsets.end(); ++tit)
-    {
-        size_t implied_offset = (*tit).first;
-        char const* tx_contig = (*tit).second;
-        oit = tx_contig_order.find(tx_contig);
-        if (oit == tx_contig_order.end())
-        {
-            fprintf(stderr, "Error: CheckProjectionOrder: didn't find transcript contig %s "
-                    "in given transcript ordering that was found in transcript-to-genome "
-                    "projection from gtf file\n",
-                    tx_contig);
-            exit(1);
-        }
-        size_t given_offset = (*oit).second;
-        if (last_implied_offset < implied_offset
-            && ! (last_given_offset < given_offset))
-        {
-            fprintf(stderr, "Error: CheckProjectionOrder: transcript contig ordering implied from "
-                    "gtf file and given genome contig ordering differs from "
-                    "given transcript ordering. Please re-order transcript contigs in SAM header\n"
-                    "Last contig: %s (%Zu implied offset) (%Zu given offset)\n"
-                    "Current ctg: %s (%Zu implied offset) (%Zu given offset)\n",
-                    last_tx_contig, last_implied_offset, last_given_offset, 
-                    tx_contig, implied_offset, given_offset);
-
-            return false;
-        }
-        else
-        {
-            last_implied_offset = implied_offset;
-            last_given_offset = given_offset;
-            last_tx_contig = tx_contig;
-        }
-    }
-    return true;
-}
-
-
-
-
-int main_transcript_to_genome(int argc, char ** argv)
+int main_tx2genome(int argc, char ** argv)
 {
     char c;
 
-    char const* input_genome_sam_header_file = "";
     bool inserts_are_introns = false;
     bool add_cufflinks_xs_tag = false;
     bool retain_unsequenced_projection = false;
@@ -168,33 +91,32 @@ int main_transcript_to_genome(int argc, char ** argv)
     size_t max_mem = mdef;
 
 
-    while ((c = getopt(argc, argv, "h:nxut:m:C:")) >= 0)
+    while ((c = getopt(argc, argv, "nxut:m:C:")) >= 0)
     {
         switch(c)
         {
-        case 'h': input_genome_sam_header_file = optarg; break;
         case 'n': inserts_are_introns = true; break;
         case 'x': add_cufflinks_xs_tag = true; break;
         case 'u': retain_unsequenced_projection = true; break;
         case 't': num_threads = static_cast<size_t>(atof(optarg)); break;
         case 'm': max_mem = static_cast<size_t>(atof(optarg)); break;
         case 'C': working_dir = optarg; break;
-        default: return transcript_to_genome_usage(mdef); break;
+        default: return tx2genome_usage(mdef); break;
         }
     }
 
-    //printf("optind: %i\n", optind);
-    if (argc != 3 + optind)
+    if (argc != 4 + optind)
     {
-        return transcript_to_genome_usage(mdef);
+        return tx2genome_usage(mdef);
     }
 
     omp_set_dynamic(false);
     omp_set_num_threads(num_threads);
 
     char * gtf_file = argv[optind];
-    char * input_tx_sam_file = argv[optind + 1];
-    char * output_genome_sam_file = argv[optind + 2];
+    char * input_genome_sam_header_file = argv[optind + 1];
+    char * input_tx_sam_file = argv[optind + 2];
+    char * output_genome_sam_file = argv[optind + 3];
 
     int chdir_success = chdir(working_dir);
     if (chdir_success != 0)
@@ -204,20 +126,25 @@ int main_transcript_to_genome(int argc, char ** argv)
     }
 
     FILE * input_tx_sam_fh = open_or_die(input_tx_sam_file, "r", "Input transcript-based SAM file");
-    FILE * input_genome_sam_header_fh = open_if_present(input_genome_sam_header_file, "r");
+    FILE * input_genome_sam_header_fh = open_or_die(input_genome_sam_header_file, "r", "Input genome SAM header file");
     FILE * output_genome_sam_fh = open_or_die(output_genome_sam_file, "w", "Output genome-projected SAM file");
 
     SamOrder genome_sam_order(SAM_POSITION_RID, "ALIGN");
     SamOrder tx_sam_order(SAM_POSITION_RID, "ALIGN");
 
-    SAM_QNAME_FORMAT tx_qname_fmt = tx_sam_order.InitFromFile(input_tx_sam_fh);
-    tx_sam_order.AddHeaderContigStats(input_tx_sam_fh);
-    SetToFirstDataLine(& input_tx_sam_fh);
+    char * tx_header_buf = ReadAllocSAMHeader(input_tx_sam_fh);
+    tx_sam_order.AddHeaderContigStats(tx_header_buf);
+    delete [] tx_header_buf;
 
-    genome_sam_order.InitFromChoice(tx_qname_fmt);
-    genome_sam_order.AddHeaderContigStats(input_genome_sam_header_fh);
+    char * genome_header_buf = ReadAllocSAMHeader(input_genome_sam_header_fh);
+    fclose(input_genome_sam_header_fh);
 
-    SamLine::SetGlobalFlags(tx_qname_fmt, "", "", 0);
+    size_t genome_header_length = strlen(genome_header_buf);
+    genome_sam_order.AddHeaderContigStats(genome_header_buf);
+    fwrite(genome_header_buf, 1, genome_header_length, output_genome_sam_fh);
+    fflush(output_genome_sam_fh);
+    delete [] genome_header_buf;
+
 
     char const* species = "dummy";
 
@@ -227,52 +154,7 @@ int main_transcript_to_genome(int argc, char ** argv)
     less_seq_projection lsp(& genome_sam_order);
     std::set<SequenceProjection, less_seq_projection> tx_to_genome(lsp);
     std::set<SequenceProjection, less_seq_projection>::iterator tx_iter;
-
-    tx_to_genome.insert(tx_to_genome_tmp.begin(), tx_to_genome_tmp.end());
-
     PROJ_MAP tx_projections;
-
-    // 1. tx_to_genome  (projections of transcripts to the genome)
-    // 2. tx_projections.  (tx names pointing to tx_to_genome iterators)
-    for (SEQ_PROJ_ITER t = tx_to_genome.begin(); t != tx_to_genome.end(); ++t)
-    {
-        char * tx_name = new char[(*t).source_dna.size() + 1];
-        strcpy(tx_name, (*t).source_dna.c_str());
-        std::pair<NP_ITER, bool> ins = tx_projections.insert(std::make_pair(tx_name, t));
-
-        if (! ins.second)
-        {
-            SequenceProjection const& p1 = *(*ins.first).second;
-            SequenceProjection const& p2 = (*t);
-
-            fprintf(stderr, "Error: duplicate transcript named %s encountered.\n"
-                    "First instance: %s\t%s\n"
-                    "Second instance: %s\t%ss\n", 
-                    tx_name,
-                    p1.source_dna.c_str(), (p1.same_strand ? "+" : "-"),
-                    p2.source_dna.c_str(), (p2.same_strand ? "+" : "-"));
-            exit(1);
-        }
-    }
-
-    //here need to determine / check consistency the genome contig
-    //order implied by the transcriptome alignment
-    bool consistent_order = 
-        CheckProjectionOrder(genome_sam_order.contig_offsets,
-                             tx_sam_order.contig_offsets,
-                             tx_to_genome_tmp);
-
-    if (! consistent_order)
-    {
-        fprintf(stderr, "Cannot continue.\n");
-        exit(1);
-    }
-
-    if (input_genome_sam_header_fh != NULL)
-    {
-        PrintSAMHeader(&input_genome_sam_header_fh, output_genome_sam_fh);
-    }
-    close_if_present(input_genome_sam_header_fh);
 
     fprintf(stderr, "Starting Projection...\n");
     fflush(stderr);
@@ -280,12 +162,15 @@ int main_transcript_to_genome(int argc, char ** argv)
     std::vector<char *> sam_lines;
     std::vector<char *>::iterator sit;
 
-    size_t nbytes_unused;
+    size_t nbytes_unused = 0;
     size_t nbytes_read;
+    char * last_fragment;
 
     // at any one point, we will have:  a chunk_buffer, a buffer of converted chunks,
     size_t chunk_size = std::min(1024UL * 1024UL * 1024UL, max_mem / 2);
     char * chunk_buffer_in = new char[chunk_size + 1];
+    char * read_pointer = chunk_buffer_in;
+
     std::vector<SamLine *> sam_records;
 
     // number of bytes loaded that haven't been purged
@@ -304,16 +189,23 @@ int main_transcript_to_genome(int argc, char ** argv)
          */
 
         // 1. read a raw chunk
-        nbytes_read = fread(chunk_buffer_in, 1, chunk_size, input_tx_sam_fh);
-        chunk_buffer_in[nbytes_read] = '\0';
+        nbytes_read = fread(read_pointer, 1, chunk_size - nbytes_unused, input_tx_sam_fh);
+        read_pointer[nbytes_read] = '\0';
         cumul_nbytes_read += nbytes_read;
 
         // 2. find complete newlines, recycle unused.
-        sam_lines = FileUtils::find_complete_lines_nullify(chunk_buffer_in, & nbytes_unused);
-        if (nbytes_unused > 0)
+        sam_lines = FileUtils::find_complete_lines_nullify(chunk_buffer_in, & last_fragment);
+
+        if (! SamLine::initialized && ! sam_lines.empty())
         {
-            //only do this if we need to. this resets a flag that affects feof()
-            fseek(input_tx_sam_fh, -1 * static_cast<off_t>(nbytes_unused), SEEK_CUR);
+            // initialize tx_sam_order, genome_sam_order, SamLine, tx_to_genome, tx_projections
+            SAM_QNAME_FORMAT tx_qname_fmt = QNAMEFormat(sam_lines[0]);
+            SamLine::SetGlobalFlags(tx_qname_fmt, "", "", 0);
+            tx_sam_order.InitFromChoice(tx_qname_fmt);
+            genome_sam_order.InitFromChoice(tx_qname_fmt);
+
+            tx_to_genome.insert(tx_to_genome_tmp.begin(), tx_to_genome_tmp.end());
+            tx_projections = LoadProjectionMap(tx_to_genome, genome_sam_order);
         }
 
         // 3. convert to std::vector<SamLine *> (transform)
@@ -435,12 +327,6 @@ int main_transcript_to_genome(int argc, char ** argv)
             }
         }
 
-        // now re-set flattened pos according to transcriptome meta-contig
-        // __gnu_parallel::for_each(sam_records.begin() + prev_num_records, 
-        //                          sam_records.end(), 
-        //                          set_flattened_pos_unary(& tx_sam_order));
-
-
         __gnu_parallel::_Settings psettings;
         psettings.transform_minimal_n = 2;
         __gnu_parallel::_Settings::set(psettings);
@@ -469,6 +355,10 @@ int main_transcript_to_genome(int argc, char ** argv)
         // now we want to copy the range [pre, end) into sam_records
         sam_records.swap(std::vector<SamLine *>(pre, sam_records.end()));
 
+        nbytes_unused = strlen(last_fragment);
+        memmove(chunk_buffer_in, last_fragment, nbytes_unused);
+        read_pointer = chunk_buffer_in + nbytes_unused;
+
         cumul_nbytes_read = 0;
     }
 
@@ -485,4 +375,137 @@ int main_transcript_to_genome(int argc, char ** argv)
     
     return 0;
 }
+
+
+PROJ_MAP LoadProjectionMap(std::set<SequenceProjection, less_seq_projection> const& tx_to_genome,
+                           SamOrder const& genome_sam_order)
+{
+    // 1. tx_to_genome  (projections of transcripts to the genome)
+    // 2. tx_projections.  (tx names pointing to tx_to_genome iterators)
+    PROJ_MAP tx_projections;
+
+    CONTIG_OFFSETS::const_iterator genome_offset_iter = 
+        genome_sam_order.contig_offsets.begin();
+
+    size_t prev_flat_start_pos = 0;
+    for (SEQ_PROJ_ITER t = tx_to_genome.begin(); t != tx_to_genome.end(); ++t)
+    {
+        char * tx_name = new char[(*t).source_dna.size() + 1];
+        strcpy(tx_name, (*t).source_dna.c_str());
+        std::pair<NP_ITER, bool> ins = tx_projections.insert(std::make_pair(tx_name, t));
+
+        SequenceProjection const& p2 = (*t);
+                
+        if (! ins.second)
+        {
+            SequenceProjection const& p1 = *(*ins.first).second;
+            SequenceProjection const& p2 = (*t);
+                    
+            fprintf(stderr, "Error: duplicate transcript named %s encountered.\n"
+                    "First instance: %s\t%s\n"
+                    "Second instance: %s\t%ss\n", 
+                    tx_name,
+                    p1.source_dna.c_str(), (p1.same_strand ? "+" : "-"),
+                    p2.source_dna.c_str(), (p2.same_strand ? "+" : "-"));
+            exit(1);
+        }
+
+
+        size_t flat_start_pos = 
+            flattened_position_aux(p2.target_dna.c_str(), p2.target_start_pos(),
+                                   genome_sam_order.contig_offsets,
+                                   & genome_offset_iter);
+                
+        if (flat_start_pos < prev_flat_start_pos)
+        {
+            fprintf(stderr, "Error: previous projection %s has target start position\n"
+                    "before current one (%s).\n", 
+                    (*t).source_dna.c_str(),
+                    (*(--SEQ_PROJ_ITER(t))).source_dna.c_str());
+            exit(1);
+        }
+        prev_flat_start_pos = flat_start_pos;
+    }
+
+    return tx_projections;
+}
+
+
+//check that the genome contig order implied by the combination of
+//transcript projections and transcript contig order is the same as
+//that given by genome_contig_order
+bool CheckProjectionOrder(CONTIG_OFFSETS const& genome_contig_order,
+                          CONTIG_OFFSETS const& tx_contig_order,
+                          std::set<SequenceProjection> const& tx_to_genome)
+{
+    //1. Compute a flattened genome coordinate for each transcript
+    std::multimap<size_t, char const*> tx_implied_genomic_offsets;
+    std::multimap<size_t, char const*>::const_iterator tit;
+
+    std::set<SequenceProjection>::const_iterator pit;
+    OFFSETS_ITER oit;
+    for (pit = tx_to_genome.begin(); pit != tx_to_genome.end(); ++pit)
+    {
+        char const* tx_contig = (*pit).source_dna.c_str();
+        char const* tx_proj_contig = (*pit).target_dna.c_str();
+        oit = genome_contig_order.find(tx_proj_contig);
+        if (oit == genome_contig_order.end())
+        {
+            fprintf(stderr, "Error: CheckProjectionOrder: didn't find genome contig %s "
+                    "that was found in transcript-to-genome projection from gtf file\n",
+                    tx_proj_contig);
+            exit(1);
+        }
+        size_t genome_contig_offset = (*oit).second;
+        size_t tx_local_offset = (*pit).transformation[0].jump_length;
+
+        tx_implied_genomic_offsets.insert(std::make_pair(genome_contig_offset + tx_local_offset, tx_contig));
+    }
+
+    size_t last_implied_offset = SIZE_MAX;
+    size_t last_given_offset = 0;
+    char const* last_tx_contig = "";
+
+    //tx implied offsets are partially ordered.  given offsets are
+    //fully ordered.  here, we merely check that if a consecutive pair
+    //of contigs are implied strictly increasing, they are increasing
+    //by given offset as well. 
+    for (tit = tx_implied_genomic_offsets.begin(); tit != tx_implied_genomic_offsets.end(); ++tit)
+    {
+        size_t implied_offset = (*tit).first;
+        char const* tx_contig = (*tit).second;
+        oit = tx_contig_order.find(tx_contig);
+        if (oit == tx_contig_order.end())
+        {
+            fprintf(stderr, "Error: CheckProjectionOrder: didn't find transcript contig %s "
+                    "in given transcript ordering that was found in transcript-to-genome "
+                    "projection from gtf file\n",
+                    tx_contig);
+            exit(1);
+        }
+        size_t given_offset = (*oit).second;
+        if (last_implied_offset < implied_offset
+            && ! (last_given_offset < given_offset))
+        {
+            fprintf(stderr, "Error: CheckProjectionOrder: transcript contig ordering implied from "
+                    "gtf file and given genome contig ordering differs from "
+                    "given transcript ordering. Please re-order transcript contigs in SAM header\n"
+                    "Last contig: %s (%Zu implied offset) (%Zu given offset)\n"
+                    "Current ctg: %s (%Zu implied offset) (%Zu given offset)\n",
+                    last_tx_contig, last_implied_offset, last_given_offset, 
+                    tx_contig, implied_offset, given_offset);
+
+            return false;
+        }
+        else
+        {
+            last_implied_offset = implied_offset;
+            last_given_offset = given_offset;
+            last_tx_contig = tx_contig;
+        }
+    }
+    return true;
+}
+
+
 

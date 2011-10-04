@@ -9,7 +9,8 @@
 #include "sam_score_aux.h"
 #include "sam_aux.h"
 
-int sam_rejoin_usage(size_t mdef, char const* fdef, size_t qdef)
+int sam_rejoin_usage(size_t mdef, size_t qdef,
+                     size_t rdef, size_t Sdef)
 {
     fprintf(stderr,
             "\nUsage:\n\n"
@@ -18,11 +19,11 @@ int sam_rejoin_usage(size_t mdef, char const* fdef, size_t qdef)
             "-m     INT     number bytes of memory to use [%zu]\n"
             "-t     INT     number of threads to use [1]\n"
             "-C     STRING  work in the directory named here [.]\n"
-            "-f     STRING  symbolic record filtering string [%s]\n"
-            "-q     INT     minimum mapping quality to output a record [%Zu]\n"
-            "-A     STRING  if present, output only records from these alignment spaces [absent]\n"
-            "-r     INT     if present, output only records with this stratum rank or better [absent]\n"
-            "-S     INT     if present, output only records with this stratum size or better [absent]\n"
+            "-f     STRING  symbolic record filtering string [<no filter>]\n"
+            "-q     INT     only output records with this or greater mapping quality [%Zu]\n"
+            "-A     STRING  only output records from these alignment spaces [<all spaces>]\n"
+            "-r     INT     only output records with this or smaller stratum rank [%zu]\n"
+            "-S     INT     only output records with this or smaller stratum size [%zu]\n"
             "\n\n"
             "NOTES:\n"
             "       seq.{fqi,fqd} are produced from 'samutil seqindex' on the fastq\n"
@@ -36,7 +37,7 @@ int sam_rejoin_usage(size_t mdef, char const* fdef, size_t qdef)
             "       Missing letters denote that no filtering occurs on that field and both categories are output\n"
             "\n"
             ""
-            , mdef, fdef, qdef);
+            , mdef, qdef, rdef, Sdef);
     return 1;
 }
 
@@ -68,17 +69,21 @@ int main_sam_rejoin(int argc, char ** argv)
     char c;
 
     size_t mdef = 1024l * 1024l * 1024l * 4l; // 4 GB memory
+    char const* fdef = "";
+    size_t qdef = 0;
+    size_t rdef = 1000;
+    size_t Sdef = 1000;
+
     size_t max_mem = mdef;
-    char const* fdef = "MPQD";
     char const* tag_filter = fdef;
 
-    size_t qdef = 0;
     size_t min_mapping_quality = qdef;
 
     char const* alignment_space_filter = NULL;
 
-    size_t max_stratum_rank = 1000;
-    size_t max_stratum_size = 1000;
+    size_t max_stratum_rank = rdef;
+
+    size_t max_stratum_size = Sdef;
 
     size_t num_threads = 1;
     char const* working_dir = ".";
@@ -96,13 +101,13 @@ int main_sam_rejoin(int argc, char ** argv)
         case 'A': alignment_space_filter = optarg; break;
         case 'r': max_stratum_rank = static_cast<size_t>(atof(optarg)); break;
         case 'S': max_stratum_size = static_cast<size_t>(atof(optarg)); break;
-        default: return sam_rejoin_usage(mdef, fdef, qdef); break;
+        default: return sam_rejoin_usage(mdef, qdef, rdef, Sdef); break;
         }
     }
 
     if (argc != optind + 4)
     {
-        return sam_rejoin_usage(mdef, fdef, qdef);
+        return sam_rejoin_usage(mdef, qdef, rdef, Sdef);
     }
 
     omp_set_dynamic(false);
@@ -162,6 +167,7 @@ int main_sam_rejoin(int argc, char ** argv)
     
     char * rsam_buffer = new char[rsam_chunk_size + 1];
     char * seq_buffer = new char[seq_chunk_size + 1];
+    char * read_pointer = rsam_buffer;
 
     std::vector<SamLine *> rsam_records;
 
@@ -173,20 +179,16 @@ int main_sam_rejoin(int argc, char ** argv)
     std::vector<char *> sam_strings;
 
     std::vector<char *> sam_lines;
-    size_t nbytes_read, nbytes_unused;
+    size_t nbytes_read, nbytes_unused = 0;
     size_t n_databytes_read = 0;
     size_t data_buffer_offset = 0;
+    char * last_fragment;
     
     // iterator bounding last loaded record
     INDEX_ITER loaded_seq_end = seq_index.begin();
 
-    SetToFirstDataLine(& input_rsam_fh);
-
-    size_t header_length = ftell(input_rsam_fh);
-    rewind(input_rsam_fh);
-
-    char * header_buf = new char[header_length];
-    fread(header_buf, 1, header_length, input_rsam_fh);
+    char * header_buf = ReadAllocSAMHeader(input_rsam_fh);
+    size_t header_length = strlen(header_buf);
     fwrite(header_buf, 1, header_length, output_sam_fh);
     delete [] header_buf;
 
@@ -196,7 +198,7 @@ int main_sam_rejoin(int argc, char ** argv)
                          max_stratum_size,
                          alignment_space_filter);
 
-    while (! feof(input_rsam_fh))
+    while (! rsam_records.empty() || ! feof(input_rsam_fh))
     {
         // 1) All records in rec have been processed and purged. Load
         // new records
@@ -205,15 +207,10 @@ int main_sam_rejoin(int argc, char ** argv)
         // postcondition: beg = rec.begin(),end = upper_bound(fqd)
         if (beg == rsam_records.end() && end == rsam_records.end())
         {
-            nbytes_read = fread(rsam_buffer, 1, rsam_chunk_size, input_rsam_fh);
-            rsam_buffer[nbytes_read] = '\0';
-            sam_lines = FileUtils::find_complete_lines_nullify(rsam_buffer, & nbytes_unused);
-            if (nbytes_unused > 0)
-            {
-                //only do this if we need to. this resets a flag that affects feof()
-                fseek(input_rsam_fh, -1 * static_cast<off_t>(nbytes_unused), SEEK_CUR);
-            }
-            
+            nbytes_read = fread(read_pointer, 1, rsam_chunk_size - nbytes_unused, input_rsam_fh);
+            read_pointer[nbytes_read] = '\0';
+            sam_lines = FileUtils::find_complete_lines_nullify(rsam_buffer, & last_fragment);
+
             rsam_records.resize(sam_lines.size());
             sam_strings.resize(sam_lines.size());
 
@@ -222,6 +219,11 @@ int main_sam_rejoin(int argc, char ** argv)
 
             beg = rsam_records.begin();
             end = find_rsam_by_id(rsam_records.begin(), rsam_records.end(), (*loaded_seq_end).index);
+
+            nbytes_unused = strlen(last_fragment);
+            memmove(rsam_buffer, last_fragment, nbytes_unused);
+            read_pointer = rsam_buffer + nbytes_unused;
+            
         }
         
         // 2) [beg, end) is an empty range, but not at rec.end().

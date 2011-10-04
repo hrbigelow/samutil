@@ -128,23 +128,19 @@ int main_sam_sort(int argc, char ** argv)
 
     SamOrder sam_order(SAM_RID, sort_type);
 
-    sam_order.InitFromFile(alignment_sam_fh);
-    sam_order.AddHeaderContigStats(used_header_fh);
-
-    SetToFirstDataLine(&used_header_fh);
-
-    size_t header_length = ftell(used_header_fh);
-    rewind(used_header_fh);
-
-    char * header_buf = new char[header_length];
-    fread(header_buf, 1, header_length, used_header_fh);
+    char * header_buf = ReadAllocSAMHeader(used_header_fh);
+    size_t header_length = strlen(header_buf);
     fwrite(header_buf, 1, header_length, sorted_sam_fh);
+
+    sam_order.AddHeaderContigStats(header_buf);
+    
     delete [] header_buf;
 
+    // merely to slurp up the alignment_sam_fh header
+    char * dummy = ReadAllocSAMHeader(alignment_sam_fh);
+    delete [] dummy;
+
     fflush(sorted_sam_fh);
-
-    SetToFirstDataLine(&alignment_sam_fh);
-
 
     /*
       The index will transition between four possible orderings during these
@@ -190,83 +186,99 @@ int main_sam_sort(int argc, char ** argv)
          b. Print out elements in buffer according to merged, to final sorted file
      */
 
-    size_t const max_line = 10000;
     size_t chunk_size = max_mem / 2;
 
-    gzFile alignment_sam_zfh = gzopen(alignment_sam_file, "r");
-    std::vector<size_t> chunk_lengths = 
-        FileUtils::ChunkLengths(alignment_sam_zfh, chunk_size, max_line);
-    gzclose(alignment_sam_zfh);
-
-    size_t num_chunks = chunk_lengths.size();
-
-    //prepare temporary files
+    //prepare temporary file variables
     size_t template_length = strlen(tmp_file_prefix) + 8;
     char * tmp_file_template = new char[template_length];
     strcpy(tmp_file_template, tmp_file_prefix);
     strcat(tmp_file_template, ".XXXXXX");
 
-    char ** tmp_files = new char *[num_chunks];
-    FILE ** tmp_fhs = new FILE *[num_chunks];
-    char * tmp_file_buf = new char[num_chunks * (template_length + 1)];
-
-    if (num_chunks > 1)
-    {
-        for (size_t c = 0; c != num_chunks; ++c)
-        {
-            tmp_files[c] = tmp_file_buf + (c * (template_length + 1));
-            strcpy(tmp_files[c], tmp_file_template);
-            int fdes = mkstemp(tmp_files[c]);
-            tmp_fhs[c] = fdopen(fdes, "w+");
-            if (tmp_fhs[c] == NULL)
-            {
-                fprintf(stderr, "Error: couldn't open temporary chunk file %s for reading/writing.\n",
-                        tmp_files[c]);
-                exit(1);
-            }
-        }
-    }
+    std::vector<char *> tmp_files;
+    std::vector<FILE *> tmp_fhs;
 
     // build the index, and output the
     char * chunk_buffer_in = new char[chunk_size + 1];
     char * chunk_buffer_out = new char[chunk_size + 1];
+    char * read_pointer = chunk_buffer_in;
 
-
-    chunk_lengths[0] -= ftell(alignment_sam_fh);
+    size_t nbytes_read, nbytes_unused = 0;
+    char * last_fragment;
 
     std::vector<size_t> chunk_num_lines;
     std::vector<size_t> offset_quantile_sizes;
     std::vector<LineIndex> line_index;
 
-    fprintf(stderr, "Writing chunks [0-%zu]:", num_chunks - 1);
+    fprintf(stderr, "Writing chunks:");
     fflush(stderr);
 
-    for (size_t c = 0; c != num_chunks; ++c)
-    {
-        FILE * used_out_fh = num_chunks == 1 ? sorted_sam_fh : tmp_fhs[c];
+    size_t chunk_num = 0;
 
-        size_t nbytes_read = fread(chunk_buffer_in, 1, chunk_lengths[c], alignment_sam_fh);
-        assert(nbytes_read == chunk_lengths[c]);
-        chunk_buffer_in[nbytes_read] = '\0';
+    while (! feof(alignment_sam_fh))
+    {
+
+        nbytes_read = fread(read_pointer, 1, chunk_size - nbytes_unused, alignment_sam_fh);
+        read_pointer[nbytes_read] = '\0';
+
+        FILE * used_out_fh;
+        if (feof(alignment_sam_fh) && tmp_fhs.empty())
+        {
+            // special case: we can bypass the tmp file stage if the
+            // entire input file fits in one chunk
+            used_out_fh = sorted_sam_fh;
+        }
+        else
+        {
+            char * tmp_file = new char[template_length + 1];
+            strcpy(tmp_file, tmp_file_template);
+            int fdes = mkstemp(tmp_file);
+            FILE * tmp_fh = fdopen(fdes, "w+");
+            if (tmp_fh == NULL)
+            {
+                fprintf(stderr, "Error: couldn't open temporary chunk file %s for reading/writing.\n",
+                        tmp_file);
+                exit(1);
+            }
+
+            tmp_files.push_back(tmp_file);
+            tmp_fhs.push_back(tmp_fh);
+            
+            used_out_fh = tmp_fh;
+        }
+        
+        std::vector<char *> sam_lines = 
+            FileUtils::find_complete_lines_nullify(chunk_buffer_in, & last_fragment);
+
+        if (! sam_order.Initialized() && ! sam_lines.empty())
+        {
+            sam_order.InitFromID(sam_lines[0]);
+        }
 
         std::pair<size_t, size_t> chunk_info = 
-            process_chunk(chunk_buffer_in, chunk_buffer_out,
-                          chunk_lengths[c], sam_order,
-                          used_out_fh, & line_index);
+            process_chunk(sam_lines, chunk_buffer_in, chunk_buffer_out, 
+                          sam_order, used_out_fh, & line_index);
 
         offset_quantile_sizes.push_back(chunk_info.first);
         chunk_num_lines.push_back(chunk_info.second);
 
-        fprintf(stderr, " %zu", c);
+        fprintf(stderr, " %zu", chunk_num);
         fflush(stderr);
+
+        nbytes_unused = strlen(last_fragment);
+        memmove(chunk_buffer_in, last_fragment, nbytes_unused);
+        read_pointer = chunk_buffer_in + nbytes_unused;
+        
+        ++chunk_num;
     }
 
     fprintf(stderr, ".\n");
     fflush(stderr);
+    fclose(alignment_sam_fh);
 
     delete [] chunk_buffer_in;
     delete [] chunk_buffer_out;
 
+    size_t num_chunks = tmp_fhs.empty() ? 1 : tmp_fhs.size();
 
     // 0. Determine N quantiles based on file offset, offset_quantiles
     std::vector<INDEX_ITER> offset_quantiles;
@@ -287,7 +299,7 @@ int main_sam_sort(int argc, char ** argv)
             fseek(tmp_fhs[c], 0, std::ios::beg);
         }
 
-        write_final_merge(line_index, offset_quantiles, tmp_fhs, num_chunks, sorted_sam_fh, NULL);
+        write_final_merge(line_index, offset_quantiles, tmp_fhs, sorted_sam_fh, NULL);
 
         fprintf(stderr, ".\n");
         fprintf(stderr, "Cleaning up...");
@@ -297,20 +309,16 @@ int main_sam_sort(int argc, char ** argv)
         {
             fclose(tmp_fhs[o]);
             remove(tmp_files[o]);
+            delete tmp_files[o];
         }
         fprintf(stderr, "done.\n");
         fflush(stderr);
     }
 
-
-    close_if_present(alignment_sam_fh);
     close_if_present(sorted_sam_fh);
     close_if_present(sam_header_fh);
 
     delete [] tmp_file_template;
-    delete [] tmp_files;
-    delete [] tmp_fhs;
-    delete [] tmp_file_buf;
 
     fprintf(stderr, "%Zu lines printed.\n", line_index.size());
 

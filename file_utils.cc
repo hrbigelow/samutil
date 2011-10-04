@@ -11,7 +11,7 @@
 
 //optionally prints to a string or a file.  to make a string behave
 //the same as a file, though, we need to increment it after printing.
-int FileUtils::switch_printf(bool is_file, void * & buf, char const* format, ...)
+int FileUtils::switch_printf(bool is_file, void ** buf, char const* format, ...)
 {
     va_list arg;
     int done;
@@ -20,13 +20,13 @@ int FileUtils::switch_printf(bool is_file, void * & buf, char const* format, ...
     
     if (is_file)
     {
-        done = vfprintf(static_cast<FILE *>(buf), format, arg);
+        done = vfprintf(static_cast<FILE *>(*buf), format, arg);
     }
     else
     {
-        char * stringbuf = static_cast<char *>(buf);
+        char * stringbuf = static_cast<char *>(*buf);
         done = vsprintf(stringbuf, format, arg);
-        buf += done;
+        (*buf) += done;
     }
 
     va_end (arg);
@@ -143,7 +143,7 @@ std::vector<size_t> FileUtils::ChunkLengths(gzFile input_fh, size_t chunk_approx
 
 //
 std::vector<char *> 
-find_complete_lines_aux(char * lines, bool nullify_newlines, size_t * num_unused_bytes)
+find_complete_lines_aux(char * lines, bool nullify_newlines, char ** last_fragment)
 {
     char * lines_tmp = lines;
     std::vector<char *> line_starts;
@@ -178,22 +178,22 @@ find_complete_lines_aux(char * lines, bool nullify_newlines, size_t * num_unused
             line_starts.push_back(++lines_tmp);
         }
     }
-    *num_unused_bytes = strlen(line_starts.back());
+    (*last_fragment) = line_starts.back();
     line_starts.pop_back();
 
     return line_starts;
 }
 
 std::vector<char *> 
-FileUtils::find_complete_lines(char * lines, size_t * nbytes_unused)
+FileUtils::find_complete_lines(char * lines, char ** last_fragment)
 {
-    return find_complete_lines_aux(lines, false, nbytes_unused);
+    return find_complete_lines_aux(lines, false, last_fragment);
 }
 
 std::vector<char *> 
-FileUtils::find_complete_lines_nullify(char * lines, size_t * nbytes_unused)
+FileUtils::find_complete_lines_nullify(char * lines, char ** last_fragment)
 {
-    return find_complete_lines_aux(lines, true, nbytes_unused);
+    return find_complete_lines_aux(lines, true, last_fragment);
 }
 
 
@@ -266,6 +266,7 @@ char * BufferedFile::next_n_lines(size_t num_lines, bool * advanced_chunk, bool 
     //is our current line_iter valid?  if not, we need to read another chunk
     size_t lines_left = std::distance(this->line_iter, this->line_starts.end());
     size_t nbytes_unused;
+    char * last_fragment;
 
     *advanced_chunk = lines_left < num_lines;
 
@@ -306,7 +307,11 @@ char * BufferedFile::next_n_lines(size_t num_lines, bool * advanced_chunk, bool 
         ++this->chunk_iter;
 
         this->chunk_buffer[num_bytes_read + carry_over] = '\0';
-        this->line_starts = FileUtils::find_complete_lines(this->chunk_buffer, & nbytes_unused);
+
+        this->line_starts = FileUtils::find_complete_lines(this->chunk_buffer, & last_fragment);
+
+        nbytes_unused = strlen(last_fragment);
+
         this->line_iter = this->line_starts.begin();
 
         //replace newlines with nulls

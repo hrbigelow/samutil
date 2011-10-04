@@ -240,6 +240,7 @@ public:
     static bool brief_records; // prints records with numeric qnames, and '*' for SEQ and QUAL
     static char raw_score_tag[3];
     static size_t worst_fragment_score;
+    static bool initialized;
 
     static size_t (* parse_fragment_id)(char const* qname);
 
@@ -312,6 +313,7 @@ struct SamFilter
 
 void SetToFirstDataLine(FILE ** sam_fh);
 
+char * ReadAllocSAMHeader(FILE * sam_fh);
 
 
 
@@ -332,6 +334,7 @@ bool AreUnmappedMatePairs(SamLine const& a, SamLine const& b);
 
 
 char const* strand_to_char(Strand strand);
+
 
 int SAM_cmp_qname_flag(SamLine const& a, SamLine const& b);
 

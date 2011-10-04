@@ -70,7 +70,7 @@ int main(int argc, char *argv[])
     }
     else if (strcmp(argv[1], "tx2genome") == 0)
     {
-        return main_transcript_to_genome(argc - 1, argv + 1);
+        return main_tx2genome(argc - 1, argv + 1);
     }
     else if (strcmp(argv[1], "get_tx_sequence") == 0)
     {
@@ -84,7 +84,7 @@ int main(int argc, char *argv[])
     // }
     else if (strcmp(argv[1], "score") == 0)
     {
-        return main_score_mapq(argc - 1, argv + 1);
+        return main_score(argc - 1, argv + 1);
     }
     else if (strcmp(argv[1], "gen_header") == 0)
     {
@@ -98,7 +98,7 @@ int main(int argc, char *argv[])
     }
     else if (strcmp(argv[1], "seqindex") == 0)
     {
-        return main_sam_index_fastq(argc - 1, argv + 1);
+        return main_sam_seqindex(argc - 1, argv + 1);
     }
     else if (strcmp(argv[1], "rejoin") == 0)
     {

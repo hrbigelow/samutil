@@ -11,7 +11,7 @@
 
 #include <zlib.h>
 
-int sam_index_fastq_usage(size_t mdef)
+int sam_seqindex_usage(size_t mdef)
 {
     fprintf(stderr,
             "Usage:\n\n"
@@ -27,7 +27,7 @@ int sam_index_fastq_usage(size_t mdef)
 }
 
 
-int main_sam_index_fastq(int argc, char ** argv)
+int main_sam_seqindex(int argc, char ** argv)
 {
 
     size_t max_mem_def = 1024l * 1024l * 1024l * 4l; // 4 GB memory
@@ -50,13 +50,13 @@ int main_sam_index_fastq(int argc, char ** argv)
         case 'C': working_dir = optarg; break;
         case 'T': tmp_file_prefix = optarg; break;
         case 1: fastq_files.push_back(std::string(optarg)); break;
-        default: return sam_index_fastq_usage(max_mem_def); break;
+        default: return sam_seqindex_usage(max_mem_def); break;
         }
     }
 
     if (optind + 2 != argc || fastq_files.empty())
     {
-        return sam_index_fastq_usage(max_mem_def);
+        return sam_seqindex_usage(max_mem_def);
     }
     
     char const* out_index_file = argv[optind];
@@ -132,6 +132,7 @@ int main_sam_index_fastq(int argc, char ** argv)
 
     size_t nbytes_read;
     size_t nbytes_unused;
+    char * last_fragment;
 
     do
     {
@@ -148,7 +149,9 @@ int main_sam_index_fastq(int argc, char ** argv)
                 nbytes_read = 0;
             }
             fq_chunks[f][nbytes_read] = '\0';
-            line_starts[f] = FileUtils::find_complete_lines(fq_chunks[f], & nbytes_unused);
+            line_starts[f] = FileUtils::find_complete_lines(fq_chunks[f], & last_fragment);
+            nbytes_unused = strlen(last_fragment);
+
             if (nbytes_unused > 0)
             {
                 gzseek(fastq_fhs[f], - nbytes_unused, SEEK_CUR);
@@ -241,11 +244,16 @@ int main_sam_index_fastq(int argc, char ** argv)
             }
             
             tmp_fhs.push_back(ftmp);
-            
+
+            char * last_fragment;
+
+            std::vector<char *> lines = 
+                FileUtils::find_complete_lines_nullify(fq_dat_in, & last_fragment);
+
+            assert(strlen(last_fragment) == 0);
+
             std::pair<size_t, size_t> chunk_info = 
-                process_chunk(fq_dat_in, fq_dat_out,
-                              (write_pointer - fq_dat_in),
-                              sam_order, ftmp, & line_index);
+                process_chunk(lines, fq_dat_in, fq_dat_out, sam_order, ftmp, & line_index);
             
             //offset_quantile_sizes.push_back(chunk_info.first);
             chunk_num_lines.push_back(chunk_info.second);
@@ -295,8 +303,8 @@ int main_sam_index_fastq(int argc, char ** argv)
 
     // Now do the merge
     
-    write_final_merge(line_index, offset_quantiles, & (*tmp_fhs.begin()), 
-                      num_sort_chunks, out_data_fh, out_index_fh);
+    write_final_merge(line_index, offset_quantiles, tmp_fhs, 
+                      out_data_fh, out_index_fh);
     
     fclose(out_data_fh);
     fclose(out_index_fh);

@@ -30,6 +30,8 @@ class SamOrder
 
     void InitFromChoice(SAM_QNAME_FORMAT qname_format);
 
+    bool Initialized() const;
+
     SAM_ORDER order;
     /* SAM_INDEX_TYPE index_type; */
 
@@ -45,7 +47,7 @@ class SamOrder
     size_t (SamOrder::* sam_index)(char const* samline) const;
     
     
-    void AddHeaderContigStats(FILE * sam_fh);
+    void AddHeaderContigStats(char const* header);
 
     //gives the flattened position of this alignment according to the
     //concatenated set of contigs in the order specified by contig_offsets.
@@ -87,6 +89,8 @@ class SamOrder
 
 };
 
+
+SAM_QNAME_FORMAT QNAMEFormat(char const* sam_dataline);
 
 struct less_seq_projection
 {

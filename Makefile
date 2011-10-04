@@ -7,8 +7,8 @@ SOURCES = $(shell find $(srcdir) -name "*.cc")
 # filter_sam_by_score filter_matching_lines get_peak_regions
 # test/matrix_test samutil_check sam_eval
 
-BIN = fastq2fastq align_eval make_sq_header make_dnas_file	\
-	 fasta2cisfasta shuffle_paired_fastq
+BIN = fastq2fastq make_sq_header make_dnas_file fasta2cisfasta	\
+	 shuffle_paired_fastq
 
 BIN += samutil
 # BIN += sim
@@ -27,23 +27,9 @@ CPPFLAGS = -I.
 # LDFLAGS = -lgsl -lgslcblas
 LDFLAGS = 
 
-ifeq ($(findstring el5,$(shell uname -r)), el5)
-bindir = $(HOME)/usr_el5/bin
-OBJDIR = obj_el5
-CXXFLAGS = -ggdb3 -Wall -fopenmp $(OPT) $(DEBUG)
-# CPPFLAGS += -I $(HOME)/usr_el5/include/stlport
-# LDFLAGS += -L$(HOME)/usr_el5/lib
-else
 bindir = $(HOME)/usr/bin
 OBJDIR = obj
-CXXFLAGS = -ggdb3 -Wall -std=c++0x -fopenmp $(OPT) $(DEBUG)
-# CPPFLAGS += -I $(HOME)/usr/include/stlport
-# LDFLAGS += -L$(HOME)/usr/lib
-endif
-
-
-
-
+CXXFLAGS = -ggdb3 -Wall -Wno-pointer-arith -std=c++0x -fopenmp $(OPT) $(DEBUG)
 
 
 .PHONY: all clean
@@ -108,11 +94,10 @@ sim: $(sim_OBJS)
 
 
 
-samutil_OBJS = $(addprefix $(OBJDIR)/, samutil.o						\
-	sam_transcript_to_genome.o dep/tools.o sam_score_mapq.o				\
-	sam_truncate.o sam_index_fastq.o sam_rejoin.o sam_sort.o			\
-	sam_checksort.o align_eval_aux.o sam_score_aux.o sam_aux.o			\
-	seq_projection.o gtf.o align_eval_raw.o file_utils.o sam_buffer.o	\
+samutil_OBJS = $(addprefix $(OBJDIR)/, samutil.o sam_tx2genome.o		\
+	dep/tools.o sam_score.o sam_truncate.o sam_seqindex.o sam_rejoin.o	\
+	sam_sort.o sam_checksort.o align_eval_aux.o sam_score_aux.o			\
+	sam_aux.o seq_projection.o gtf.o file_utils.o sam_buffer.o			\
 	sam_helper.o sam_order.o cigar_ops.o)
 
 
@@ -136,22 +121,15 @@ pretty_plot: $(pretty_plot_OBJS)
 #	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^
 
 
-align_eval_OBJS = $(addprefix $(OBJDIR)/, align_eval.o				\
-	align_eval_raw.o align_eval_sort.o align_eval_aux.o				\
-	align_eval_checksort.o align_eval_mask.o align_eval_coverage.o	\
-	align_eval_stats.o cigar_ops.o seq_projection.o	\
-	file_utils.o sam_helper.o sam_order.o dep/tools.o)
+align_eval_OBJS = $(addprefix $(OBJDIR)/, align_eval.o		\
+	align_eval_raw.o align_eval_aux.o align_eval_mask.o		\
+	align_eval_coverage.o align_eval_stats.o cigar_ops.o	\
+	seq_projection.o file_utils.o sam_helper.o sam_order.o	\
+	dep/tools.o)
 
 align_eval: $(align_eval_OBJS)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -lz -o $@ $^
 
-
-#samutil_check: samutil_check.o sam_helper.o cigar_ops.o file_utils.o
-#	$(CXX) $(CXXFLAGS) -lz -o $@ $^
-
-
-#test_cigar: test_cigar.o cigar_ops.o
-#	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^
 
 
 make_sq_header_OBJS = $(addprefix $(OBJDIR)/, make_sq_header.o)
@@ -165,23 +143,11 @@ gtf_annotate_regions : $(gtf_annotate_regions_OBJS)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^
 
 
-filter_reads_for_tophat_OBJS = $(addprefix $(OBJDIR)/, \
-	filter_reads_for_tophat.o file_utils.o fastq_tools.o dep/tools.o)
-
-filter_reads_for_tophat : $(filter_reads_for_tophat_OBJS)
-	$(CXX) $(CXXFLAGS) -lz $(LDFLAGS) -o $@ $^
-
-
-split_reads_OBJS = $(addprefix $(OBJDIR)/, split_reads.o cisortho/string_tools.o \
-	dep/tools.o file_utils.o)
-split_reads : $(split_reads_OBJS)
-	$(CXX) $(CXXFLAGS) -lz $(LDFLAGS) -o $@ $^
-
-
 make_dnas_file_OBJS = $(addprefix $(OBJDIR)/, \
 	make_dnas_file.o cisortho/dnacol.o					\
 	cisortho/dna_scanning.o cisortho/dna.o cisortho/string_tools.o	\
 	cisortho/litestream.o)
+
 
 make_dnas_file : $(make_dnas_file_OBJS)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^

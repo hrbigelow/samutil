@@ -1,12 +1,14 @@
 #include "sam_order.h"
 #include "sam_helper.h"
+#include "file_utils.h"
 
 #include <set>
 #include <zlib.h>
 
 //!!! This is muddied in that it is partially up to the user, partly a nuissance.
 SamOrder::SamOrder(SAM_ORDER _so, char const* _sort_type) : 
-    order(_so)
+    order(_so),
+    parse_fragment_id(NULL)
 {
     strcpy(this->sort_type, _sort_type);
 
@@ -70,7 +72,7 @@ SamOrder::SamOrder(SAM_ORDER _so, char const* _sort_type) :
 // }
 
 
-SamOrder::SamOrder() : order(SAM_RID)
+SamOrder::SamOrder() : order(SAM_RID), parse_fragment_id(NULL)
 {
     sort_type[0] = '\0';
 }
@@ -134,46 +136,53 @@ SAM_QNAME_FORMAT SamOrder::InitFromFastqFile(char const* file)
 }
 
 
-SAM_QNAME_FORMAT SamOrder::InitFromID(char const* id)
+SAM_QNAME_FORMAT QNAMEFormat(char const* sam_dataline)
 {
-
     int dum[5];
     char dum_string[30];
 
     SAM_QNAME_FORMAT qname_format;
 
-    if (strlen(id) == 0)
+    if (strlen(sam_dataline) == 0)
     {
-        this->parse_fragment_id = &parse_fragment_id_zero;
         qname_format = SAM_NON_INTERPRETED;
     }
-    else if (sscanf(id, "%i", dum) == 1)
+    else if (sscanf(sam_dataline, "%i", dum) == 1)
     {
-        this->parse_fragment_id = &parse_fragment_id_numeric;
         qname_format = SAM_NUMERIC;
     }
-    else if (sscanf(id, "%[^:]:%i:%i:%i:%i", dum_string, dum, dum + 1, dum + 2, dum + 3) == 5)
+    else if (sscanf(sam_dataline, "%[^:]:%i:%i:%i:%i", dum_string, dum, dum + 1, dum + 2, dum + 3) == 5)
     {
-        this->parse_fragment_id = &parse_fragment_id_illumina;
         qname_format = SAM_ILLUMINA;
     }
 
-    else if (sscanf(id, "%*[^:]:%*[^:]:%[^:]:%i:%i:%i:%i", 
+    else if (sscanf(sam_dataline, "%*[^:]:%*[^:]:%[^:]:%i:%i:%i:%i", 
                     dum_string, dum, dum + 1, dum + 2, dum + 3) == 5)
 
     {
-        this->parse_fragment_id = &parse_fragment_id_casava_1_8;
         qname_format = SAM_CASAVA18;
     }
     else
     {
         fprintf(stderr, "Error: SamOrder: Don't have a parser for this qname format: %s\n",
-                id);
+                sam_dataline);
         exit(1);
     }
 
     return qname_format;
 }
+
+
+SAM_QNAME_FORMAT SamOrder::InitFromID(char const* id)
+{
+
+    SAM_QNAME_FORMAT qname_format = QNAMEFormat(id);
+
+    this->InitFromChoice(qname_format);
+    return qname_format;
+}
+
+
 
 
 void SamOrder::InitFromChoice(SAM_QNAME_FORMAT qname_format)
@@ -188,6 +197,12 @@ void SamOrder::InitFromChoice(SAM_QNAME_FORMAT qname_format)
         fprintf(stderr, "Error: InitFromChoice: Don't know this qname format\n");
         exit(1);
     }
+}
+
+
+bool SamOrder::Initialized() const
+{
+    return this->parse_fragment_id != NULL;
 }
 
 
@@ -397,23 +412,26 @@ bool SamOrder::equal_fragment_id_position(SamLine const& a, SamLine const& b) co
 
 //compute contig lengths from sam_fh.
 //rewinds sam_fh to beginning
-void SamOrder::AddHeaderContigStats(FILE * sam_fh)
+void SamOrder::AddHeaderContigStats(char const* header)
 {
     size_t contig_offset = 0;
+    char * hdr_copy = new char[strlen(header) + 1];
+    strcpy(hdr_copy, header);
 
-    char line[4096 + 1];
+    char * last_fragment;
+    std::vector<char *> header_lines =
+        FileUtils::find_complete_lines_nullify(hdr_copy, & last_fragment);
+    
+    assert(strlen(last_fragment) == 0);
 
-    while (! feof(sam_fh))
+    char const* line;
+    //while (! feof(sam_fh))
+    for (std::vector<char *>::const_iterator it = header_lines.begin();
+         it != header_lines.end(); ++it)
     {
-        fgets(line, 4096, sam_fh);
-
-        if (line[0] != '@')
-        {
-            rewind(sam_fh);
-            break;
-        }
         //if there is a SQ tag, parse and record
-        else if (strncmp(line, "@SQ", 3) == 0)
+        line = *it;
+        if (strncmp(line, "@SQ", 3) == 0)
         {
             //this is a SQ line
             char contig_name[1000];
@@ -429,6 +447,7 @@ void SamOrder::AddHeaderContigStats(FILE * sam_fh)
             contig_offset += contig_length;
         }
     }
+    delete hdr_copy;
 
     this->contig_lengths[std::string("*")] = 0;
 

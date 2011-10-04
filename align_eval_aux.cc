@@ -35,17 +35,20 @@ truncate_sam_unary::truncate_sam_unary() { }
 char * truncate_sam_unary::operator()(char * full_samline)
 {
     SamLine * sam = new SamLine(full_samline);
+    if (sam->parse_flag == PARSE_ERROR)
+    {
+        fprintf(stderr, "Encountered error parsing input\n");
+        exit(1);
+    }
+
     sam->sprint(full_samline);
     delete sam;
     return full_samline;
 }
 
 
-//tmp_fhs are open. 
-//chunk_buffer_in and chunk_buffer_out are allocated to
-//largest chunk length in chunk_lengths. 
-// chunk_buffer_in is set to 
-//line_index will be appended with a K-sorted chunk range
+//tmp_fhs are open.  samlines chunk_buffer_out allocated.  line_index will be
+//appended with a K-sorted chunk range
 /*
 1. index
 2. sort
@@ -61,23 +64,13 @@ Returns a pair of <number bytes, number of lines> in chunk processed
     // chunk_buffer_in[nbytes_read] = '\0';
 
 std::pair<size_t, size_t> 
-process_chunk(char * chunk_buffer_in,
+process_chunk(std::vector<char *> & samlines,
+              char * chunk_buffer_in,
               char * chunk_buffer_out,
-              size_t chunk_length,
               SamOrder const& sam_order,
               FILE * chunk_tmp_fh,
               std::vector<LineIndex> * line_index)
 {
-
-    size_t nbytes_unused;
-
-    //this is really fast
-    std::vector<char *> samlines = 
-        FileUtils::find_complete_lines_nullify(chunk_buffer_in, & nbytes_unused);
-
-    // we are depending on the chunks to be separated at record boundaries
-    assert(nbytes_unused == 0);
-
     size_t S = samlines.size();
 
     if (S == 0)
@@ -115,9 +108,8 @@ process_chunk(char * chunk_buffer_in,
     }
 
     size_t nbytes_written = std::distance(chunk_buffer_out, write_pointer);
-    assert(nbytes_written == chunk_length);
 
-    fwrite(chunk_buffer_out, 1, chunk_length, chunk_tmp_fh);
+    fwrite(chunk_buffer_out, 1, nbytes_written, chunk_tmp_fh);
     fflush(chunk_tmp_fh);
 
     (*line_index).insert((*line_index).end(), line_index_chunk, line_index_chunk + S);
@@ -168,14 +160,15 @@ get_key_quantiles(std::vector<LineIndex> const& line_index,
 // prev_chunk_starts updated to next set of chunk starts for next call
 // returns number of bytes written
 size_t catenate_subchunks(LineIndex const& query_key_quantile,
-                          FILE * tmp_fhs[],
+                          std::vector<FILE *> const& tmp_fhs,
                           std::vector<INDEX_ITER> * prev_chunk_starts,
                           std::vector<INDEX_ITER> const& chunk_ends, /* ends of each chunk ordered by (O, K) */
-                          size_t num_chunks,
                           char ** chunk_buffer,
                           std::vector<LineIndex> * catenated_index,
                           size_t ** subrange_sizes)
 {
+    size_t num_chunks = tmp_fhs.size();
+
     std::pair<INDEX_ITER, INDEX_ITER> * subrange_iters =
         new std::pair<INDEX_ITER, INDEX_ITER>[num_chunks];
 
@@ -346,11 +339,12 @@ size_t set_start_offsets(std::vector<LineIndex>::iterator beg,
 
 void write_final_merge(std::vector<LineIndex> const& ok_index,
                        std::vector<INDEX_ITER> const& offset_quantiles,
-                       FILE * tmp_fhs[],
-                       size_t num_chunks,
+                       std::vector<FILE *> const& tmp_fhs,
                        FILE * out_dat_fh,
                        FILE * out_ind_fh)
 {
+    size_t num_chunks = tmp_fhs.size();
+
     std::vector<LineIndex> key_quantile_sentinels;
     size_t * key_quantile_sizes = new size_t[num_chunks];
 
@@ -387,7 +381,6 @@ void write_final_merge(std::vector<LineIndex> const& ok_index,
                                tmp_fhs,
                                & prev_sub_k,
                                offset_quantiles,
-                               num_chunks,
                                & chunk_buffer_in,
                                ok_index_ptr,
                                & subrange_sizes);

@@ -40,12 +40,12 @@ struct truncate_sam_unary
 
 
 std::pair<size_t, size_t> 
-process_chunk(char * chunk_buffer_in,
-              char * chunk_buffer_out,
-              size_t chunk_length,
-              SamOrder const& sam_order,
-              FILE * chunk_tmp_fh,
-              std::vector<LineIndex> * line_index);
+    process_chunk(std::vector<char *> & sam_lines,
+                  char * chunk_buffer_in,
+                  char * chunk_buffer_out,
+                  SamOrder const& sam_order,
+                  FILE * chunk_tmp_fh,
+                  std::vector<LineIndex> * line_index);
 
 void
 get_key_quantiles(std::vector<LineIndex> const& line_index,
@@ -57,8 +57,7 @@ get_key_quantiles(std::vector<LineIndex> const& line_index,
 void 
 write_final_merge(std::vector<LineIndex> const& ok_index,
                   std::vector<INDEX_ITER> const& offset_quantiles,
-                  FILE * tmp_fhs[],
-                  size_t num_chunks,
+                  std::vector<FILE *> const& tmp_fhs,
                   FILE * out_dat_fh,
                   FILE * out_ind_fh);
 

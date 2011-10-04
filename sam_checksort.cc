@@ -71,7 +71,10 @@ int main_sam_checksort(int argc, char ** argv)
     SamOrder sam_order(SAM_RID, sort_type);
 
     SAM_QNAME_FORMAT qname_fmt = sam_order.InitFromFile(sorted_sam_fh);
-    sam_order.AddHeaderContigStats(sorted_sam_fh);
+
+    char * header_buf = ReadAllocSAMHeader(sorted_sam_fh);
+    sam_order.AddHeaderContigStats(header_buf);
+    delete [] header_buf;
 
     SamLine::SetGlobalFlags(qname_fmt, "", "", 0);
 
@@ -80,7 +83,7 @@ int main_sam_checksort(int argc, char ** argv)
     size_t const max_mem = 1024l * 1024l * 1024l;
     size_t const max_line = 4096;
 
-    char * chunk_buffer = new char[max_mem];
+    char * chunk_buffer_in = new char[max_mem];
 
     gzFile sorted_sam_zfh = gzopen(sorted_sam_file, "r");
     std::vector<size_t> chunk_lengths = 
@@ -91,6 +94,7 @@ int main_sam_checksort(int argc, char ** argv)
     size_t total_lines = 0;
     size_t nbytes_unused = 0;
     size_t nbytes_read = 0;
+    char * last_fragment;
 
     //includes the newline
     size_t last_line_length = 0;
@@ -99,11 +103,14 @@ int main_sam_checksort(int argc, char ** argv)
 
     for (size_t c = 0; c != chunk_lengths.size(); ++c)
     {
-        nbytes_read = fread(chunk_buffer, 1, chunk_lengths[c], sorted_sam_fh);
+        nbytes_read = fread(chunk_buffer_in, 1, chunk_lengths[c], sorted_sam_fh);
         
-        chunk_buffer[nbytes_read] = '\0';
+        chunk_buffer_in[nbytes_read] = '\0';
 
-        samlines = FileUtils::find_complete_lines_nullify(chunk_buffer, & nbytes_unused);
+        samlines = FileUtils::find_complete_lines_nullify(chunk_buffer_in, & last_fragment);
+
+        nbytes_unused = strlen(last_fragment);
+
         assert(nbytes_unused == 0);
 
         partial_index_aux paux(&sam_order);
@@ -153,7 +160,7 @@ int main_sam_checksort(int argc, char ** argv)
         }
     }
     
-    delete [] chunk_buffer;
+    delete [] chunk_buffer_in;
 
     if (is_sorted)
     {

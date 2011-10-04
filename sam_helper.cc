@@ -205,12 +205,18 @@ void reverse_comp_inplace(char const* begin, char const* end, char * rcomp)
 }
 
 
-void encode_tags(char const* tag_string, 
-                 char const* raw_score_tag,
-                 size_t worst_raw_score, 
-                 SamTag * tags,
-                 char ** extra_tags)
+//
+void init_tags_from_string(char const* tag_string, 
+                           char const* raw_score_tag,
+                           size_t worst_raw_score, 
+                           SamTag * tags,
+                           char ** extra_tags)
 {
+
+    // This function should only be used when initializing from SAM
+    // input, not rSAM input.
+    assert(! SamLine::expect_rsam_format);
+
     char tmp_buf[1024];
     char * tmp_buf_ptr = tmp_buf;
     tmp_buf_ptr[0] = '\0';
@@ -221,6 +227,18 @@ void encode_tags(char const* tag_string,
     char tag_value[1024];
     int advance;
 
+    // set default values.  
+    (*tags).raw_score = 0;
+    (*tags).stratum_rank = 0;
+    (*tags).stratum_size = 0;
+    (*tags).alignment_space = '\0';
+    (*tags).raw_score_present = false;
+    (*tags).alignment_space_present = false;
+    (*tags).stratum_rank = false;
+    (*tags).stratum_size_present = false;
+    strcpy((*tags).raw_score_tag, "--");
+    
+    
     while (sscanf(tag, " %[^:]:%c:%s%n", tag_name, &tag_type, tag_value, &advance) == 3)
     {
         if (strcmp(tag_name, raw_score_tag) == 0)
@@ -282,6 +300,8 @@ char SamLine::expected_read_layout[256];
 bool SamLine::expect_rsam_format;
 char SamLine::raw_score_tag[3];
 size_t SamLine::worst_fragment_score;
+bool SamLine::initialized = false;
+
 
 size_t (* SamLine::parse_fragment_id)(char const* qname) = &parse_fragment_id_zero;
 
@@ -306,6 +326,7 @@ void SamLine::SetGlobalFlags(SAM_QNAME_FORMAT _qname_format,
     SamLine::worst_fragment_score = _worst_fragment_score;
 
     SamLine::expect_rsam_format = strcmp(SamLine::expected_read_layout, "") == 0;
+    SamLine::initialized = true;
 }
 
 
@@ -587,6 +608,21 @@ void SamLine::Init(char const* samline_string)
             this->flag.set_raw(flag_raw);
             this->tags.set_raw(tag_raw);
 
+            // samline_string + tag_start either is a '\t' or NULL
+            char const* tag_ptr = strlen(samline_string + tag_start) > 0
+                ? samline_string + tag_start + 1
+                : NULL;
+
+            if (tag_ptr != NULL)
+            {
+                this->tag_string = new char[strlen(tag_ptr) + 1];
+                strcpy(this->tag_string, tag_ptr);
+            }
+            else
+            {
+                this->tag_string = NULL;
+            }
+
             if (num_fields != 7)
             {
                 was_error = true;
@@ -617,11 +653,13 @@ void SamLine::Init(char const* samline_string)
 
             this->flag.set_raw(flag_raw);
 
-            this->tags.raw_score_present = false;
-            this->tags.alignment_space_present = false;
-            this->tags.stratum_rank_present = false;
-            this->tags.stratum_size_present = false;
-
+            // initialize tags and tag_string
+            init_tags_from_string(samline_string + tag_start, 
+                                  SamLine::raw_score_tag,
+                                  SamLine::worst_fragment_score,
+                                  & this->tags,
+                                  & this->tag_string);
+        
             if (num_fields != 9)
             {
                 was_error = true;
@@ -655,13 +693,6 @@ void SamLine::Init(char const* samline_string)
             return;
         }
 
-        // initialize tag_string
-        encode_tags(samline_string + tag_start, 
-                    SamLine::raw_score_tag,
-                    SamLine::worst_fragment_score,
-                    & this->tags,
-                    & this->tag_string);
-        
         if (! this->flag.this_fragment_unmapped)
         {
             --this->pos;
@@ -758,22 +789,22 @@ void SamLine::print_aux(void * print_buf, bool to_file) const
 
     if (this->parse_flag == HEADER)
     {
-        FileUtils::switch_printf(to_file, print_buf, "%s\n", this->tag_string);
+        FileUtils::switch_printf(to_file, & print_buf, "%s\n", this->tag_string);
     }
 
     else if (this->flag.is_rsam_format)
     {
         size_t reported_pos = this->flag.this_fragment_unmapped ? 0 : this->ones_based_pos();
         
-        FileUtils::switch_printf(to_file, print_buf, "%zu\t%zu\t%s\t%zu\t%zu\t%s\t%zu",
-                                 this->fragment_id, this->flag.get_raw(), this->rname, reported_pos,
-                                 this->mapq, this->cigar, this->tags.get_raw());
+        FileUtils::switch_printf(to_file, & print_buf, "%zu\t%zu\t%s\t%zu\t%zu\t%s\t%zu",
+                                     this->fragment_id, this->flag.get_raw(), this->rname, reported_pos,
+                                     this->mapq, this->cigar, this->tags.get_raw());
         
         if (this->tag_string != NULL)
         {
-            FileUtils::switch_printf(to_file, print_buf, "\t%s", this->tag_string);
+            FileUtils::switch_printf(to_file, & print_buf, "\t%s", this->tag_string);
         }
-        FileUtils::switch_printf(to_file, print_buf, "\n");
+        FileUtils::switch_printf(to_file, & print_buf, "\n");
     }
     else
     {
@@ -782,7 +813,7 @@ void SamLine::print_aux(void * print_buf, bool to_file) const
         size_t reported_pnext = this->flag.next_fragment_unmapped ? 0 : this->ones_based_pnext();
 
         // QNAME.FLAG.RNAME.POS.MAPQ.CIGAR.RNEXT.PNEXT.TLEN.SEQ.QUAL[.TAG[.TAG[.TAG...]]]
-        FileUtils::switch_printf(to_file, print_buf, 
+        FileUtils::switch_printf(to_file, & print_buf, 
                                  "%zu\t%zu\t%s\t%zu\t%zu\t%s\t%s\t%zu\t%i\t%s\t%s",
                                  this->fragment_id, flag.get_raw(), this->rname, reported_pos,
                                  this->mapq, this->cigar, this->rnext, reported_pnext, this->tlen,
@@ -790,10 +821,10 @@ void SamLine::print_aux(void * print_buf, bool to_file) const
         
         if (this->tag_string != NULL)
         {
-            FileUtils::switch_printf(to_file, print_buf, "\t%s", this->tag_string);
+            FileUtils::switch_printf(to_file, & print_buf, "\t%s", this->tag_string);
         }
         
-        FileUtils::switch_printf(to_file, print_buf, "\n");
+        FileUtils::switch_printf(to_file, & print_buf, "\n");
     }
     return;
 }
@@ -1149,6 +1180,34 @@ char const* strand_to_char(Strand strand)
     case POS_NEG: return "POS_NEG"; break;
     }
     return "";
+}
+
+
+// reads and allocates a buffer loaded with the sam header
+char * ReadAllocSAMHeader(FILE * sam_fh)
+{
+    std::vector<char> header;
+    header.reserve(1000);
+
+    char p,n;
+    p = '\0';
+
+    while (! feof(sam_fh))
+    {
+        n = fgetc(sam_fh);
+        if ((p == '\0' || p == '\n') && n != '@')
+        {
+            ungetc(n, sam_fh);
+            break;
+        }
+        p = n;
+        header.push_back(p);
+    }
+    char * header_string = new char[header.size() + 1];
+    std::copy(header.begin(), header.end(), header_string);
+    header_string[header.size()] = '\0';
+
+    return header_string;
 }
 
 

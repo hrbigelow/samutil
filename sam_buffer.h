@@ -37,23 +37,12 @@ criterion.
 3. checks the pair-validity of the SAM file, that records claiming to
 have a pair actually do.
 
-For memory efficiency, though, there is a single wrinkle here:
+The recommended practice is to use the SAM buffer to load, pair and
+convert ordinary SAM records to rSAM. To avoid overflowing memory, the
+buffer must be emptied periodically. However, it can only be emptied
+when all entries are properly paired.
 
-In order not to store the entire set of records processed, the SAM
-buffer maintains a marker called a 'low_bound'. The low bound is a
-claim from the client that says "I guarantee that I will not insert
-any further SAM records that fall below this bound, according to the
-specified output ordering.
-
-This claim is useful because it allows the caller to 'purge' the SAM
-buffer up to (but not including) this low bound without violating the
-output ordering or missing any opportunities to de-duplicate the
-records.
-
-
-
-  
- */
+*/
 
 
 //sort on [rname, pos, strand, cigar, (optionally) qname]
@@ -74,23 +63,6 @@ struct LessSAMLineFragmentIDPtr
 };
 
 
-// typedef std::pair<SamLine const*, SamLine const*> SAMPTR_PAIR;
-
-
-/*
-//sort on [rname1, pos1, strand1, cigar1, (and optionally) qname1, 
-//         rname2, pos2, strand2, cigar2, (and optionally) qname2]
-struct LessSAMLinePair
-{
-    SamOrder const* sam_order;
-    //if true, read pairs with identical alignment coordinates,
-    //but different read ids, are considered different.
-
-    LessSAMLinePair(SamOrder const* _so = NULL) : sam_order(_so) { }
-    bool operator()(SAMPTR_PAIR const& a, SAMPTR_PAIR const& b);
-};
-*/
-
 struct LessSAMLinePtrMatePair
 {
     SamOrder const* sam_order;
@@ -99,9 +71,6 @@ struct LessSAMLinePtrMatePair
 };
 
 
-
-// typedef std::set<SAMPTR_PAIR, LessSAMLinePair> PAIRED_READ_SET;
-// typedef std::pair<PAIRED_READ_SET::iterator, bool> PAIRED_READ_INS;
 
 typedef std::set<SamLine const*, LessSAMLinePtr> SINGLE_READ_SET;
 typedef std::pair<SINGLE_READ_SET::iterator, bool> SINGLE_READ_INS;
@@ -131,7 +100,6 @@ class SamBuffer
  public:
 
     SamOrder const* sam_order;
-    /* SamLine const* low_bound; */
 
     SINGLE_READ_SET unique_entries;
     /* SINGLE_READ_SET single_entries_from_pairs; */
@@ -139,30 +107,14 @@ class SamBuffer
     //entries that are claimed to have a mapped mate, but we haven't seen it yet
     SINGLE_READ_ID_MSET incomplete_entries;
 
-    //entries whose mate is unmapped
-    // SINGLE_READ_SET unpaired_entries;
-
     SamBuffer(SamOrder const* sam_order, bool output_pairs_as_same_strand);
-
-    /* bool safe_advance_lowbound(SamLine const* _proposed_new_low_bound); */
-    /* void update_lowbound(SamLine const* _low_bound); */
 
     // insert an entry, checking whether it is a duplicate.
     // this follows the same logic as std::set::insert() in its return type.
-
-
     InsertResult insert(SamLine * entry);
 
     void replace(SINGLE_READ_SET::iterator iter,
                  SamLine * replacement_entry);
-
-    //print entries preceding low_bound, and delete them from memory
-    //if low_bound == NULL, purge all remaining entries
-    void purge(FILE * output_sam_fh, 
-               FILE * output_first_fastq_fh, 
-               FILE * output_second_fastq_fh, 
-               bool output_rsam_format,
-               SamLine const* low_bound);
 
 };
 

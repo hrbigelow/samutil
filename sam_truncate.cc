@@ -79,23 +79,11 @@ int main_sam_truncate(int argc, char ** argv)
     omp_set_dynamic(false);
     omp_set_num_threads(num_threads);
 
-    SamOrder sam_order;
 
-    SAM_QNAME_FORMAT qname_format = sam_order.InitFromFile(input_sam_fh);
-
-    char const* dummy_read_layout = "y"; // this is merely to tell SamLine to parse traditional SAM.
-
-    SamLine::SetGlobalFlags(qname_format, dummy_read_layout, "", 0);
-
-    SetToFirstDataLine(&input_sam_fh);
-
-    size_t header_length = ftell(input_sam_fh);
-    rewind(input_sam_fh);
-
-    char * header_buf = new char[header_length];
-    fread(header_buf, 1, header_length, input_sam_fh);
+    char * header_buf = ReadAllocSAMHeader(input_sam_fh);
+    size_t header_length = strlen(header_buf);
     fwrite(header_buf, 1, header_length, output_sam_fh);
-    delete header_buf;
+    delete [] header_buf;
     
     size_t chunk_size = max_mem / 2;
     char * chunk_buffer_in = new char[chunk_size + 1];
@@ -107,19 +95,19 @@ int main_sam_truncate(int argc, char ** argv)
     std::vector<char *>::iterator sit, end;
 
     char * write_pointer;
+    char * read_pointer = chunk_buffer_in;
+    char * last_fragment;
 
     while (! feof(input_sam_fh))
     {
-        nbytes_read = fread(chunk_buffer_in, 1, chunk_size, input_sam_fh);
-        
-        chunk_buffer_in[nbytes_read] = '\0';
-        
-        sam_lines = FileUtils::find_complete_lines_nullify(chunk_buffer_in, & nbytes_unused);
+        nbytes_read = fread(read_pointer, 1, chunk_size - nbytes_unused, input_sam_fh);
+        read_pointer[nbytes_read] = '\0';
+        sam_lines = FileUtils::find_complete_lines_nullify(chunk_buffer_in, & last_fragment);
 
-        if (nbytes_unused > 0)
+        if (! SamLine::initialized && ! sam_lines.empty())
         {
-            //only do this if we need to. this resets a flag that affects feof()
-            fseek(input_sam_fh, -1 * static_cast<off_t>(nbytes_unused), SEEK_CUR);
+            char const* dummy_read_layout = "y"; // merely to tell SamLine to parse traditional SAM.
+            SamLine::SetGlobalFlags(QNAMEFormat(sam_lines[0]), dummy_read_layout, "", 0);
         }
 
         // do not use the last line. it is incomplete.
@@ -132,9 +120,14 @@ int main_sam_truncate(int argc, char ** argv)
         {
             strcpy(write_pointer, (*sit));
             write_pointer += strlen(*sit);
-            //fputs(*sit, output_sam_fh);
         }
         fwrite(chunk_buffer_out, 1, write_pointer - chunk_buffer_out, output_sam_fh);
+
+        // now restore unused bytes
+        nbytes_unused = strlen(last_fragment);
+        memmove(chunk_buffer_in, last_fragment, nbytes_unused);
+        read_pointer = chunk_buffer_in + nbytes_unused;
+
     }
     delete chunk_buffer_in;
     delete chunk_buffer_out;

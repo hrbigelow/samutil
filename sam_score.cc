@@ -14,7 +14,7 @@
 #include <omp.h>
 #include <parallel/algorithm>
 
-int score_mapq_usage(size_t ldef, size_t Ldef, size_t mdef)
+int score_usage(size_t ldef, size_t Ldef, size_t mdef)
 {
     fprintf(stderr,
             "\n\nUsage:\n\n"
@@ -57,7 +57,7 @@ int score_mapq_usage(size_t ldef, size_t Ldef, size_t mdef)
 
 
 
-int main_score_mapq(int argc, char ** argv)
+int main_score(int argc, char ** argv)
 {
     char c;
 
@@ -85,13 +85,13 @@ int main_score_mapq(int argc, char ** argv)
         case 'm': max_mem = static_cast<size_t>(atof(optarg)); break;
         case 't': num_threads = static_cast<size_t>(atof(optarg)); break;
         case 'C': working_dir = optarg; break;
-        default: return score_mapq_usage(ldef, Ldef, mdef); break;
+        default: return score_usage(ldef, Ldef, mdef); break;
         }
     }
 
     if (argc != optind + 4)
     {
-        return score_mapq_usage(ldef, Ldef, mdef);
+        return score_usage(ldef, Ldef, mdef);
     }
 
     omp_set_dynamic(false);
@@ -117,38 +117,49 @@ int main_score_mapq(int argc, char ** argv)
     fragment_scoring.init(score_calibration_file, contig_space_file);
 
     SamOrder sam_order(SAM_RID_POSITION, "NONE");
-    SAM_QNAME_FORMAT qname_fmt = sam_order.InitFromFile(unscored_sam_fh);
-    sam_order.AddHeaderContigStats(unscored_sam_fh);
 
-    SamLine::SetGlobalFlags(qname_fmt, expected_read_layout,
-                            fragment_scoring.raw_score_tag,
-                            fragment_scoring.worst_fragment_score);
-
-    PrintSAMHeader(&unscored_sam_fh, scored_sam_fh);
+    char * header_buf = ReadAllocSAMHeader(unscored_sam_fh);
+    size_t header_length = strlen(header_buf);
+    fwrite(header_buf, 1, header_length, scored_sam_fh);
     fflush(scored_sam_fh);
+
+    sam_order.AddHeaderContigStats(header_buf);
+    
+    delete header_buf;
 
     std::vector<char *> sam_lines;
     std::vector<char *>::iterator sit;
 
-    size_t nbytes_unused;
+    size_t nbytes_fragment = 0;
+    size_t nbytes_unused = 0;
     size_t nbytes_read;
+    char * last_fragment;
 
+    
+    
     // at any one point, we will have:  a chunk_buffer, a buffer of converted chunks,
     size_t chunk_size = max_mem / 2;
     char * chunk_buffer_in = new char[chunk_size + 1];
+    char * read_pointer = chunk_buffer_in;
+
 
     while (! feof(unscored_sam_fh))
     {
-        nbytes_read = fread(chunk_buffer_in, 1, chunk_size, unscored_sam_fh);
-        chunk_buffer_in[nbytes_read] = '\0';
-        sam_lines = FileUtils::find_complete_lines_nullify(chunk_buffer_in, & nbytes_unused);
+        nbytes_read = fread(read_pointer, 1, chunk_size - nbytes_unused, unscored_sam_fh);
+        read_pointer[nbytes_read] = '\0';
+        sam_lines = FileUtils::find_complete_lines_nullify(chunk_buffer_in, & last_fragment);
 
-        if (nbytes_unused > 0)
+        nbytes_fragment = strlen(last_fragment);
+
+        if (! sam_order.Initialized() && ! sam_lines.empty())
         {
-            //only do this if we need to. this resets a flag that affects feof()
-            fseek(unscored_sam_fh, -1 * static_cast<off_t>(nbytes_unused), SEEK_CUR);
+            sam_order.InitFromID(sam_lines[0]);
+            SamLine::SetGlobalFlags(QNAMEFormat(sam_lines[0]), 
+                                    expected_read_layout,
+                                    fragment_scoring.raw_score_tag,
+                                    fragment_scoring.worst_fragment_score);
         }
-
+        
         std::vector<SamLine *> sam_records(sam_lines.size());
         __gnu_parallel::transform(sam_lines.begin(), sam_lines.end(), 
                                   sam_records.begin(), 
@@ -193,7 +204,7 @@ int main_score_mapq(int argc, char ** argv)
 
         // if this is the last chunk, consume the entire range,
         // otherwise, look for a fragment boundary
-        pre_fragment_id = nbytes_unused > 0 ? (*revit)->fragment_id : SIZE_MAX;
+        pre_fragment_id = nbytes_fragment > 0 ? (*revit)->fragment_id : SIZE_MAX;
         for (revit = sam_records.rbegin(); revit.base() != pre; ++revit)
         {
             if ((*revit)->fragment_id != pre_fragment_id)
@@ -203,24 +214,22 @@ int main_score_mapq(int argc, char ** argv)
             }
         }
 
-         sam_buffers.resize(ranges.size());
+        sam_buffers.resize(ranges.size());
         for (size_t i = 0; i != ranges.size(); ++i)
         {
             sam_buffers[i] = new SamBuffer(& sam_order, false);
         }
-
-        // now recycle unused part of buffer by replacing all newlines,
-        // and then rewinding the file by that length
-        off_t unused_length = 0;
+        
+        // restore newlines into chunk_buffer_in
+        // mark start of unused portion
         size_t unused_index = std::distance(sam_records.begin(), revit.base());
+        char * unused_start = *(sam_lines.begin() + unused_index);
         for (sit = sam_lines.begin() + unused_index; sit != sam_lines.end(); ++sit)
         {
-            unused_length += strlen((*sit)) + 1;
+            assert(*((*sit) + strlen(*sit)) == '\0');
+            *((*sit) + strlen(*sit)) = '\n';
         }
-        if (unused_length > 0)
-        {
-            fseek(unscored_sam_fh, - unused_length, SEEK_CUR);
-        }
+        nbytes_unused = strlen(unused_start);
 
         // join SAM to rSAM, allocate string buffer, print, delete rSAM record
         std::vector<char *> scored_sam_records(ranges.size());
@@ -234,6 +243,9 @@ int main_score_mapq(int argc, char ** argv)
             delete [] scored_sam_records[r];
             delete sam_buffers[r];
         }
+
+        memmove(chunk_buffer_in, unused_start, nbytes_unused);
+        read_pointer = chunk_buffer_in + nbytes_unused;
 
     }
 

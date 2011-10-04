@@ -66,46 +66,6 @@ non_overlapping_range(SEQ_PROJ_ITER start, SEQ_PROJ_ITER set_end)
 
 
 
-
-/*
-  returns true if the named contigs do not have overlapping
-  projections on the genome. by definition, unmapped contigs have no
-  projection, and are thus non-overlapping.
- */
-/*
-bool tx_nonoverlapping_or_passthrough(PROJ_MAP const& tx_projections,
-                                      char const* tx1, char const* tx2)
-{
-    if (strcmp(tx1, "*") == 0 || strcmp(tx2, "*") == 0)
-    {
-        return true;
-    }
-    else if (strcmp(tx1, tx2) == 0)
-    {
-        return false;
-    }
-
-    // check if these are non-overlapping contigs
-    PROJ_MAP::const_iterator proj1_iter = tx_projections.find(tx1);
-    PROJ_MAP::const_iterator proj2_iter = tx_projections.find(tx2);
-
-    if (proj1_iter == tx_projections.end() || proj2_iter == tx_projections.end())
-    {
-        //either of these are not projected, so we're in pass-through mode.
-        return true;
-    }
-                    
-    SequenceProjection const& sp1 = *(*proj1_iter).second;
-    SequenceProjection const& sp2 = *(*proj2_iter).second;
-
-    return 
-        sp1.target_dna != sp2.target_dna
-        || sp1.target_end_pos() <= sp2.target_start_pos()
-        || sp2.target_end_pos() <= sp1.target_start_pos();
-}
-*/
-
-
 project_dedup_print::project_dedup_print(PROJ_MAP const* _proj_map,
                                          SamOrder const* _tx_ord,
                                          SamOrder const* _genome_ord,
