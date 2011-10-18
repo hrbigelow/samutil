@@ -39,16 +39,19 @@ int align_eval_raw_usage(size_t qdef)
 {
     fprintf(stderr,
             "\nUsage:\n\n"
-            "align_eval raw [OPTIONS] alignment_sorted.sam jumps.txt align_stats.cumul.txt \\\n"
+            "align_eval raw [OPTIONS] <read_layout> alignment_sorted.sam jumps.txt align_stats.cumul.txt \\\n"
             "           align_stats.{oplen,fragsize}.{full,by_half}.txt\n\n"
             "Options:\n\n"
             "-q  INT      minimum mapping quality to include alignment[%Zu]\n"
             "-p  FLAG     (primary alignment) if present, require primary alignment.\n"
             "             in this case, do not tally 'correct' and 'error' jumps\n"
-            "             for non-primary alignments (SAM flag 0x0100, 256)\n\n",
+            "             for non-primary alignments (SAM flag 0x0100, 256)\n\n"
+            ,
             qdef);
 
     fprintf(stderr,
+            "<read_layout> defines the forward (f) and reverse (r) relationships of reads\n"
+            "to the template, typically 'fr' for paired-end, or 'f' for single-end\n\n"
             "Output files:\n\n"
 
             "jumps.txt: <contig> <position> <guide_jump> <correct_jump> <error_jump>\n\n"
@@ -266,19 +269,20 @@ int main_align_eval_raw(int argc, char ** argv)
         }
     }
     
-    int arg_count = optind + 7;
+    int arg_count = optind + 8;
     if (argc != arg_count)
     {
         return align_eval_raw_usage(min_mapping_quality_def);
     }
 
-    char const* alignment_sam_file = argv[optind];
-    char const* output_jumps_file = argv[optind + 1];
-    char const* dist_summary_file = argv[optind + 2];
-    char const* oplen_full_file = argv[optind + 3];
-    char const* oplen_halfs_file = argv[optind + 4];
-    char const* frag_full_file = argv[optind + 5];
-    char const* frag_halfs_file = argv[optind + 6];
+    char const* read_layout = argv[optind];
+    char const* alignment_sam_file = argv[optind + 1];
+    char const* output_jumps_file = argv[optind + 2];
+    char const* dist_summary_file = argv[optind + 3];
+    char const* oplen_full_file = argv[optind + 4];
+    char const* oplen_halfs_file = argv[optind + 5];
+    char const* frag_full_file = argv[optind + 6];
+    char const* frag_halfs_file = argv[optind + 7];
 
     FILE * alignment_sam_fh = open_if_present(alignment_sam_file, "r");
     FILE * output_jumps_fh = open_if_present(output_jumps_file, "w");
@@ -292,10 +296,12 @@ int main_align_eval_raw(int argc, char ** argv)
 
     SamOrder sam_order(SAM_RID, "MIN_ALIGN_GUIDE"); // doesn't matter what the order is here.
 
-    sam_order.InitFromFile(alignment_sam_fh);
-    sam_order.AddHeaderContigStats(alignment_sam_fh);
+    char * header_buf = ReadAllocSAMHeader(alignment_sam_fh);
+    sam_order.AddHeaderContigStats(header_buf);
+    delete [] header_buf;
 
-    SetToFirstDataLine(&alignment_sam_fh);
+    bool retain_qname = true;
+    SamLine::SetGlobalFlags(SAM_NUMERIC, read_layout, "", 0, retain_qname);
 
     //stores features ordered by flattened transcript coordinate
     std::map<size_t, Feature> ordered_features;
@@ -347,21 +353,18 @@ int main_align_eval_raw(int argc, char ** argv)
     std::vector<block_offsets>::const_iterator gi;
 
     samline = new SamLine(alignment_sam_fh);
+    sam_order.InitFromID(samline->qname_string);
 
     while (samline->parse_flag == DATA_LINE)
     {
-        char guide_string[1024];
-        char type_dummy;
-        if (! samline->has_tag(GuideAlignmentTag, type_dummy, guide_string))
-        {
-            fprintf(stderr, "Error: SAM line didn't have guide alignment tag %s\n",
-                    GuideAlignmentTag);
-            exit(1);
-        }
-        ParseSimReadCoords(guide_string, 
+        ParseSimReadCoords(samline->qname_string, 
                            samline->flag.first_fragment_in_template,
                            &guide_coords);
         
+        // This is to allow guide_coords to encompass any alignment
+        // when used as a projection
+        guide_coords.blocks.push_back(block_offsets(SIZE_MAX, 0L));
+
         assert(num_used_bases == num_correct_bases + num_error_bases + num_trimmed_bases);
         assert(num_total_bases == num_used_bases + num_skipped_bases);
         assert((! require_primary_alignment) || (num_used_bases <= num_guide_bases));
@@ -467,8 +470,8 @@ int main_align_eval_raw(int argc, char ** argv)
             
             for (gi = guide_coords.blocks.begin(); gi != guide_coords.blocks.end(); ++gi)
             {
-                assert(old_feature_bound <= feature_bound);
                 feature_bound += (*gi).jump_length;
+                assert(old_feature_bound <= feature_bound);
                 
                 Feature & start_feature = ordered_features[feature_bound];
                 start_feature.guide_jumps++;
@@ -529,7 +532,7 @@ int main_align_eval_raw(int argc, char ** argv)
             size_t test_read_pos = 0;
 
             //position on the contig for the first alignment among the test and guide
-            feature_bound = (*guide_offset_iter).second;
+            feature_bound = new_feature_bound;
 
             //once the merge is complete, there will (in general) be an offset between the guide
             //and test start (represented by an 'I' or 'D' state).  

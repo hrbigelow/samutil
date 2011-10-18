@@ -301,7 +301,7 @@ bool SamLine::expect_rsam_format;
 char SamLine::raw_score_tag[3];
 size_t SamLine::worst_fragment_score;
 bool SamLine::initialized = false;
-
+bool SamLine::retain_qname_string = false;
 
 size_t (* SamLine::parse_fragment_id)(char const* qname) = &parse_fragment_id_zero;
 
@@ -310,7 +310,8 @@ size_t (* SamLine::parse_fragment_id)(char const* qname) = &parse_fragment_id_ze
 void SamLine::SetGlobalFlags(SAM_QNAME_FORMAT _qname_format,
                              char const* _expected_layout,
                              char const* _raw_score_tag,
-                             size_t _worst_fragment_score)
+                             size_t _worst_fragment_score,
+                             bool _retain_qname_string)
 {
     SamLine::sam_qname_format = _qname_format;
     switch(SamLine::sam_qname_format)
@@ -326,6 +327,7 @@ void SamLine::SetGlobalFlags(SAM_QNAME_FORMAT _qname_format,
     SamLine::worst_fragment_score = _worst_fragment_score;
 
     SamLine::expect_rsam_format = strcmp(SamLine::expected_read_layout, "") == 0;
+    SamLine::retain_qname_string = _retain_qname_string;
     SamLine::initialized = true;
 }
 
@@ -416,7 +418,8 @@ SamLine::SamLine(SamLine const& s) :
     tags(s.tags),
     tag_string(NULL),
     flattened_pos(s.flattened_pos),
-    cigar_compared(NULL)
+    cigar_compared(NULL),
+    qname_string(NULL)
 {
     if (s.rname != NULL)
     {
@@ -432,6 +435,11 @@ SamLine::SamLine(SamLine const& s) :
     {
         this->cigar_compared = new char[strlen(s.cigar_compared) + 1];
         strcpy(this->cigar_compared, s.cigar_compared);
+    }
+    if (s.qname_string != NULL)
+    {
+        this->qname_string = new char[strlen(s.qname_string) + 1];
+        strcpy(this->qname_string, s.qname_string);
     }
     if (s.rnext != NULL)
     {
@@ -456,8 +464,10 @@ SamLine::SamLine(SamLine const* samlines[], size_t n_lines, char const* read_lay
       pnext(0),
       tlen(0),
       flattened_pos(samlines[0]->flattened_pos),
-      cigar_compared(NULL) // since we are merging SAM (not rSAM), we
-                           // don't yet have a use for cigar_compared
+      cigar_compared(NULL),
+      qname_string(NULL) 
+// since we are merging SAM (not rSAM), we don't yet have a use for
+// cigar_compared
 {
     this->flag.set_raw(0);
 
@@ -576,6 +586,7 @@ void SamLine::Init(char const* samline_string)
 
     assert(strlen(samline_string) < 4096);
     assert(strchr(samline_string, '\n') == NULL); // must not contain a newline
+    this->qname_string = NULL;
 
     if (samline_string[0] == '@')
     {
@@ -600,7 +611,7 @@ void SamLine::Init(char const* samline_string)
 
             int num_fields =
                 sscanf(samline_string, 
-                       "%zu\t" "%zu\t" "%as\t" "%zu\t" "%zu\t"
+                       "%zu\t" "%zu\t" "%a[^\t]\t" "%zu\t" "%zu\t"
                        "%as\t" "%zu%n",
                        &this->fragment_id, &flag_raw, &this->rname, &this->pos, &this->mapq, 
                        &this->cigar, &tag_raw, &tag_start);
@@ -642,7 +653,7 @@ void SamLine::Init(char const* samline_string)
 
             int num_fields =
                 sscanf(samline_string, 
-                       "%as\t" "%zu\t" "%as\t" "%zu\t" "%zu\t" 
+                       "%a[^\t]\t" "%zu\t" "%a[^\t]\t" "%zu\t" "%zu\t" 
                        "%as\t" "%as\t" "%zu\t" "%i\t"
                        "%n%*s%n\t%*s" 
                        "%n",
@@ -668,7 +679,15 @@ void SamLine::Init(char const* samline_string)
             {
                 this->fragment_id = this->parse_fragment_id(qname);
 
-                delete [] qname;
+                if (SamLine::retain_qname_string)
+                {
+                    this->qname_string = qname;
+                }
+                else
+                {
+                    this->qname_string = NULL;
+                    delete [] qname;
+                }
                 if (strcmp(this->cigar, "*") == 0)
                 {
                     //replace the '*' CIGAR with the more useful 'nS' op.
@@ -761,7 +780,8 @@ SamLine::~SamLine()
 {
     char ** fields[] = { & this->rname, & this->cigar, 
                          & this->rnext, & this->tag_string, 
-                         & this->cigar_compared, NULL };
+                         & this->cigar_compared, & this->qname_string, 
+                         NULL };
 
     for (char *** f = fields; *f != NULL; ++f)
     {
@@ -828,6 +848,8 @@ void SamLine::print_aux(void * print_buf, bool to_file) const
     }
     return;
 }
+
+
 
 
 // print an rSAM record as a set of SAM records, to be stored in
@@ -920,6 +942,7 @@ void SamLine::print_rsam_as_sam(char const* seq_data, char * out_string) const
         size_t start_to_start_dist = Cigar::Length(read_start, unseq_end, true);
         if (this->flag.all_fragments_mapped)
         {
+            Cigar::Trim(read_start, read_end, false, & read_start, & read_end);
             Cigar::ToString(read_start, read_end, cigar_substring);
             reported_pos = cur_read_start + 1;
             reported_pnext = (read_end == cigar_v.end())

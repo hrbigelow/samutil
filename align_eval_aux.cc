@@ -2,6 +2,8 @@
 #include "file_utils.h"
 
 #include <parallel/algorithm>
+#include <ext/algorithm>
+
 
 //partial ordering
 bool less_offset(LineIndex const& a, LineIndex const& b)
@@ -93,6 +95,7 @@ process_chunk(std::vector<char *> & samlines,
     {
         (*lit).start_offset = current_offset;
         current_offset += (*lit).line_length;
+        assert((*lit).line_length > 0);
     }
 
     __gnu_parallel::sort(line_index_chunk, line_index_chunk + S, less_key);
@@ -123,6 +126,7 @@ void
 get_key_quantiles(std::vector<LineIndex> const& line_index,
                   size_t num_chunks,
                   size_t * key_quantile_sizes,
+                  size_t * key_quantile_nlines,
                   std::vector<LineIndex> * key_quantile_sentinels)
 {
     std::vector<LineIndex> line_index_copy(line_index);
@@ -135,6 +139,8 @@ get_key_quantiles(std::vector<LineIndex> const& line_index,
     for (size_t k = 0; k != num_chunks; ++k)
     {
         INDEX_ITER kit, kit_end = key_quantiles[k+1];
+        kit = key_quantiles[k];
+        key_quantile_nlines[k] = std::distance(kit, kit_end);
 
         LineIndex sentinel = (kit_end == line_index_copy.end())
             ? LineIndex(INT64_MAX, INT64_MAX, 0)
@@ -183,9 +189,10 @@ size_t catenate_subchunks(LineIndex const& query_key_quantile,
     {
         beg = (*prev_chunk_starts)[o];
         end = chunk_ends[o+1];
-        sub_k = std::lower_bound(beg, end, query_key_quantile, less_key);
 
-        //assert(__gnu_cxx::is_sorted(beg, end, less_key));
+        assert(std::is_sorted(beg, end, less_key));
+
+        sub_k = std::lower_bound(beg, end, query_key_quantile, less_key);
 
         // fprintf(stdout, "key %Zu, offset %Zu, num_lines: %Zu\n",
         //         k, o, part);
@@ -193,7 +200,6 @@ size_t catenate_subchunks(LineIndex const& query_key_quantile,
         S = 0;
         for (INDEX_ITER kit = beg; kit != sub_k; ++kit)
         {
-            (*kit).start_offset = S + buffer_pos;
             S += (*kit).line_length;
         }
         fread(write_pointer, 1, S, tmp_fhs[o]);
@@ -222,7 +228,7 @@ size_t catenate_subchunks(LineIndex const& query_key_quantile,
     }
 
     delete [] subrange_iters;
-    return buffer_pos; // number of bytes written
+    return total_subrange_size;
 }
 
 
@@ -330,7 +336,7 @@ size_t set_start_offsets(std::vector<LineIndex>::iterator beg,
 
 
 // Preconditions: 
-// ok_index: sorted by (O, K)
+// ok_index: sorted by (O, K).  start_offsets globally set
 // tmp_fhs: opened and at beginning. hold K-sorted chunks consistent with ok_index
 // offset_quantiles define positions in ok_index corresponding to tmp_fhs chunks
 // Postconditions:
@@ -347,10 +353,13 @@ void write_final_merge(std::vector<LineIndex> const& ok_index,
 
     std::vector<LineIndex> key_quantile_sentinels;
     size_t * key_quantile_sizes = new size_t[num_chunks];
+    size_t * key_quantile_nlines = new size_t[num_chunks];
 
     // 2. Find N quantile key values in index.  does not change
     // order of line_index.
-    get_key_quantiles(ok_index, num_chunks, key_quantile_sizes, & key_quantile_sentinels);
+    get_key_quantiles(ok_index, num_chunks, key_quantile_sizes, 
+                      key_quantile_nlines,
+                      & key_quantile_sentinels);
 
     size_t kq_size_max = 
         *std::max_element(key_quantile_sizes, key_quantile_sizes + num_chunks);
@@ -376,7 +385,7 @@ void write_final_merge(std::vector<LineIndex> const& ok_index,
         std::vector<LineIndex> * ok_index_ptr = & buf1;
         std::vector<LineIndex> * k_index_ptr = & buf2;
 
-        size_t bytes_written = 
+        size_t lines_written = 
             catenate_subchunks(key_quantile_sentinels[k],
                                tmp_fhs,
                                & prev_sub_k,
@@ -384,8 +393,14 @@ void write_final_merge(std::vector<LineIndex> const& ok_index,
                                & chunk_buffer_in,
                                ok_index_ptr,
                                & subrange_sizes);
+
+        // now initialize start offsets
+        set_start_offsets((*ok_index_ptr).begin(), (*ok_index_ptr).end(), 0);
         
-        assert(bytes_written == key_quantile_sizes[k]);
+        assert(lines_written == key_quantile_nlines[k]);
+
+        size_t bytes_written;
+        //assert(bytes_written == key_quantile_sizes[k]);
 
         merge_ok_index(subrange_sizes, num_chunks, & ok_index_ptr, & k_index_ptr);
 
@@ -396,9 +411,9 @@ void write_final_merge(std::vector<LineIndex> const& ok_index,
         bytes_written = 
             write_new_ordering(chunk_buffer_in, k_index_ptr, chunk_buffer_out);
 
-        assert(bytes_written == key_quantile_sizes[k]);
-
+        //assert(bytes_written == key_quantile_sizes[k]);
         fwrite(chunk_buffer_out, 1, key_quantile_sizes[k], out_dat_fh);
+        fflush(out_dat_fh);
 
         if (out_ind_fh != NULL)
         {
@@ -409,6 +424,7 @@ void write_final_merge(std::vector<LineIndex> const& ok_index,
                         (*i).index, (*i).start_offset + chunk_offset, (*i).line_length);
             }
         }
+        fflush(out_ind_fh);
 
         chunk_offset += bytes_written;
 
@@ -419,13 +435,24 @@ void write_final_merge(std::vector<LineIndex> const& ok_index,
     delete [] chunk_buffer_in;
     delete [] chunk_buffer_out;
     delete [] key_quantile_sizes;
+    delete [] key_quantile_nlines;
     delete [] subrange_sizes;
 
 }
 
 
-//what does this do?  
+/*
+There is a gotcha in using nth_element.  The postcondition states:
 
+"There exists no iterator i in the range [first, nth) such that *nth <
+*i, and there exists no iterator j in the range [nth + 1, last) such
+that *j < *nth."
+
+But, if [first, end) happens to have two identical elements, which
+would occupy positions nth and (n+1)th, then it is unspecified which
+of the two will be assigned to nth.
+
+ */
 std::vector<INDEX_ITER> 
 get_quantiles(std::vector<LineIndex> * line_index,
               bool (less_fcn)(LineIndex const&, LineIndex const&),

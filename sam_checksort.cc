@@ -76,42 +76,31 @@ int main_sam_checksort(int argc, char ** argv)
     sam_order.AddHeaderContigStats(header_buf);
     delete [] header_buf;
 
-    SamLine::SetGlobalFlags(qname_fmt, "", "", 0);
+    SamLine::SetGlobalFlags(qname_fmt, "", "", 0, false);
 
     SetToFirstDataLine(&sorted_sam_fh);
 
-    size_t const max_mem = 1024l * 1024l * 1024l;
-    size_t const max_line = 4096;
+    size_t const chunk_size = 1024l * 1024l * 1024l;
 
-    char * chunk_buffer_in = new char[max_mem];
-
-    gzFile sorted_sam_zfh = gzopen(sorted_sam_file, "r");
-    std::vector<size_t> chunk_lengths = 
-        FileUtils::ChunkLengths(sorted_sam_zfh, max_mem, max_line);
-    gzclose(sorted_sam_zfh);
+    char * chunk_buffer_in = new char[chunk_size + 1];
 
     bool is_sorted = true; // innocent until proven guilty
     size_t total_lines = 0;
     size_t nbytes_unused = 0;
     size_t nbytes_read = 0;
     char * last_fragment;
-
-    //includes the newline
-    size_t last_line_length = 0;
+    char * read_pointer = chunk_buffer_in;
 
     std::vector<char *> samlines;
 
-    for (size_t c = 0; c != chunk_lengths.size(); ++c)
+    while (! feof(sorted_sam_fh))
     {
-        nbytes_read = fread(chunk_buffer_in, 1, chunk_lengths[c], sorted_sam_fh);
+        nbytes_read = fread(read_pointer, 1, chunk_size - nbytes_unused, sorted_sam_fh);
         
-        chunk_buffer_in[nbytes_read] = '\0';
+        read_pointer[nbytes_read] = '\0';
 
         samlines = FileUtils::find_complete_lines_nullify(chunk_buffer_in, & last_fragment);
 
-        nbytes_unused = strlen(last_fragment);
-
-        assert(nbytes_unused == 0);
 
         partial_index_aux paux(&sam_order);
 
@@ -149,15 +138,11 @@ int main_sam_checksort(int argc, char ** argv)
         }
         delete [] line_index_chunk;
         total_lines += samlines.size();
-        
-        // because we now have to add in a newline
-        last_line_length = strlen(samlines.back()) + 1;
 
-        //re-read last line (plus newline)
-        if (last_line_length > 0)
-        {
-            fseek(sorted_sam_fh, -1 * static_cast<off_t>(last_line_length), SEEK_CUR);
-        }
+        nbytes_unused = strlen(last_fragment);
+        memmove(chunk_buffer_in, last_fragment, nbytes_unused);
+        read_pointer = chunk_buffer_in + nbytes_unused;
+        
     }
     
     delete [] chunk_buffer_in;

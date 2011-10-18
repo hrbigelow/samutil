@@ -107,7 +107,7 @@ int main_sam_truncate(int argc, char ** argv)
         if (! SamLine::initialized && ! sam_lines.empty())
         {
             char const* dummy_read_layout = "y"; // merely to tell SamLine to parse traditional SAM.
-            SamLine::SetGlobalFlags(QNAMEFormat(sam_lines[0]), dummy_read_layout, "", 0);
+            SamLine::SetGlobalFlags(QNAMEFormat(sam_lines[0]), dummy_read_layout, "", 0, false);
         }
 
         // do not use the last line. it is incomplete.

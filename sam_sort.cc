@@ -49,6 +49,7 @@ int sam_sort_usage(size_t mdef)
             "-u  FLAG      (unique) if present, omit printing of all but one duplicate lines. [false]\n"
             "-h  STRING    optional sam header if alignment.sam header lacks SQ fields.\n"
             "              If provided, any header lines in alignment.sam will be ignored.\n"
+            "-g  STRING    optional transcript gtf file.  Required iff sort order is 'PROJALIGN'.\n"
             "-C  STRING    work in the directory named here [.]\n"
             "-T  STRING    path/and/prefix of temp files [name of output file]\n\n",
             mdef);
@@ -57,6 +58,7 @@ int sam_sort_usage(size_t mdef)
             "sort_order must be one of:\n"
             "FRAGMENT: sort by read id / pair flag (uniquely identifies the physical fragment)\n"
             "ALIGN: sort by alignment position\n"
+            "PROJALIGN: sort by genome-projected alignment position.  Requires -g flag\n"
             "GUIDE: sort by read-id encoded guide alignment position\n"
             "MIN_ALIGN_GUIDE: sort by the minimum of ALIGN or GUIDE\n\n");
 
@@ -79,8 +81,10 @@ int main_sam_sort(int argc, char ** argv)
 
     char const* tmp_file_prefix = NULL;
 
+    char const* gtf_file = NULL;
+
     char c;
-    while ((c = getopt(argc, argv, "m:t:uh:C:T:")) >= 0)
+    while ((c = getopt(argc, argv, "m:t:uh:g:C:T:")) >= 0)
     {
         switch(c)
         {
@@ -88,6 +92,7 @@ int main_sam_sort(int argc, char ** argv)
         case 't': num_threads = static_cast<size_t>(atof(optarg)); break;
         case 'u': filter_duplicates = true; break;
         case 'h': sam_header_file = optarg; break;
+        case 'g': gtf_file = optarg; break;
         case 'C': working_dir = optarg; break;
         case 'T': tmp_file_prefix = optarg; break;
         default: return sam_sort_usage(max_mem_def); break;
@@ -127,6 +132,19 @@ int main_sam_sort(int argc, char ** argv)
     FILE * used_header_fh = (sam_header_fh != NULL) ? sam_header_fh : alignment_sam_fh;
 
     SamOrder sam_order(SAM_RID, sort_type);
+    if (strcmp(sort_type, "PROJALIGN") == 0)
+    {
+        if (gtf_file == NULL)
+        {
+            fprintf(stderr, "Error: Sort type given as 'PROJALIGN', but "
+                    "no -g option (gtf file) provided\n");
+            exit(1);
+        }
+        else
+        {
+            sam_order.InitProjection(gtf_file);
+        }
+    }
 
     char * header_buf = ReadAllocSAMHeader(used_header_fh);
     size_t header_length = strlen(header_buf);
@@ -258,6 +276,14 @@ int main_sam_sort(int argc, char ** argv)
             process_chunk(sam_lines, chunk_buffer_in, chunk_buffer_out, 
                           sam_order, used_out_fh, & line_index);
 
+        // now, line_index is in num_chunks pieces, each corresponding
+        // to a key-sorted temp file. Each chunk is just a roughly
+        // equal portion of the original file and in no particular
+        // order. The 'start_offset' fields in line index correspond
+        // to original start offsets before key sorting but that are
+        // local to the chunk.  (That is, the first entry in each
+        // chunk has a start offset of zero.
+
         offset_quantile_sizes.push_back(chunk_info.first);
         chunk_num_lines.push_back(chunk_info.second);
 
@@ -281,6 +307,8 @@ int main_sam_sort(int argc, char ** argv)
     size_t num_chunks = tmp_fhs.empty() ? 1 : tmp_fhs.size();
 
     // 0. Determine N quantiles based on file offset, offset_quantiles
+    set_start_offsets(line_index.begin(), line_index.end(), 0);
+
     std::vector<INDEX_ITER> offset_quantiles;
     INDEX_ITER iit = line_index.begin();
     offset_quantiles.push_back(iit);

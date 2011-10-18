@@ -51,7 +51,14 @@ void
 get_key_quantiles(std::vector<LineIndex> const& line_index,
                   size_t num_chunks,
                   size_t * key_quantile_sizes,
+                  size_t * key_quantile_nlines,
                   std::vector<LineIndex> * key_quantile_sentinels);
+
+
+size_t
+set_start_offsets(std::vector<LineIndex>::iterator beg,
+                  std::vector<LineIndex>::iterator end,
+                  size_t initial_offset);
 
 
 void 

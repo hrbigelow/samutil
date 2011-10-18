@@ -150,6 +150,7 @@ find_complete_lines_aux(char * lines, bool nullify_newlines, char ** last_fragme
     size_t total_length = strlen(lines);
     if (total_length == 0)
     {
+        (*last_fragment) = lines;
         return line_starts;
     }
 

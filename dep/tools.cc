@@ -252,8 +252,9 @@ double * ParseNumbersFile(char const* numbers_file, size_t * num_numbers)
 //opens the file and returns file handle if file is not '/dev/null'
 FILE * open_if_present(char const* file, char const* mode)
 {
-    if (strcmp(file, "/dev/null") == 0 ||
-        strcmp(file, "") == 0)
+    if (file == NULL
+        || strcmp(file, "/dev/null") == 0
+        || strcmp(file, "") == 0)
     {
         return NULL;
     }

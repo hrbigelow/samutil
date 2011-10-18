@@ -14,7 +14,7 @@ int sam_rejoin_usage(size_t mdef, size_t qdef,
 {
     fprintf(stderr,
             "\nUsage:\n\n"
-            "samutil rejoin [OPTIONS] seq.fqi seq.fqd input.rsam output.sam\n\n"
+            "samutil rejoin [OPTIONS] seq.fqi seq.fqd input.rsam output.sam [output.unmapped.fq]\n\n"
             "Options:\n\n"
             "-m     INT     number bytes of memory to use [%zu]\n"
             "-t     INT     number of threads to use [1]\n"
@@ -35,7 +35,10 @@ int sam_rejoin_usage(size_t mdef, size_t qdef,
             "       Q (q) means output only passing (failing) quality check (inverse of 'failed_quality_check' flag)\n"
             "       D (d) means output only non-duplicate (duplicate) entries (inverse of 'pcr_or_optical_duplicate' flag)\n"
             "       Missing letters denote that no filtering occurs on that field and both categories are output\n"
-            "\n"
+            "\n\n"
+            "       If present on command line, <output.unmapped.fq> is an intercalated fastq formatted\n"
+            "       file of all unmapped records. Entries do not have trailing /1, /2 etc, and entries\n"
+            "       are printed in intercalated fashion.  Use 'deal_fastq' to unmix them\n"
             ""
             , mdef, qdef, rdef, Sdef);
     return 1;
@@ -105,7 +108,7 @@ int main_sam_rejoin(int argc, char ** argv)
         }
     }
 
-    if (argc != optind + 4)
+    if ((argc != optind + 4) && (argc != optind + 5))
     {
         return sam_rejoin_usage(mdef, qdef, rdef, Sdef);
     }
@@ -117,6 +120,8 @@ int main_sam_rejoin(int argc, char ** argv)
     char * seq_data_file = argv[optind + 1];
     char * input_rsam_file = argv[optind + 2];
     char * output_sam_file = argv[optind + 3];
+    char * output_fastq_file = argc == optind + 5 ? argv[optind + 4] : NULL;
+
 
     int chdir_success = chdir(working_dir);
     if (chdir_success != 0)
@@ -129,10 +134,11 @@ int main_sam_rejoin(int argc, char ** argv)
     FILE * seq_data_fh = open_or_die(seq_data_file, "r", "Input seq data file");
     FILE * input_rsam_fh = open_or_die(input_rsam_file, "r", "Input rsam-formatted file");
     FILE * output_sam_fh = open_or_die(output_sam_file, "w", "Output sam-formatted file");
+    FILE * output_fastq_fh = open_if_present(output_fastq_file, "w");
 
     // assume we have rSAM format.  By definition, it requires
     // 'SAM_NUMERIC' and empty expected layout.
-    SamLine::SetGlobalFlags(SAM_NUMERIC, "", "", 0);
+    SamLine::SetGlobalFlags(SAM_NUMERIC, "", "", 0, false);
 
     size_t index, start_offset;
     int line_length;
@@ -177,6 +183,7 @@ int main_sam_rejoin(int argc, char ** argv)
     std::vector<SamLine *>::iterator end = rsam_records.end();
 
     std::vector<char *> sam_strings;
+    std::vector<char const*> fqd_strings;
 
     std::vector<char *> sam_lines;
     size_t nbytes_read, nbytes_unused = 0;
@@ -303,6 +310,31 @@ int main_sam_rejoin(int argc, char ** argv)
                                       sam_strings.begin() + beg_elem,
                                       rsb);
 
+            unmapped_rsam_to_fastq usb(seq_buffer, data_buffer_offset);
+
+            if (output_fastq_fh != NULL)
+            {
+                fqd_strings.resize(std::distance(beg, end));
+                __gnu_parallel::transform(beg, end,
+                                          index_iters.begin(),
+                                          fqd_strings.begin(),
+                                          usb);
+
+                std::vector<char const*>::iterator sit;
+                for (sit = fqd_strings.begin(); sit != fqd_strings.end(); ++sit)
+                {
+                    char const* fqd_string = *sit;
+                    if (fqd_string != NULL)
+                    {
+                        print_fqd_as_fastq(fqd_string, output_fastq_fh);
+                        // do not delete fastq string -- it's owned by the index
+                    }
+                }
+                fflush(output_fastq_fh);
+            }
+
+            __gnu_parallel::for_each(beg, end, delete_samline());
+            
             beg = end;
         }
 
@@ -322,6 +354,8 @@ int main_sam_rejoin(int argc, char ** argv)
                     delete sam_string;
                 }
             }
+            fflush(output_sam_fh);
+
             rsam_records.clear();
             beg = rsam_records.end();
             end = rsam_records.end();
@@ -332,6 +366,7 @@ int main_sam_rejoin(int argc, char ** argv)
     fclose(seq_data_fh);
     fclose(input_rsam_fh);
     fclose(output_sam_fh);
+    close_if_present(output_fastq_fh);
 
     delete [] rsam_buffer;
     delete [] seq_buffer;

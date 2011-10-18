@@ -398,19 +398,19 @@ size_t CountCorrectBases(SamLine const* samline,
 }
 
 
-score_rsam_alloc_binary::score_rsam_alloc_binary(FragmentScore const* _fragment_scoring) : 
-    fragment_scoring(_fragment_scoring) { }
+score_rsam_alloc_binary::score_rsam_alloc_binary(FragmentScore const* _fragment_scoring,
+                                                 size_t _arll) : 
+    fragment_scoring(_fragment_scoring),
+    average_rsam_line_length(_arll) { }
 
 
-char * 
+std::vector<char> *
 score_rsam_alloc_binary::operator()(std::pair<SAMIT, SAMIT> const& range,
                                     SamBuffer * sam_buffer)
 {
     if (range.first == range.second)
     {
-        char * dummy = new char[1];
-        dummy[0] = '\0';
-        return dummy;
+        return new std::vector<char>();
     }
 
     SAMIT cur;
@@ -429,9 +429,6 @@ score_rsam_alloc_binary::operator()(std::pair<SAMIT, SAMIT> const& range,
         fprintf(stderr, "Error: at a fragment boundary but there are still incomplete SAM entries\n");
         exit(1);
     }
-    size_t num_entries = sam_buffer->unique_entries.size();
-    char * out_buffer = new char[num_entries * MAX_RSAM_LINE_LENGTH];
-
     // score them.
     SINGLE_READ_SET::iterator beg, sit, end;
     beg = sam_buffer->unique_entries.begin();
@@ -447,17 +444,22 @@ score_rsam_alloc_binary::operator()(std::pair<SAMIT, SAMIT> const& range,
     }
     set_score_fields(beg, end, *this->fragment_scoring);
 
-    char * write_pointer = out_buffer;
+    size_t num_entries = sam_buffer->unique_entries.size();
+    std::vector<char> * result = new std::vector<char>;
+    result->reserve(num_entries * this->average_rsam_line_length);
+    
+    char tmp_buffer[1024];
+
     for (sit = sam_buffer->unique_entries.begin(); 
          sit != sam_buffer->unique_entries.end(); ++sit)
     {
-        (*sit)->sprint(write_pointer);
-        write_pointer += strlen(write_pointer);
+        (*sit)->sprint(tmp_buffer);
         delete (*sit);
+        result->insert(result->end(), tmp_buffer, tmp_buffer + strlen(tmp_buffer));
     }
     sam_buffer->unique_entries.clear();
 
-    return out_buffer;
+    return result;
 }
 
 

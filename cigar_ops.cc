@@ -473,15 +473,6 @@ Cigar::Condense(std::vector<block_offsets> const& blocks,
             op_remain -= min_length;
         }
 
-        if (block_remain == 0)
-        {
-            if (++cur_block == blocks.end())
-            {
-                break;
-            }
-            jump_remain = (*cur_block).jump_length;
-            block_remain = (*cur_block).block_length;
-        }
         if (op_remain == 0)
         {
             if (++cur_op == cigar.end())
@@ -489,6 +480,16 @@ Cigar::Condense(std::vector<block_offsets> const& blocks,
                 break;
             }
             op_remain = (*cur_op).length;
+        }
+
+        if (jump_remain == 0 && block_remain == 0)
+        {
+            if (++cur_block == blocks.end())
+            {
+                break;
+            }
+            jump_remain = (*cur_block).jump_length;
+            block_remain = (*cur_block).block_length;
         }
     }
     if (cur_op != cigar.end())
@@ -1033,12 +1034,33 @@ void Cigar::Trim(Cigar::CIGAR_VEC const& source,
             CIGAR_ITER * trimmed_start,
             CIGAR_ITER * trimmed_end)
 {
+    return 
+        Cigar::Trim(source.begin(), source.end(), retain_top_extent, 
+                    trimmed_start, trimmed_end);
+}
 
-    Cigar::CIGAR_VEC::const_iterator left = source.begin();
-    Cigar::CIGAR_VEC::const_reverse_iterator right = source.rbegin();
+
+Cigar::CIGAR_VEC Cigar::Trim(Cigar::CIGAR_VEC const& source, 
+                             bool retain_top_extent)
+{
+    Cigar::CIGAR_VEC::const_iterator left, right;
+    Trim(source, retain_top_extent, &left, &right);
+    return Cigar::CIGAR_VEC(left, right);
+}
+
+
+void Cigar::Trim(CIGAR_ITER const& source_start,
+                 CIGAR_ITER const& source_end,
+                 bool retain_top_extent,
+                 CIGAR_ITER * trimmed_start,
+                 CIGAR_ITER * trimmed_end)
+{
+
+    Cigar::CIGAR_VEC::const_iterator left = source_start;
+    Cigar::CIGAR_VEC::const_reverse_iterator right(source_end);
     
 
-    while (left != source.end()
+    while (left != source_end
            && Cigar::UnitLength(*left, retain_top_extent) == 0)
     {
         ++left;
@@ -1054,14 +1076,6 @@ void Cigar::Trim(Cigar::CIGAR_VEC const& source,
     *trimmed_end = right.base();
 }
 
-
-Cigar::CIGAR_VEC Cigar::Trim(Cigar::CIGAR_VEC const& source, 
-                             bool retain_top_extent)
-{
-    Cigar::CIGAR_VEC::const_iterator left, right;
-    Trim(source, retain_top_extent, &left, &right);
-    return Cigar::CIGAR_VEC(left, right);
-}
 
 
 /*

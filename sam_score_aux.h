@@ -101,9 +101,13 @@ typedef SAMVEC::iterator SAMIT;
 struct score_rsam_alloc_binary
 {
     FragmentScore const* fragment_scoring;
-    score_rsam_alloc_binary(FragmentScore const* _fragment_scoring);
-    char * operator()(std::pair<SAMIT, SAMIT> const& range,
-                      SamBuffer * sam_buffer);
+    size_t average_rsam_line_length;
+
+    score_rsam_alloc_binary(FragmentScore const* _fragment_scoring,
+                            size_t _arll);
+
+    std::vector<char> * operator()(std::pair<SAMIT, SAMIT> const& range, 
+                                   SamBuffer * sam_buffer);
 };
 
 

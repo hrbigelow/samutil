@@ -4,6 +4,7 @@
 #include "sam_helper.h"
 
 #include <vector>
+#include <unordered_map>
 
 struct block_offsets
 {
@@ -35,8 +36,13 @@ class SequenceProjection
                        char _strand_char,
                        std::vector<block_offsets> const& blocks);
 
+    SequenceProjection(SequenceProjection const& sp);
+
     bool operator<(SequenceProjection const& b) const;
 };
+
+typedef std::unordered_map<char const*, SequenceProjection, to_integer, eqstr> PROJECTIONS;
+
 
 bool ApplySequenceProjection(SequenceProjection const& projection,
                              SamLine * samline,

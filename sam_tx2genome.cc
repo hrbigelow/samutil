@@ -55,10 +55,17 @@ int tx2genome_usage(size_t mdef)
             "SAM Records successfully projected will have the 'XP:A:T' tag added.\n"
             "reads.vs.tx.rsam must be sorted by [rname, read_pair_flag, pos].\n"
             "\n"
-            "reads.vs.tx.asort.sam must be sorted by alignment position, with contigs (transcript)\n"
-            "ordered by projection order according to genomic contig order as specified.\n"
-            "expected read layout is a sequenced of 'f' and 'r' denoting whether each read is\n"
-            "on the forward or reverse strand of the template molecule.\n",
+            "reads.vs.tx.asort.sam must be sorted by alignment position, with\n"
+            "contigs (transcripts) ordered by ascending start position on the\n"
+            "genome after they are projected. The projection order is\n"
+            "determined both by the order of genomic contigs (chromosomes) in\n"
+            "'genome.samheader' and by the projections implied by\n"
+            "'transcripts.gtf'.\n"
+            "\n"
+            "expected read layout is a sequenced of 'f' and 'r' denoting\n"
+            "whether each read is on the forward or reverse strand of the\n"
+            "template molecule.\n"
+            "\n",
             mdef
             );
     return 1;
@@ -175,6 +182,9 @@ int main_tx2genome(int argc, char ** argv)
 
     // number of bytes loaded that haven't been purged
     size_t cumul_nbytes_read = 0;
+    size_t num_records_processed = 0;
+    size_t num_records_discarded = 0;
+    size_t num_records_retained = 0;
 
     while (! feof(input_tx_sam_fh))
     {
@@ -196,11 +206,13 @@ int main_tx2genome(int argc, char ** argv)
         // 2. find complete newlines, recycle unused.
         sam_lines = FileUtils::find_complete_lines_nullify(chunk_buffer_in, & last_fragment);
 
+        num_records_processed += sam_lines.size();
+
         if (! SamLine::initialized && ! sam_lines.empty())
         {
             // initialize tx_sam_order, genome_sam_order, SamLine, tx_to_genome, tx_projections
             SAM_QNAME_FORMAT tx_qname_fmt = QNAMEFormat(sam_lines[0]);
-            SamLine::SetGlobalFlags(tx_qname_fmt, "", "", 0);
+            SamLine::SetGlobalFlags(tx_qname_fmt, "", "", 0, false);
             tx_sam_order.InitFromChoice(tx_qname_fmt);
             genome_sam_order.InitFromChoice(tx_qname_fmt);
 
@@ -221,19 +233,10 @@ int main_tx2genome(int argc, char ** argv)
                                  set_flattened_pos_unary(& tx_sam_order));
 
         //compute average printed line length of first 100 records
-        size_t average_rsam_line_length = 200; // reasonable value in absence of any other information
-        size_t n_sampled_records = std::min(100UL, sam_records.size());
-        char write_buffer[1024];
-        size_t sum_of_lengths = 0;
-        for (size_t r = 0; r != n_sampled_records; ++r)
-        {
-            sam_records[r]->sprint(write_buffer);
-            sum_of_lengths += strlen(write_buffer);
-        }
-        if (n_sampled_records > 0)
-        {
-            average_rsam_line_length = sum_of_lengths / n_sampled_records;
-        }
+        size_t n_sampled_records = 1000;
+        size_t average_rsam_line_length = 
+            average_line_length(sam_records.begin(), sam_records.end(), n_sampled_records);
+
 
         // 4. make chunks at non-overlapping transcripts.
         size_t min_range = 1000; // arbitrarily set the single work unit size to 1000
@@ -250,6 +253,9 @@ int main_tx2genome(int argc, char ** argv)
         CONTIG_OFFSETS::const_iterator dummy = 
             tx_sam_order.contig_offsets.begin();
 
+        // traverse 'sam_records'. find all ranges [start, end) that
+        // are non-overlapping and thus safe to process individually
+        // in SAM buffers.
         while (cur != sam_records.end())
         {
             pre = cur;
@@ -269,9 +275,7 @@ int main_tx2genome(int argc, char ** argv)
                 ? tx_to_genome.end()
                 : (*p).second;
             
-            // find the next valid bound projection iterator if it exists
             cur_proj_iter = non_overlapping_range(cur_proj_iter, tx_to_genome.end());
-            
             // compute the lowest flattened position for this valid bound
 
             if (cur_proj_iter == tx_to_genome.end())
@@ -280,6 +284,9 @@ int main_tx2genome(int argc, char ** argv)
             }
             else
             {
+                // advance 'cur' until its flattened position is not
+                // less than this valid non-overlapping breakpoint.
+                // not finding such a bound would imply that 
                 size_t flat_lowbound = 
                     flattened_position_aux((*cur_proj_iter).source_dna.c_str(),
                                            0,
@@ -287,13 +294,14 @@ int main_tx2genome(int argc, char ** argv)
                                            & dummy);
                                            
                 for ( ; cur != sam_records.end()
-                          && (*cur)->flattened_pos < flat_lowbound; ++cur) { }
-
+                          && (*cur)->flattened_pos < flat_lowbound; ++cur) 
+                { 
+                }
+                
                 assert(cur == sam_records.end() || (*cur)->flattened_pos >= flat_lowbound);
             }
             // postcondition: cur represents the valid bound
             // corresponding to the projection bound.
-
 
             if (cur != sam_records.end() || feof(input_tx_sam_fh))
             {
@@ -309,16 +317,32 @@ int main_tx2genome(int argc, char ** argv)
         // bound then)
         assert(feof(input_tx_sam_fh) || n_records_left > 0);
 
-        // Where did we account for unused SAM records??? This is n_records_left
+        // at this point, recover the partially read line back to the
+        // start of the buffer.  sam_records is not affected by this.
+        nbytes_unused = strlen(last_fragment);
+        memmove(chunk_buffer_in, last_fragment, nbytes_unused);
+        read_pointer = chunk_buffer_in + nbytes_unused;
 
+        // Where did we account for unused SAM records??? This is n_records_left
         if(ranges.empty())
         {
+            assert(pre == sam_records.begin());
+            // we need to load more records.
             if (cumul_nbytes_read + chunk_size > max_mem)
             {
-                fprintf(stderr, "Error: Run cannot be completed with allotted memory: %zu\n"
-                        "due to too many entries on overlapping genes. "
+                char first[1024];
+                char last[1024];
+                (*sam_records.begin())->sprint(first);
+                (*sam_records.rbegin())->sprint(last);
+                fprintf(stderr, 
+                        "Error: Run cannot be completed with allotted memory %zu bytes\n"
+                        "due to too a clump of too many entries on overlapping genes.\n"
+                        "First entry in clump: %s"
+                        "Last entry in clump: %s"
+                        "Number entries in clump: %zu\n"
                         "Please run with more memory.\n",
-                        max_mem);
+                        max_mem,
+                        first, last, sam_records.size());
                 exit(1);
             }
             else
@@ -331,7 +355,7 @@ int main_tx2genome(int argc, char ** argv)
         psettings.transform_minimal_n = 2;
         __gnu_parallel::_Settings::set(psettings);
 
-        std::vector<std::vector<char> *> projected_sam_records(ranges.size());
+        std::vector<pdp_result> projected_sam_records(ranges.size());
 
         project_dedup_print pdp_aux(&tx_projections,
                                     &tx_sam_order,
@@ -347,17 +371,16 @@ int main_tx2genome(int argc, char ** argv)
         // 6. delete allocated vectors
         for (size_t r = 0; r != ranges.size(); ++r)
         {
-            fwrite(&(*projected_sam_records[r])[0], 1, 
-                   projected_sam_records[r]->size(), output_genome_sam_fh);
+            fwrite(&(*projected_sam_records[r].lines)[0], 1, 
+                   projected_sam_records[r].lines->size(), 
+                   output_genome_sam_fh);
 
-            delete projected_sam_records[r];
+            delete projected_sam_records[r].lines;
+            num_records_retained += projected_sam_records[r].num_records_retained;
+            num_records_discarded += projected_sam_records[r].num_records_discarded;
         }
         // now we want to copy the range [pre, end) into sam_records
         sam_records.swap(std::vector<SamLine *>(pre, sam_records.end()));
-
-        nbytes_unused = strlen(last_fragment);
-        memmove(chunk_buffer_in, last_fragment, nbytes_unused);
-        read_pointer = chunk_buffer_in + nbytes_unused;
 
         cumul_nbytes_read = 0;
     }
@@ -371,7 +394,13 @@ int main_tx2genome(int argc, char ** argv)
     {
         delete (*tn).first;
     }
-
+    fprintf(stderr, 
+            "Records processed: %zu\n"
+            "Records discarded: %zu\n"
+            "Records retained : %zu\n",
+            num_records_processed,
+            num_records_discarded,
+            num_records_retained);
     
     return 0;
 }
@@ -429,83 +458,3 @@ PROJ_MAP LoadProjectionMap(std::set<SequenceProjection, less_seq_projection> con
 
     return tx_projections;
 }
-
-
-//check that the genome contig order implied by the combination of
-//transcript projections and transcript contig order is the same as
-//that given by genome_contig_order
-bool CheckProjectionOrder(CONTIG_OFFSETS const& genome_contig_order,
-                          CONTIG_OFFSETS const& tx_contig_order,
-                          std::set<SequenceProjection> const& tx_to_genome)
-{
-    //1. Compute a flattened genome coordinate for each transcript
-    std::multimap<size_t, char const*> tx_implied_genomic_offsets;
-    std::multimap<size_t, char const*>::const_iterator tit;
-
-    std::set<SequenceProjection>::const_iterator pit;
-    OFFSETS_ITER oit;
-    for (pit = tx_to_genome.begin(); pit != tx_to_genome.end(); ++pit)
-    {
-        char const* tx_contig = (*pit).source_dna.c_str();
-        char const* tx_proj_contig = (*pit).target_dna.c_str();
-        oit = genome_contig_order.find(tx_proj_contig);
-        if (oit == genome_contig_order.end())
-        {
-            fprintf(stderr, "Error: CheckProjectionOrder: didn't find genome contig %s "
-                    "that was found in transcript-to-genome projection from gtf file\n",
-                    tx_proj_contig);
-            exit(1);
-        }
-        size_t genome_contig_offset = (*oit).second;
-        size_t tx_local_offset = (*pit).transformation[0].jump_length;
-
-        tx_implied_genomic_offsets.insert(std::make_pair(genome_contig_offset + tx_local_offset, tx_contig));
-    }
-
-    size_t last_implied_offset = SIZE_MAX;
-    size_t last_given_offset = 0;
-    char const* last_tx_contig = "";
-
-    //tx implied offsets are partially ordered.  given offsets are
-    //fully ordered.  here, we merely check that if a consecutive pair
-    //of contigs are implied strictly increasing, they are increasing
-    //by given offset as well. 
-    for (tit = tx_implied_genomic_offsets.begin(); tit != tx_implied_genomic_offsets.end(); ++tit)
-    {
-        size_t implied_offset = (*tit).first;
-        char const* tx_contig = (*tit).second;
-        oit = tx_contig_order.find(tx_contig);
-        if (oit == tx_contig_order.end())
-        {
-            fprintf(stderr, "Error: CheckProjectionOrder: didn't find transcript contig %s "
-                    "in given transcript ordering that was found in transcript-to-genome "
-                    "projection from gtf file\n",
-                    tx_contig);
-            exit(1);
-        }
-        size_t given_offset = (*oit).second;
-        if (last_implied_offset < implied_offset
-            && ! (last_given_offset < given_offset))
-        {
-            fprintf(stderr, "Error: CheckProjectionOrder: transcript contig ordering implied from "
-                    "gtf file and given genome contig ordering differs from "
-                    "given transcript ordering. Please re-order transcript contigs in SAM header\n"
-                    "Last contig: %s (%Zu implied offset) (%Zu given offset)\n"
-                    "Current ctg: %s (%Zu implied offset) (%Zu given offset)\n",
-                    last_tx_contig, last_implied_offset, last_given_offset, 
-                    tx_contig, implied_offset, given_offset);
-
-            return false;
-        }
-        else
-        {
-            last_implied_offset = implied_offset;
-            last_given_offset = given_offset;
-            last_tx_contig = tx_contig;
-        }
-    }
-    return true;
-}
-
-
-

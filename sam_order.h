@@ -29,6 +29,7 @@ class SamOrder
     SAM_QNAME_FORMAT InitFromID(char const* id);
 
     void InitFromChoice(SAM_QNAME_FORMAT qname_format);
+    void InitProjection(char const* gtf_file);
 
     bool Initialized() const;
 
@@ -39,6 +40,8 @@ class SamOrder
 
     std::map<std::string, size_t> contig_lengths;
     CONTIG_OFFSETS contig_offsets;
+
+    PROJECTIONS projections;
 
     bool (SamOrder::* less)(SamLine const& a, SamLine const& b) const;
     bool (SamOrder::* equal)(SamLine const& a, SamLine const& b) const;
@@ -84,6 +87,8 @@ class SamOrder
 
     size_t samline_position_min_align_guide(char const* samline) const;
     size_t samline_position_align(char const* samline) const;
+    size_t samline_projected_position_align(char const* samline) const;
+
     /* size_t samline_read_id(char const* samline) const; */
     size_t samline_fragment_id(char const* samline) const;
 

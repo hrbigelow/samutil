@@ -32,6 +32,7 @@ std::vector<block_offsets> InitFromMDString(char const* md_string)
             jump_length = 0;
             break;
         case 'D':
+        case 'N':
             //should really be 'jump_length = op_length'.  But, if we
             //encounter consecutive 'D' states, this will handle them
             //correctly.
@@ -60,6 +61,17 @@ SequenceProjection::SequenceProjection(char const* _species,
     transformation = _blocks;
     total_block_length = 0;
 }
+
+
+
+SequenceProjection::SequenceProjection(SequenceProjection const& sp) :
+    species(sp.species),
+    source_dna(sp.source_dna),
+    target_dna(sp.target_dna),
+    same_strand(sp.same_strand),
+    transformation(sp.transformation),
+    total_block_length(sp.total_block_length) { }
+
 
 
 //order by coordinates of 

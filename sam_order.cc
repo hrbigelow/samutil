@@ -1,6 +1,7 @@
 #include "sam_order.h"
 #include "sam_helper.h"
 #include "file_utils.h"
+#include "gtf.h"
 
 #include <set>
 #include <zlib.h>
@@ -53,6 +54,10 @@ SamOrder::SamOrder(SAM_ORDER _so, char const* _sort_type) :
     {
         this->sam_index = &SamOrder::samline_fragment_id;
     }
+    else if (strcmp(this->sort_type, "PROJALIGN") == 0)
+    {
+        this->sam_index = &SamOrder::samline_projected_position_align;
+    }
     else if (strcmp(this->sort_type, "NONE") == 0)
     {
         this->sam_index = NULL;
@@ -89,11 +94,13 @@ SamOrder::~SamOrder()
     }
     contig_offsets.clear();
 
-    // for (size_t k = 0; k != contig_offsets.size(); ++k)
-    // {
-    //     delete keys[k];
-    // }
-    // delete keys;
+    PROJECTIONS::const_iterator pit;
+    for (pit = this->projections.begin(); pit != this->projections.end(); ++pit)
+    {
+        delete (*pit).first;
+    }
+    this->projections.clear();
+
 }
 
 
@@ -158,7 +165,6 @@ SAM_QNAME_FORMAT QNAMEFormat(char const* sam_dataline)
 
     else if (sscanf(sam_dataline, "%*[^:]:%*[^:]:%[^:]:%i:%i:%i:%i", 
                     dum_string, dum, dum + 1, dum + 2, dum + 3) == 5)
-
     {
         qname_format = SAM_CASAVA18;
     }
@@ -199,6 +205,21 @@ void SamOrder::InitFromChoice(SAM_QNAME_FORMAT qname_format)
     }
 }
 
+
+void SamOrder::InitProjection(char const* gtf_file)
+{
+    char const* species = "dummy";
+    std::set<SequenceProjection> tx_to_genome = 
+        gtf_to_sequence_projection(gtf_file, species);
+
+    std::set<SequenceProjection>::const_iterator tgi;
+    for (tgi = tx_to_genome.begin(); tgi != tx_to_genome.end(); ++tgi)
+    {
+        char * transcript = new char[(*tgi).source_dna.size() + 1];
+        strcpy(transcript, (*tgi).source_dna.c_str());
+        this->projections.insert(std::make_pair(transcript, SequenceProjection(*tgi)));
+    }
+}
 
 bool SamOrder::Initialized() const
 {
@@ -437,7 +458,7 @@ void SamOrder::AddHeaderContigStats(char const* header)
             char contig_name[1000];
             
             size_t contig_length;
-            sscanf(line, "@SQ\tSN:%s\tLN:%zu", contig_name, &contig_length);
+            sscanf(line, "@SQ\tSN:%[^\t]\tLN:%zu", contig_name, &contig_length);
             this->contig_lengths[std::string(contig_name)] = contig_length;
 
             char * contig_name_copy = new char[strlen(contig_name) + 1];
@@ -490,10 +511,39 @@ size_t SamOrder::samline_position_align(char const* samline) const
 
     char contig[1024];
     size_t position;
-    sscanf(samline, "%*s\t%*u\t%s\t%zu", contig, &position);
+    sscanf(samline, "%*[^\t]\t%*u\t%[^\t]\t%zu", contig, &position);
 
     CONTIG_OFFSETS::const_iterator dummy;
     return flattened_position_aux(contig, position, this->contig_offsets, &dummy);
+}
+
+
+//produce index consistent with ordering [rname, pos] projected to genome
+size_t SamOrder::samline_projected_position_align(char const* samline) const
+{
+
+    char contig[1024];
+    size_t position;
+    size_t flat_pos;
+    CONTIG_OFFSETS::const_iterator dummy;
+
+    sscanf(samline, "%*[^\t]\t%*u\t%[^\t]\t%zu", contig, &position);
+
+    PROJECTIONS::const_iterator proj_iter = this->projections.find(contig);
+    if (proj_iter == this->projections.end())
+    {
+        // don't do any projection
+        flat_pos = flattened_position_aux(contig, position, this->contig_offsets, &dummy);
+    }
+    else
+    {
+        SequenceProjection const& proj = (*proj_iter).second;
+        flat_pos = flattened_position_aux(proj.target_dna.c_str(), 
+                                          proj.target_start_pos() + position, 
+                                          this->contig_offsets, &dummy);
+    }
+
+    return flat_pos;
 }
 
 
@@ -571,14 +621,23 @@ size_t SamOrder::samline_position_min_align_guide(char const* samline) const
 
     size_t flag_raw;
 
-    sscanf(samline, 
-           "%*[^:]:" // id field.  ignored
-           "read%i:%[^:]:%*c:%zu:%*[^:]:%*u"  //read chunk
-           "read%i:%[^:]:%*c:%zu:%*[^:]:%*u\t" //second read chunk
-           "%zu\t%s\t%zu", //part of alignment
-           &read_num_left, guide_chrom_left, &guide_pos_left, 
-           &read_num_right, guide_chrom_right, &guide_pos_right,
-           &flag_raw, align_chrom, &align_pos);
+    int nfields = 
+        sscanf(samline, 
+               "%*[^:]:" // id field.  ignored
+               "read%i:%[^:]:%*c:%zu:%*[^:]:%*u:"  //read chunk
+               "read%i:%[^:]:%*c:%zu:%*[^:]:%*u:" //second read chunk
+               "fragment_size:%*i\t"
+               "%zu\t%[^\t]\t%zu", //part of alignment
+               &read_num_left, guide_chrom_left, &guide_pos_left, 
+               &read_num_right, guide_chrom_right, &guide_pos_right,
+               &flag_raw, align_chrom, &align_pos);
+    
+    if (nfields != 9)
+    {
+        fprintf(stderr, "SamOrder::samline_position_min_align_guide:\n"
+                "Bad ID format for this sort type:\n%s\n", samline);
+        exit(1);
+    }
 
     flag.set_raw(flag_raw);
 

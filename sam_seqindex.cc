@@ -286,6 +286,8 @@ int main_sam_seqindex(int argc, char ** argv)
     // describe the partitioning.
     size_t num_sort_chunks = chunk_num_lines.size();
 
+    set_start_offsets(line_index.begin(), line_index.end(), 0);
+
     std::vector<INDEX_ITER> offset_quantiles;
     INDEX_ITER iit = line_index.begin();
     offset_quantiles.push_back(iit);

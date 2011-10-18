@@ -174,6 +174,13 @@ namespace Cigar
               bool retain_top_extent,
               CIGAR_ITER * trimmed_start,
               CIGAR_ITER * trimmed_end);
+
+
+    void Trim(CIGAR_ITER const& source_start,
+              CIGAR_ITER const& source_end,
+              bool retain_top_extent,
+              CIGAR_ITER * trimmed_start,
+              CIGAR_ITER * trimmed_end);
     
 
     CIGAR_VEC Trim(Cigar::CIGAR_VEC const& source, bool retain_top_extent);

@@ -8,12 +8,7 @@
 #include <cassert>
 #include <map>
 #include <functional>
-
-#ifdef __GXX_EXPERIMENTAL_CXX0X__
 #include <unordered_map>
-#else
-#include <tr1/unordered_map>
-#endif
 
 /*
   Policy: Assume either a SAM or rSAM format when parsing, according
@@ -54,7 +49,6 @@ struct eqstr
 };
 
 
-#ifdef __GXX_EXPERIMENTAL_CXX0X__
 typedef std::hash<std::string> STRING_HASH;
 struct to_integer : public STRING_HASH
 {
@@ -62,22 +56,10 @@ struct to_integer : public STRING_HASH
 };
 typedef std::unordered_map<char const*, char, to_integer, eqstr> CONTIG_SPACE;
 typedef std::unordered_map<char const*, size_t, to_integer, eqstr> CONTIG_OFFSETS;
-#else
-typedef std::tr1::hash<std::string> STRING_HASH;
-struct to_integer : public STRING_HASH
-{
-    size_t operator()(char const* k) const;
-};
-typedef std::tr1::unordered_map<char const*, char, to_integer, eqstr> CONTIG_SPACE;
-typedef std::tr1::unordered_map<char const*, size_t, to_integer, eqstr> CONTIG_OFFSETS;
-#endif
+
 
 typedef CONTIG_OFFSETS::const_iterator OFFSETS_ITER;
 
-
-
-// needed for buffer allocation estimate
-size_t const MAX_RSAM_LINE_LENGTH = 20 + 20 + 20 + 12 + 3 + 100 + 20 + 12 + 300;
 
 // The Not Applicable Read Layout used when parsing 
 #define ReadLayoutNA "-"
@@ -208,6 +190,7 @@ public:
     char * tag_string;
     size_t flattened_pos; //position along a virtual concatenated meta-contig.
     char * cigar_compared; // if not NULL, used for positional comparison
+    char * qname_string;
 
     SamLine(SAM_PARSE _parse_flag,
             char const* _qname, size_t _flag, 
@@ -232,7 +215,8 @@ public:
     static void SetGlobalFlags(SAM_QNAME_FORMAT _qname_format,
                                char const* _expected_layout,
                                char const* _raw_score_tag,
-                               size_t _worst_fragment_score);
+                               size_t _worst_fragment_score,
+                               bool _retain_qname_string);
 
     static SAM_QNAME_FORMAT sam_qname_format;
     static char expected_read_layout[256];
@@ -241,6 +225,7 @@ public:
     static char raw_score_tag[3];
     static size_t worst_fragment_score;
     static bool initialized;
+    static bool retain_qname_string;
 
     static size_t (* parse_fragment_id)(char const* qname);
 

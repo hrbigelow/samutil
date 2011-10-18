@@ -8,9 +8,9 @@ SOURCES = $(shell find $(srcdir) -name "*.cc")
 # test/matrix_test samutil_check sam_eval
 
 BIN = fastq2fastq make_sq_header make_dnas_file fasta2cisfasta	\
-	 shuffle_paired_fastq
+	 shuffle_paired_fastq fastq_type
 
-BIN += samutil
+BIN += samutil align_eval deal_fastq
 # BIN += sim
 # BIN += pretty_plot
 # BIN += gtf_annotate_regions
@@ -55,6 +55,12 @@ fastq2fastq_OBJS = $(addprefix $(OBJDIR)/, fastq2fastq.o fastq_tools.o)
 fastq2fastq: $(fastq2fastq_OBJS)
 	$(CXX) $(CXXFLAGS) -o $@ $^
 
+
+fastq_type_OBJS = $(addprefix $(OBJDIR)/, fastq_type.o fastq_tools.o)
+fastq_type: $(fastq_type_OBJS)
+	$(CXX) $(CXXFLAGS) -o $@ $^
+
+
 file_bytes_OBJS = $(addprefix $(OBJDIR)/, file_bytes.o file_utils.o)
 file_bytes: $(file_bytes_OBJS)
 	$(CXX) $(CXXFLAGS) -lz -o $@ $^
@@ -64,6 +70,12 @@ shuffle_paired_fastq_OBJS = $(addprefix $(OBJDIR)/, shuffle_paired_fastq.o)
 shuffle_paired_fastq: $(shuffle_paired_fastq_OBJS)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(LDFLAGS) -o $@ $^
 
+
+deal_fastq_OBJS = $(addprefix $(OBJDIR)/, deal_fastq.o file_utils.o	\
+dep/tools.o)
+
+deal_fastq: $(deal_fastq_OBJS)
+	$(CXX) $(CXXFLAGS) -lz -o $@ $^
 
 #filter_sam_by_score: filter_sam_by_score.o
 #	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^
@@ -121,10 +133,10 @@ pretty_plot: $(pretty_plot_OBJS)
 #	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^
 
 
-align_eval_OBJS = $(addprefix $(OBJDIR)/, align_eval.o		\
-	align_eval_raw.o align_eval_aux.o align_eval_mask.o		\
-	align_eval_coverage.o align_eval_stats.o cigar_ops.o	\
-	seq_projection.o file_utils.o sam_helper.o sam_order.o	\
+align_eval_OBJS = $(addprefix $(OBJDIR)/, align_eval.o				\
+	align_eval_raw.o align_eval_aux.o align_eval_mask.o				\
+	align_eval_coverage.o align_eval_stats.o cigar_ops.o			\
+	seq_projection.o file_utils.o sam_helper.o sam_order.o gtf.o	\
 	dep/tools.o)
 
 align_eval: $(align_eval_OBJS)

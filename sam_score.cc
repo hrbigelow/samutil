@@ -7,6 +7,7 @@
 #include <getopt.h>
 
 #include "sam_score_aux.h"
+#include "sam_aux.h"
 #include "sam_buffer.h"
 #include "dep/tools.h"
 #include "file_utils.h"
@@ -138,7 +139,7 @@ int main_score(int argc, char ** argv)
     
     
     // at any one point, we will have:  a chunk_buffer, a buffer of converted chunks,
-    size_t chunk_size = max_mem / 2;
+    size_t chunk_size = max_mem / 9;
     char * chunk_buffer_in = new char[chunk_size + 1];
     char * read_pointer = chunk_buffer_in;
 
@@ -157,7 +158,8 @@ int main_score(int argc, char ** argv)
             SamLine::SetGlobalFlags(QNAMEFormat(sam_lines[0]), 
                                     expected_read_layout,
                                     fragment_scoring.raw_score_tag,
-                                    fragment_scoring.worst_fragment_score);
+                                    fragment_scoring.worst_fragment_score,
+                                    false);
         }
         
         std::vector<SamLine *> sam_records(sam_lines.size());
@@ -204,7 +206,7 @@ int main_score(int argc, char ** argv)
 
         // if this is the last chunk, consume the entire range,
         // otherwise, look for a fragment boundary
-        pre_fragment_id = nbytes_fragment > 0 ? (*revit)->fragment_id : SIZE_MAX;
+        pre_fragment_id = feof(unscored_sam_fh) ? SIZE_MAX : (*revit)->fragment_id;
         for (revit = sam_records.rbegin(); revit.base() != pre; ++revit)
         {
             if ((*revit)->fragment_id != pre_fragment_id)
@@ -232,15 +234,23 @@ int main_score(int argc, char ** argv)
         nbytes_unused = strlen(unused_start);
 
         // join SAM to rSAM, allocate string buffer, print, delete rSAM record
-        std::vector<char *> scored_sam_records(ranges.size());
-        score_rsam_alloc_binary rsam_print_aux(& fragment_scoring);
+        size_t n_sampled_records = 1000;
+        size_t average_rsam_line_length = 
+            average_line_length(sam_records.begin(), sam_records.end(), n_sampled_records);
+
+        std::vector<std::vector<char> *> scored_sam_records(ranges.size());
+        score_rsam_alloc_binary rsam_print_aux(& fragment_scoring, average_rsam_line_length);
+
         __gnu_parallel::transform(ranges.begin(), ranges.end(), sam_buffers.begin(),
                                   scored_sam_records.begin(), rsam_print_aux);
 
         for (size_t r = 0; r != ranges.size(); ++r)
         {
-            fputs(scored_sam_records[r], scored_sam_fh);
-            delete [] scored_sam_records[r];
+            fwrite(&(*scored_sam_records[r])[0], 1, 
+                   (*scored_sam_records[r]).size(), 
+                   scored_sam_fh);
+
+            delete scored_sam_records[r];
             delete sam_buffers[r];
         }
 

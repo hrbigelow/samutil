@@ -185,7 +185,7 @@ int main_raw(int argc, char ** argv)
     {
         if (samline->parse_flag == HEADER)
         {
-            if (2 == sscanf(samline->tag_string, "SQ SN:%s LN:%zu", sequence_name, &sequence_length))
+            if (2 == sscanf(samline->tag_string, "SQ\tSN:%[^\t]\tLN:%zu", sequence_name, &sequence_length))
             {
                 contig_lengths[std::string(sequence_name)] = sequence_length;
                 contig_offsets[std::string(sequence_name)] = total_sequence_length;

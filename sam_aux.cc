@@ -33,6 +33,8 @@
 
 */
 
+
+// Find a breakpoint where  
 SEQ_PROJ_ITER 
 non_overlapping_range(SEQ_PROJ_ITER start, SEQ_PROJ_ITER set_end)
 {
@@ -44,11 +46,13 @@ non_overlapping_range(SEQ_PROJ_ITER start, SEQ_PROJ_ITER set_end)
         return start;
     }
 
+    // find the projection 'max' that overlaps 'start' and has the
+    // furthest end_pos(). this projection may indeed *be* 'start'
     while (strcmp((*start).target_dna.c_str(), (*end).target_dna.c_str()) == 0
            && ((*end).target_start_pos() < (*start).target_end_pos())
            && end != set_end)
     {
-        max = ((*end).target_end_pos() > (*max).target_end_pos())
+        max = ((*max).target_end_pos() < (*end).target_end_pos())
             ? end
             : max;
         ++end;
@@ -56,6 +60,8 @@ non_overlapping_range(SEQ_PROJ_ITER start, SEQ_PROJ_ITER set_end)
     
     if (max != start)
     {
+        // recurse, since now there may be another max that overlaps
+        // this max.
         return non_overlapping_range(max, set_end);
     }
     else
@@ -64,6 +70,14 @@ non_overlapping_range(SEQ_PROJ_ITER start, SEQ_PROJ_ITER set_end)
     }
 }
 
+
+
+
+
+pdp_result::pdp_result() :
+    lines(NULL),
+    num_records_retained(0),
+    num_records_discarded(0) { }
 
 
 project_dedup_print::project_dedup_print(PROJ_MAP const* _proj_map,
@@ -80,10 +94,12 @@ project_dedup_print::project_dedup_print(PROJ_MAP const* _proj_map,
       average_rsam_line_length(_avg_len) { }
 
 
-std::vector<char> * 
+pdp_result
 project_dedup_print::operator()(std::pair<SAMIT, SAMIT> const& range)
 {
     SamBuffer output_buf(this->genome_sam_order, false);
+
+    pdp_result result;
 
     // project them
     SINGLE_READ_SET::iterator beg, sit, end;
@@ -137,6 +153,8 @@ project_dedup_print::operator()(std::pair<SAMIT, SAMIT> const& range)
 
         if (! ins.was_inserted)
         {
+            ++result.num_records_discarded;
+
             // there is a collision.  now we must prioritize.
             if (ins.remaining_entry->mapq > (*ins.surviving_entry)->mapq)
             {
@@ -147,14 +165,17 @@ project_dedup_print::operator()(std::pair<SAMIT, SAMIT> const& range)
                 delete ins.remaining_entry;
             }
         }
-
+        else
+        {
+            ++result.num_records_retained;
+        }
 
     }
 
     size_t num_entries = output_buf.unique_entries.size();
 
-    std::vector<char> * out_lines = new std::vector<char>;
-    out_lines->reserve(num_entries * this->average_rsam_line_length);
+    result.lines = new std::vector<char>;
+    result.lines->reserve(num_entries * this->average_rsam_line_length);
     
     char tmp_buffer[1024];
     //char * write_pointer = out_buffer;
@@ -163,9 +184,9 @@ project_dedup_print::operator()(std::pair<SAMIT, SAMIT> const& range)
     {
         (*sit)->sprint(tmp_buffer);
         delete (*sit);
-        out_lines->insert(out_lines->end(), tmp_buffer, tmp_buffer + strlen(tmp_buffer));
+        result.lines->insert(result.lines->end(), tmp_buffer, tmp_buffer + strlen(tmp_buffer));
     }
-    return out_lines;
+    return result;
 }
 
 
@@ -197,7 +218,89 @@ char * rsam_to_sam_binary::operator()(SamLine * samline, INDEX_ITER li_iter)
         alloc_buf = new char[strlen(tmp_buf) + 1];
         strcpy(alloc_buf, tmp_buf);
     }
-    delete samline;
 
     return alloc_buf;
+}
+
+
+unmapped_rsam_to_fastq::unmapped_rsam_to_fastq(char const* _seq_buffer,
+                                               size_t _data_buffer_offset)
+    : seq_buffer(_seq_buffer), 
+      data_buffer_offset(_data_buffer_offset)
+{ }
+                                       
+
+// convert an rsam-formatted line into a string holding the printed
+// set of SAM records, with joined QNAME, SEQ, and QUAL fields
+char const* unmapped_rsam_to_fastq::operator()(SamLine * samline, INDEX_ITER li_iter)
+{
+    
+    assert((*li_iter).start_offset >= this->data_buffer_offset);
+    char const* seq_ptr = NULL;
+
+    if (! samline->flag.all_fragments_mapped
+        && samline->tags.stratum_rank == 1)
+    {
+        // find the zero-terminated seq_data from this iter and an offset
+        seq_ptr = this->seq_buffer + (*li_iter).start_offset - this->data_buffer_offset;
+
+    }
+
+    return seq_ptr;
+}
+
+
+delete_samline::delete_samline() { }
+
+void delete_samline::operator()(SamLine * samline)
+{
+    delete samline;
+}
+
+
+// assume a tab-separated line of [id seq1 qual1 [seq2 qual2 [...]]]
+// line is null-terminated
+void print_fqd_as_fastq(char const* fqd_line, FILE * fq_fh)
+{
+    char const* seq_start = strchr(fqd_line, '\t');
+    size_t id_length = std::distance(fqd_line, seq_start);
+
+    while (*seq_start++ != '\n')
+    {
+        fputs("@", fq_fh);
+        fwrite(fqd_line, 1, id_length, fq_fh);
+        fputs("\n", fq_fh);
+        // seq string
+        seq_start += fwrite(seq_start, 1, strcspn(seq_start, "\t"), fq_fh) + 1;
+        fputs("\n+\n", fq_fh);
+        // qual string; will increment seq_start past newline
+        seq_start += fwrite(seq_start, 1, strcspn(seq_start, "\t\n"), fq_fh);
+        fputs("\n", fq_fh);
+    }
+}
+
+
+// find the average length of the printed string representation of
+// SamLines
+size_t average_line_length(std::vector<SamLine *>::const_iterator beg,
+                           std::vector<SamLine *>::const_iterator end,
+                           size_t nsample)
+{
+    size_t average_length = 200; // reasonable value in absence of any other information
+    size_t sum_of_lengths = 0;
+
+    std::vector<SamLine *>::const_iterator it_end = beg;
+    std::advance(it_end, std::min(static_cast<size_t>(std::distance(beg, end)), nsample));
+
+    char write_buffer[1024];
+    for ( ; beg != it_end; ++beg)
+    {
+        (*beg)->sprint(write_buffer);
+        sum_of_lengths += strlen(write_buffer);
+    }
+    if (nsample > 0)
+    {
+        average_length = sum_of_lengths / nsample;
+    }
+    return average_length;
 }

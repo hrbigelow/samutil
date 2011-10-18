@@ -55,47 +55,41 @@ int main(int argc, char ** argv){
     char spacer[1024];
     int nfields_read;
     
-    int qual_offset;
-    bool fastq_is_valid = fastq_file_offset(input_fh, &qual_offset);
+    char minc, maxc;
+    fastq_extreme_chars(input_fh, & minc, & maxc);
 
-    if (! fastq_is_valid)
-    {
-        fprintf(stderr, "Error: couldn't determine fastq file quality scale\n");
-        exit(1);
+    int qual_offset = minc < 59 ? 33 : 64;
+
+    fprintf(stderr, "Input file quality offset is %i:\n", qual_offset);
+    rewind(input_fh);
+    int input_output_diff = qual_offset == 33 ? (33 - 64) : (64 - 33);
+    
+    char qseq2fastq[256];
+    for (int i=0; i < 256; ++i){
+        qseq2fastq[i] = char(std::max(0,i - input_output_diff));
     }
-    else
-    {
-        fprintf(stderr, "Input file quality offset is %i:\n", qual_offset);
-        rewind(input_fh);
-        int input_output_diff = qual_offset == 33 ? (33 - 64) : (64 - 33);
+    
+    while (! feof(input_fh)){
+        nfields_read = 
+            fscanf(input_fh, "%s\n%s\n%s\n%s\n", id, sequence, spacer, quality_string);
         
-        char qseq2fastq[256];
-        for (int i=0; i < 256; ++i){
-            qseq2fastq[i] = char(std::max(0,i - input_output_diff));
-        }
-        
-        while (! feof(input_fh)){
-            nfields_read = 
-                fscanf(input_fh, "%s\n%s\n%s\n%s\n", id, sequence, spacer, quality_string);
-            
-            if (nfields_read != 4)
+        if (nfields_read != 4)
+        {
+            if (nfields_read > 0)
             {
-                if (nfields_read > 0)
-                {
-                    fprintf(stderr, "fastq2fastq: found badly formatted input group with %i lines.\n", nfields_read);
-                    exit(1);
-                }
-                break;
+                fprintf(stderr, "fastq2fastq: found badly formatted input group with %i lines.\n", nfields_read);
+                exit(1);
             }
-            for (char * q = quality_string; *q != 0; ++q)
-            { 
-                *q = qseq2fastq[int(*q)];
-            }
-            
-            fprintf(output_fh, "%s\n%s\n%s\n%s\n", id, sequence, spacer, quality_string);
+            break;
         }
-        fclose(input_fh);
-        fclose(output_fh);
-        return 0;
+        for (char * q = quality_string; *q != 0; ++q)
+        { 
+            *q = qseq2fastq[int(*q)];
+        }
+        
+        fprintf(output_fh, "%s\n%s\n%s\n%s\n", id, sequence, spacer, quality_string);
     }
+    fclose(input_fh);
+    fclose(output_fh);
+    return 0;
 }    
