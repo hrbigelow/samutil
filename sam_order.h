@@ -18,6 +18,9 @@ enum SAM_ORDER
         SAM_FID_POSITION
     };
 
+#define QNAME_FORMAT_ERROR SIZE_MAX
+
+
 class SamOrder
 {
  public:
@@ -25,7 +28,6 @@ class SamOrder
     SamOrder();
     ~SamOrder();
     SAM_QNAME_FORMAT InitFromFile(FILE * sam_fh);
-    SAM_QNAME_FORMAT InitFromFastqFile(char const* fq_file);
     SAM_QNAME_FORMAT InitFromID(char const* id);
 
     void InitFromChoice(SAM_QNAME_FORMAT qname_format);
@@ -45,6 +47,8 @@ class SamOrder
 
     bool (SamOrder::* less)(SamLine const& a, SamLine const& b) const;
     bool (SamOrder::* equal)(SamLine const& a, SamLine const& b) const;
+
+    // returns QNAME_FORMAT_ERROR in case of format error
     size_t (* parse_fragment_id)(char const* qname);
 
     size_t (SamOrder::* sam_index)(char const* samline) const;

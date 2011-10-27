@@ -123,48 +123,24 @@ SAM_QNAME_FORMAT SamOrder::InitFromFile(FILE * sam_fh)
 }
 
 
-//Call to initialize the proper READ ID parsing format
-SAM_QNAME_FORMAT SamOrder::InitFromFastqFile(char const* file)
-{
-    
-    char id[1024];
-
-    gzFile fh = gzopen(file, "r");
-    gzread(fh, id, 1023);
-    gzclose(fh);
-
-    // a fastq file has a single first line with '@' followed by the ID.
-    // that's why there is a '1' here and in the next statement.
-    char * nl = strchr(id, '\n');
-    nl == NULL ? id[1] = '\0' : *nl = '\0';
-
-    return InitFromID(id + 1);
-
-}
-
-
 SAM_QNAME_FORMAT QNAMEFormat(char const* sam_dataline)
 {
-    int dum[5];
-    char dum_string[30];
-
     SAM_QNAME_FORMAT qname_format;
 
     if (strlen(sam_dataline) == 0)
     {
         qname_format = SAM_NON_INTERPRETED;
     }
-    else if (sscanf(sam_dataline, "%i", dum) == 1)
+    else if (parse_fragment_id_numeric(sam_dataline) != QNAME_FORMAT_ERROR)
     {
         qname_format = SAM_NUMERIC;
     }
-    else if (sscanf(sam_dataline, "%[^:]:%i:%i:%i:%i", dum_string, dum, dum + 1, dum + 2, dum + 3) == 5)
+    else if (parse_fragment_id_illumina(sam_dataline) != QNAME_FORMAT_ERROR)
     {
         qname_format = SAM_ILLUMINA;
     }
-
-    else if (sscanf(sam_dataline, "%*[^:]:%*[^:]:%[^:]:%i:%i:%i:%i", 
-                    dum_string, dum, dum + 1, dum + 2, dum + 3) == 5)
+    // 
+    else if (parse_fragment_id_casava_1_8(sam_dataline) != QNAME_FORMAT_ERROR)
     {
         qname_format = SAM_CASAVA18;
     }
@@ -244,7 +220,7 @@ size_t flattened_position_aux(char const* contig,
         
     if (*contig_iter == contig_offsets.end())
     {
-        fprintf(stderr, "flattened_position: error: rname %s (at %Zu) "
+        fprintf(stderr, "flattened_position_aux: error: rname %s (at %Zu) "
                 "does not exist in provided contig index\n",
                 contig, position);
         exit(1);
@@ -324,10 +300,10 @@ bool SamOrder::equal_position(SamLine const& a, SamLine const& b) const
         flattened_position_mate(&a, &dummy) == flattened_position_mate(&b, &dummy) &&
         a.tags.alignment_space == b.tags.alignment_space;
 
-        // flattened_position(&a, &dummy) == flattened_position(&b, &dummy) &&
-        // a.this_fragment_on_pos_strand() == b.this_fragment_on_pos_strand() &&
-        // strcmp(a.cigar_for_comparison(), b.cigar_for_comparison()) == 0 &&
-        // flattened_position_mate(&a, &dummy) == flattened_position_mate(&b, &dummy);
+    // flattened_position(&a, &dummy) == flattened_position(&b, &dummy) &&
+    // a.this_fragment_on_pos_strand() == b.this_fragment_on_pos_strand() &&
+    // strcmp(a.cigar_for_comparison(), b.cigar_for_comparison()) == 0 &&
+    // flattened_position_mate(&a, &dummy) == flattened_position_mate(&b, &dummy);
 }
 
 
@@ -510,77 +486,74 @@ size_t SamOrder::samline_position_align(char const* samline) const
 {
 
     char contig[1024];
-    size_t position;
-    sscanf(samline, "%*[^\t]\t%*u\t%[^\t]\t%zu", contig, &position);
+    size_t ones_based_pos;
+    sscanf(samline, "%*[^\t]\t%*u\t%[^\t]\t%zu", contig, &ones_based_pos);
+
+    size_t zero_based_pos = ones_based_pos == 0 ? 0 : ones_based_pos - 1;
 
     CONTIG_OFFSETS::const_iterator dummy;
-    return flattened_position_aux(contig, position, this->contig_offsets, &dummy);
+    return flattened_position_aux(contig, zero_based_pos, this->contig_offsets, &dummy);
 }
 
 
-//produce index consistent with ordering [rname, pos] projected to genome
+// For all records, ordering is [rname, pos]. Unmapped reads come at
+// the end. For those alone, fragment_id field is sorted. This is
+// achieved by adding fragment_id to the index value only when.  contig_offsets by
+// convention assigns the offset of '*' (unmapped) to the last
+// position in the metacontig.
 size_t SamOrder::samline_projected_position_align(char const* samline) const
 {
 
-    char contig[1024];
-    size_t position;
+    char * contig;
+    char * cigar;
+
+    size_t ones_based_pos;
     size_t flat_pos;
     CONTIG_OFFSETS::const_iterator dummy;
 
-    sscanf(samline, "%*[^\t]\t%*u\t%[^\t]\t%zu", contig, &position);
+    sscanf(samline, "%*[^\t]\t%*u\t%a[^\t]\t%zu\t%*i\t%as", 
+           &contig, &ones_based_pos, &cigar);
+
+    size_t zero_based_pos = ones_based_pos == 0 ? 0 : ones_based_pos - 1;
 
     PROJECTIONS::const_iterator proj_iter = this->projections.find(contig);
     if (proj_iter == this->projections.end())
     {
         // don't do any projection
-        flat_pos = flattened_position_aux(contig, position, this->contig_offsets, &dummy);
+        flat_pos = flattened_position_aux(contig, zero_based_pos, 
+                                          this->contig_offsets, &dummy);
     }
     else
     {
         SequenceProjection const& proj = (*proj_iter).second;
         flat_pos = flattened_position_aux(proj.target_dna.c_str(), 
-                                          proj.target_start_pos() + position, 
+                                          ExpandedStartPos(proj, zero_based_pos, cigar),
                                           this->contig_offsets, &dummy);
     }
 
+    // now, add in the sub-ordering if contig is 
+    if (strcmp(contig, "*") == 0)
+    {
+        flat_pos += this->parse_fragment_id(samline);
+    }
+    
+    delete contig;
+    delete cigar;
     return flat_pos;
 }
 
 
 //compute the fragment id assuming a numeric read id format
-/*
-size_t SamOrder::samline_read_id(char const* samline) const
+size_t SamOrder::samline_fragment_id(char const* samline) const
 {
-
-    char qname[1024];
-    SamFlag flag;
-
-    // qname flag rname pos mapq cigar rnext pnext tlen seq qual tags...
-    int nfields_read = sscanf(samline, "%s\t%zu", qname, &flag.raw);
-    if (nfields_read != 2)
+    size_t fid = this->parse_fragment_id(samline);
+    if (fid == QNAME_FORMAT_ERROR)
     {
-        fprintf(stderr, "samline_read_id_flag: bad format for read-id sorting.\n"
-                "Encountered data line:\n%s\n",
+        fprintf(stderr, "Error: samline_fragment_id: bad qname format in this line\n%s\n\n",
                 samline);
         exit(1);
     }
-
-    size_t read_id = this->parse_fragment_id(qname);
-
-    read_id = read_id<<1;
-    int read_num = flag.first_fragment_in_template ? 0 : 1;
-    read_id += read_num;
-
-    return read_id;
-}
-*/
-
-
-
-//compute the fragment id assuming a numeric read id format
-size_t SamOrder::samline_fragment_id(char const* samline) const
-{
-    return this->parse_fragment_id(samline);
+    return fid;
 }
 
 
@@ -600,10 +573,10 @@ bool less_seq_projection::operator()(SequenceProjection const& a,
 
     return 
         (a_pos < b_pos
-        || (a_pos == b_pos
-            && (a.target_end_pos() < b.target_end_pos()
-                || (a.target_end_pos() == b.target_end_pos()
-                    && (strcmp(a.source_dna.c_str(), b.source_dna.c_str()) < 0)))));
+         || (a_pos == b_pos
+             && (a.target_end_pos() < b.target_end_pos()
+                 || (a.target_end_pos() == b.target_end_pos()
+                     && (strcmp(a.source_dna.c_str(), b.source_dna.c_str()) < 0)))));
 }
 
 
@@ -719,9 +692,7 @@ size_t parse_fragment_id_numeric(char const* qname)
     int nfields_read = sscanf(qname, "%zu", &fragment_id);
     if (nfields_read != 1)
     {
-        fprintf(stderr, "parse_fragment_id_numeric: "
-                "Error: qname format is not numeric: %s\n", qname);
-        exit(1);
+        return QNAME_FORMAT_ERROR;
     }
 
     return fragment_id;
@@ -732,18 +703,27 @@ size_t parse_fragment_id_numeric(char const* qname)
 //compute the flattened coordinate start position.  
 //read id that starts out with illumina format:
 //@FLOWCELL:LANE:TILE:XPOS:YPOS
-union IlluminaID
+struct IlluminaID
 {
-    size_t data;
-    struct
-    {
-        unsigned int ypos : 16;
-        unsigned int xpos : 16;
-        unsigned int tile : 8;
-        unsigned int lane : 8;
-        unsigned int flowcell : 16;
-    } f;
+    unsigned int ypos : 22;
+    unsigned int xpos : 22;
+    unsigned int tile : 12;
+    unsigned int lane : 4;
+    unsigned int flowcell : 4;
+    size_t get_raw() const;
 };
+
+size_t IlluminaID::get_raw() const
+{
+    size_t raw = static_cast<size_t>
+        (this->ypos % (1L<<22)
+         | (this->xpos % (1L<<22))<<22
+         | (this->tile % (1L<<12))<<44
+         | (this->lane % (1L<<4))<<48
+         | (this->flowcell % (1L<<4))<<52);
+
+    return raw;
+}
 
 
 //update record of flow cells.
@@ -765,66 +745,95 @@ uint flowcell_hash_value(char const* flowcell)
 }
 
 
+// in case of format error, returns SIZE_MAX
 size_t parse_fragment_id_illumina(char const* qname)
 {
 
     //char flowcell[256];
-    uint lane, tile, xpos, ypos;
+    unsigned int lane, tile, xpos, ypos;
 
     char flowcell[256];
 
     IlluminaID iid;
+    int end_pos;
 
-    int nfields_read = sscanf(qname, "%[^:]:%i:%i:%i:%i", flowcell, &lane, &tile, &xpos, &ypos);
-    if (nfields_read != 5)
+    int nfields_read = sscanf(qname, "%[^:]:%u:%u:%u:%u%n", 
+                              flowcell, &lane, &tile, &xpos, &ypos,
+                              &end_pos);
+    if (nfields_read != 5 ||
+        (! isspace(qname[end_pos]) 
+         && qname[end_pos] != '#' 
+         && qname[end_pos] != '/'
+         && qname[end_pos] != '\0'))
     {
-        fprintf(stderr, "parse_fragment_id_illumina: bad format for read-id sorting\n");
-        exit(1);
+        return QNAME_FORMAT_ERROR;
     }
 
-    iid.f.flowcell = flowcell_hash_value(flowcell);
-    iid.f.lane = lane;
-    iid.f.tile = tile;
-    iid.f.xpos = xpos;
-    iid.f.ypos = ypos;
+    iid.flowcell = flowcell_hash_value(flowcell);
+    iid.ypos = ypos;
+    iid.xpos = xpos;
+    iid.tile = tile;
+    iid.lane = lane;
 
-    return iid.data;
+    return iid.get_raw();
 }
 
 
 /*
-Parses Casava 1.8 read id format.  This routine ignores
-instrument-name, run ID, flowcell ID, and is therefore unsuitable for
-running data that comes from different flowcells etc.
+  Parses Casava 1.8 read id format.  This routine ignores
+  instrument-name, run ID, flowcell ID, and is therefore unsuitable for
+  running data that comes from different flowcells etc.
 
-I will remedy this in the future.
+  I will remedy this in the future.
 
-@ <instrument-name>:<run ID>:<flowcell ID>:<lane-number>:<tile-number>:<x-pos>:<y-pos> \
-<read number>:<is filtered>:<control number>:<barcode sequence>
+  @<instrument-name>:<run ID>:<flowcell ID>:<lane-number>:<tile-number>:<x-pos>:<y-pos> \
+  <read number>:<is filtered>:<control number>:<barcode sequence>
+
+  The spec is vague w.r.t header format.  But, I will assume that the statement:
+
+  The first line is prefixed by the “@” symbol and contains the read
+  name. These names are parsed until the first encountered
+  whitespace. Due to this behavior, adding additional tags to the header
+  line is not problematic for extant FASTQ parsers.
+
+  means that a valid first fastq line may or may not contain a space
+  followed by extra characters.
+
+  So, another valid format could be:
+
+
+  @<instrument-name>:<run ID>:<flowcell ID>:<lane-number>:<tile-number>:<x-pos>:<y-pos>
+
 */
 size_t parse_fragment_id_casava_1_8(char const* qname)
 {
 
-    uint lane, tile, xpos, ypos;
-
-    char flowcell[256];
+    unsigned int lane, tile, xpos, ypos;
 
     IlluminaID iid;
 
-    int nfields_read = sscanf(qname, "%*[^:]:%*[^:]:%[^:]:%i:%i:%i:%i", flowcell, &lane, &tile, &xpos, &ypos);
-    if (nfields_read != 5)
+    int end_pos;
+    int hash_end_pos;
+
+    int nfields_read = sscanf(qname, "%*[^:]:%*[^:]:%*[^:]%n:%u:%u:%u:%u%n", 
+                              &hash_end_pos, &lane, &tile, &xpos, &ypos, &end_pos);
+    if (nfields_read != 4 ||
+        (! isspace(qname[end_pos]) && qname[end_pos] != '\0'))
     {
-        fprintf(stderr, "parse_fragment_id_casava_1_8: bad format for read-id sorting\n");
-        exit(1);
+        return QNAME_FORMAT_ERROR;
     }
 
-    iid.f.flowcell = flowcell_hash_value(flowcell);
-    iid.f.lane = lane;
-    iid.f.tile = tile;
-    iid.f.xpos = xpos;
-    iid.f.ypos = ypos;
+    char hashable_id[256];
+    strncpy(hashable_id, qname, hash_end_pos);
+    hashable_id[hash_end_pos] = '\0';
 
-    return iid.data;
+    iid.flowcell = flowcell_hash_value(hashable_id);
+    iid.lane = lane;
+    iid.tile = tile;
+    iid.xpos = xpos;
+    iid.ypos = ypos;
+
+    return iid.get_raw();
 }
 
 

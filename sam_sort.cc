@@ -47,9 +47,12 @@ int sam_sort_usage(size_t mdef)
             "-m  INT       number bytes of memory to use [%Zu]\n"
             "-t  INT       number of threads to use [1]\n"
             "-u  FLAG      (unique) if present, omit printing of all but one duplicate lines. [false]\n"
-            "-h  STRING    optional sam header if alignment.sam header lacks SQ fields.\n"
-            "              If provided, any header lines in alignment.sam will be ignored.\n"
-            "-g  STRING    optional transcript gtf file.  Required iff sort order is 'PROJALIGN'.\n"
+            "-h  STRING    optional sam header.\n"
+            "                -- If provided, any header lines in alignment.sam will be ignored.\n"
+            "                -- If sort_order is PROJALIGN, this is required and must correspond \n"
+            "                -- to column 1 contigs.\n"
+            "-g  STRING    If sort_order is PROJALIGN, this is the required GTF file defining projections.\n"
+            "                -- For other sort_orders, this is ignored.\n"
             "-C  STRING    work in the directory named here [.]\n"
             "-T  STRING    path/and/prefix of temp files [name of output file]\n\n",
             mdef);
@@ -60,7 +63,8 @@ int sam_sort_usage(size_t mdef)
             "ALIGN: sort by alignment position\n"
             "PROJALIGN: sort by genome-projected alignment position.  Requires -g flag\n"
             "GUIDE: sort by read-id encoded guide alignment position\n"
-            "MIN_ALIGN_GUIDE: sort by the minimum of ALIGN or GUIDE\n\n");
+            "MIN_ALIGN_GUIDE: sort by the minimum of ALIGN or GUIDE\n"
+            "\n");
 
     return 1;
 }
@@ -69,7 +73,7 @@ int sam_sort_usage(size_t mdef)
 int main_sam_sort(int argc, char ** argv)
 {
 
-    char const* sam_header_file = "/dev/null";
+    char const* alternate_header_file = "/dev/null";
 
     bool filter_duplicates = false;
 
@@ -91,7 +95,7 @@ int main_sam_sort(int argc, char ** argv)
         case 'm': max_mem = static_cast<size_t>(atof(optarg)); break;
         case 't': num_threads = static_cast<size_t>(atof(optarg)); break;
         case 'u': filter_duplicates = true; break;
-        case 'h': sam_header_file = optarg; break;
+        case 'h': alternate_header_file = optarg; break;
         case 'g': gtf_file = optarg; break;
         case 'C': working_dir = optarg; break;
         case 'T': tmp_file_prefix = optarg; break;
@@ -127,9 +131,9 @@ int main_sam_sort(int argc, char ** argv)
 
     FILE * alignment_sam_fh = open_if_present(alignment_sam_file, "r");
     FILE * sorted_sam_fh = open_if_present(sorted_sam_file, "w");
-    FILE * sam_header_fh = open_if_present(sam_header_file, "r");
+    FILE * alternate_header_fh = open_if_present(alternate_header_file, "r");
 
-    FILE * used_header_fh = (sam_header_fh != NULL) ? sam_header_fh : alignment_sam_fh;
+    FILE * output_header_fh;
 
     SamOrder sam_order(SAM_RID, sort_type);
     if (strcmp(sort_type, "PROJALIGN") == 0)
@@ -137,22 +141,51 @@ int main_sam_sort(int argc, char ** argv)
         if (gtf_file == NULL)
         {
             fprintf(stderr, "Error: Sort type given as 'PROJALIGN', but "
-                    "no -g option (gtf file) provided\n");
+                    "no -g option (gtf file) provided\n\n");
+            exit(1);
+        }
+        else if (alternate_header_fh == NULL)
+        {
+            fprintf(stderr, "Error: Sort type given as 'PROJALIGN', but "
+                    "no -h option (SAM header) provided\n\n");
             exit(1);
         }
         else
         {
+            // tricky: we need the to use the alternate header buffer
+            // as the offsets, since they are the ones corresponding
+            // to the GTF space. But, the original set of contigs
+            // still remains, even though they are in a special
+            // projected order. So, the output header must be taken
+            // from the original alignment SAM file.
             sam_order.InitProjection(gtf_file);
+            char * offsets_header_buf = ReadAllocSAMHeader(alternate_header_fh);
+            sam_order.AddHeaderContigStats(offsets_header_buf);
+            delete [] offsets_header_buf;
+
+            output_header_fh = alignment_sam_fh;
+            char * output_header_buf = ReadAllocSAMHeader(output_header_fh);
+            size_t header_length = strlen(output_header_buf);
+            fwrite(output_header_buf, 1, header_length, sorted_sam_fh);
+            delete [] output_header_buf;
         }
     }
+    else
+    {
+        // not using 'PROJALIGN'. The offsets header and output header
+        // are one-and-the-same, and follow the logic of 'override if
+        // present'.
+        output_header_fh = (alternate_header_fh != NULL) 
+            ? alternate_header_fh
+            : alignment_sam_fh;
 
-    char * header_buf = ReadAllocSAMHeader(used_header_fh);
-    size_t header_length = strlen(header_buf);
-    fwrite(header_buf, 1, header_length, sorted_sam_fh);
-
-    sam_order.AddHeaderContigStats(header_buf);
-    
-    delete [] header_buf;
+        char * output_header_buf = ReadAllocSAMHeader(output_header_fh);
+        size_t header_length = strlen(output_header_buf);
+        fwrite(output_header_buf, 1, header_length, sorted_sam_fh);
+        sam_order.AddHeaderContigStats(output_header_buf);
+        
+        delete [] output_header_buf;
+    }
 
     // merely to slurp up the alignment_sam_fh header
     char * dummy = ReadAllocSAMHeader(alignment_sam_fh);
@@ -344,7 +377,7 @@ int main_sam_sort(int argc, char ** argv)
     }
 
     close_if_present(sorted_sam_fh);
-    close_if_present(sam_header_fh);
+    close_if_present(alternate_header_fh);
 
     delete [] tmp_file_template;
 

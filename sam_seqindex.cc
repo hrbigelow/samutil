@@ -126,7 +126,6 @@ int main_sam_seqindex(int argc, char ** argv)
 
     //this is hard-coded because we only ever want to sort by read id.
     SamOrder sam_order(SAM_RID, "FRAGMENT");
-    sam_order.InitFromFastqFile(fastq_files[0].c_str());
 
     std::vector<size_t> chunk_num_lines;
 
@@ -151,6 +150,10 @@ int main_sam_seqindex(int argc, char ** argv)
             fq_chunks[f][nbytes_read] = '\0';
             line_starts[f] = FileUtils::find_complete_lines(fq_chunks[f], & last_fragment);
             nbytes_unused = strlen(last_fragment);
+            if (! sam_order.Initialized() && ! line_starts[f].empty())
+            {
+                sam_order.InitFromID(line_starts[f][0] + 1);
+            }
 
             if (nbytes_unused > 0)
             {
@@ -195,10 +198,25 @@ int main_sam_seqindex(int argc, char ** argv)
 
             //replace all newlines with nulls, up until the unused portion
             char * line_end = fq_chunks[f];
-            for (size_t r = 0; r != num_complete_lines; ++r)
+            char * test_line_end = strpbrk(line_end, "\r\n");
+            bool unix_mode = test_line_end == NULL || strncmp(test_line_end, "\n", 1) == 0;
+
+            if (unix_mode)
             {
-                line_end = strchr(line_end, '\n');
-                *line_end++ = '\0';
+                for (size_t r = 0; r != num_complete_lines; ++r)
+                {
+                    line_end = strchr(line_end, '\n');
+                    *line_end++ = '\0';
+                }
+            }
+            else
+            {
+                for (size_t r = 0; r != num_complete_lines; ++r)
+                {
+                    line_end = strstr(line_end, "\r\n");
+                    *line_end++ = '\0';
+                    ++line_end;
+                }
             }
         }
 
@@ -254,7 +272,7 @@ int main_sam_seqindex(int argc, char ** argv)
 
             std::pair<size_t, size_t> chunk_info = 
                 process_chunk(lines, fq_dat_in, fq_dat_out, sam_order, ftmp, & line_index);
-            
+
             //offset_quantile_sizes.push_back(chunk_info.first);
             chunk_num_lines.push_back(chunk_info.second);
         }
@@ -285,6 +303,20 @@ int main_sam_seqindex(int argc, char ** argv)
     // sorted line_index.  offset_quantile_sizes and chunk_num_lines
     // describe the partitioning.
     size_t num_sort_chunks = chunk_num_lines.size();
+
+    // check uniqueness of keys in line_index
+
+    size_t prior_key = SIZE_MAX;
+    for (std::vector<LineIndex>::const_iterator li = line_index.begin();
+         li != line_index.end(); ++li)
+    {
+        if ((*li).index == prior_key)
+        {
+            fprintf(stderr, "Error: found duplicate key value %zu\n", prior_key);
+            exit(1);
+        }
+        prior_key = (*li).index;
+    }
 
     set_start_offsets(line_index.begin(), line_index.end(), 0);
 

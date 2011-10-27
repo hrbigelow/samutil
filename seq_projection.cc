@@ -116,6 +116,49 @@ size_t SequenceProjection::target_end_pos() const
 }
 
 
+// determine the expanded start position on a chromosome given the
+// transcript alignment start position, the CIGAR, and the projection,
+// taking strand orientation into account.
+size_t ExpandedStartPos(SequenceProjection const& projection,
+                        size_t local_start_pos,
+                        char const* cigar)
+{
+    
+    size_t start_pos = projection.same_strand 
+        ? local_start_pos
+        : (projection.total_block_length 
+           - Cigar::Length(Cigar::FromString(cigar, 0), true)
+           - local_start_pos);
+
+    return ExpandedPos(projection, start_pos);
+}
+
+
+// determine the expanded position relative to a given projection
+size_t ExpandedPos(SequenceProjection const& projection,
+                   int64_t pos)
+{
+    if (pos > static_cast<int64_t>(projection.total_block_length))
+    {
+        fprintf(stderr, "Error: ExpandedPos: position %zi greater than total\n"
+                "block length %zu\n", pos, projection.total_block_length);
+        exit(1);
+    }
+    
+    size_t ex_pos = pos;
+    std::vector<block_offsets>::const_iterator iter = 
+        projection.transformation.begin();
+
+    while (iter != projection.transformation.end() && pos >= 0)
+    {
+        pos -= (*iter).block_length;
+        ex_pos += (*iter).jump_length;
+        ++iter;
+    }
+    return ex_pos;
+}
+
+
 
 
 //apply a partial projection to rSAM line

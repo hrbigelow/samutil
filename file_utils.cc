@@ -154,9 +154,17 @@ find_complete_lines_aux(char * lines, bool nullify_newlines, char ** last_fragme
         return line_starts;
     }
 
-    size_t first_line_length = 
-        std::max(100UL, 
-                 static_cast<size_t>(std::distance(lines_tmp, strchrnul(lines_tmp, '\n'))));
+    char * test_line_end = strpbrk(lines_tmp, "\r\n");
+
+    // length of first test line
+    size_t test_dist = 
+        test_line_end == NULL
+        ? strlen(lines_tmp)
+        : std::distance(lines_tmp, test_line_end);
+
+    bool unix_mode = test_line_end == NULL || strncmp(test_line_end, "\n", 1) == 0;
+
+    size_t first_line_length = std::max(100UL, test_dist);
 
     size_t est_num_lines = total_length / first_line_length;
 
@@ -166,17 +174,38 @@ find_complete_lines_aux(char * lines, bool nullify_newlines, char ** last_fragme
 
     if (nullify_newlines)
     {
-        while ((lines_tmp = strchr(lines_tmp, '\n')))
+        if (unix_mode)
         {
-            *lines_tmp = '\0';
-            line_starts.push_back(++lines_tmp);
+            while ((lines_tmp = strchr(lines_tmp, '\n')))
+            {
+                *lines_tmp = '\0';
+                line_starts.push_back(++lines_tmp);
+            }
+        }
+        else
+        {
+            while ((lines_tmp = strchr(lines_tmp, '\r')))
+            {
+                *lines_tmp++ = '\0';
+                line_starts.push_back(++lines_tmp);
+            }
         }
     }
     else
     {
-        while ((lines_tmp = strchr(lines_tmp, '\n')))
+        if (unix_mode)
         {
-            line_starts.push_back(++lines_tmp);
+            while ((lines_tmp = strchr(lines_tmp, '\n')))
+            {
+                line_starts.push_back(++lines_tmp);
+            }
+        }
+        else
+        {
+            while ((lines_tmp = strchr(lines_tmp, '\r')))
+            {
+                line_starts.push_back(++(++lines_tmp));
+            }
         }
     }
     (*last_fragment) = line_starts.back();
@@ -258,7 +287,7 @@ bool BufferedFile::initialize()
 }
 
 
-
+/*
 //return a null-terminated pointer to the next num_lines lines in the
 //buffer, advancing the chunk or rewinding/reloading the file if there
 //are fewer than that remaining.
@@ -339,3 +368,4 @@ char * BufferedFile::next_n_lines(size_t num_lines, bool * advanced_chunk, bool 
     return lines;
     
 }
+*/

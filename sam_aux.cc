@@ -80,15 +80,11 @@ pdp_result::pdp_result() :
     num_records_discarded(0) { }
 
 
-project_dedup_print::project_dedup_print(PROJ_MAP const* _proj_map,
-                                         SamOrder const* _tx_ord,
-                                         SamOrder const* _genome_ord,
+project_dedup_print::project_dedup_print(SamOrder const* _genome_ord,
                                          bool _inserts_are_introns,
                                          bool _retain_unseq,
                                          size_t _avg_len)
-    : projections(_proj_map), 
-      tx_sam_order(_tx_ord),
-      genome_sam_order(_genome_ord),
+    : genome_sam_order(_genome_ord),
       inserts_are_introns(_inserts_are_introns),
       retain_unsequenced_projection(_retain_unseq),
       average_rsam_line_length(_avg_len) { }
@@ -104,9 +100,11 @@ project_dedup_print::operator()(std::pair<SAMIT, SAMIT> const& range)
     // project them
     SINGLE_READ_SET::iterator beg, sit, end;
 
-    PROJ_MAP::const_iterator proj_iter;
+    PROJECTIONS::const_iterator proj_iter = this->genome_sam_order->projections.end();
 
-    char last_contig[256] = "";
+    //PROJ_MAP::const_iterator proj_iter = this->projections->end();
+
+    char prev_unprojected_rname[256] = "";
     CONTIG_OFFSETS::const_iterator contig_iter = 
         this->genome_sam_order->contig_offsets.begin();
 
@@ -117,24 +115,24 @@ project_dedup_print::operator()(std::pair<SAMIT, SAMIT> const& range)
     {
         SamLine * samline = const_cast<SamLine *>(*cur);
 
-        // here is where we should efficiently compare and replace / ignore based on
-        // mapping quality.
-        if (strcmp(last_contig, (*cur)->rname) != 0)
+        // here is where we should efficiently compare and replace /
+        // ignore based on mapping quality.
+        if (strcmp(prev_unprojected_rname, (*cur)->rname) != 0)
         {
             // update proj_iter if necessary
-            proj_iter = this->projections->find((*cur)->rname);
-            transcript_strand[0] = proj_iter == this->projections->end()
+            proj_iter = this->genome_sam_order->projections.find((*cur)->rname);
+            transcript_strand[0] = proj_iter == this->genome_sam_order->projections.end()
                 ? '.' 
-                : ((*(*proj_iter).second).same_strand ? '+' : '-');
+                : ((*proj_iter).second.same_strand ? '+' : '-');
+
+            strcpy(prev_unprojected_rname, (*cur)->rname);
         }
 
         if ((*cur)->flag.all_fragments_mapped)
         {
-            if (proj_iter != this->projections->end())
+            if (proj_iter != this->genome_sam_order->projections.end())
             {
-                ApplySequenceProjection(*(*proj_iter).second, samline, 
-                                        this->inserts_are_introns);
-
+                ApplySequenceProjection((*proj_iter).second, samline, this->inserts_are_introns);
                 samline->add_tag("XS", 'A', transcript_strand);
             }
         }
@@ -149,8 +147,6 @@ project_dedup_print::operator()(std::pair<SAMIT, SAMIT> const& range)
 
         InsertResult ins = output_buf.insert(samline);
         
-        strcpy(last_contig, (*ins.surviving_entry)->rname);
-
         if (! ins.was_inserted)
         {
             ++result.num_records_discarded;
@@ -243,7 +239,7 @@ char const* unmapped_rsam_to_fastq::operator()(SamLine * samline, INDEX_ITER li_
     {
         // find the zero-terminated seq_data from this iter and an offset
         seq_ptr = this->seq_buffer + (*li_iter).start_offset - this->data_buffer_offset;
-
+        assert(strlen(seq_ptr) > 0);
     }
 
     return seq_ptr;

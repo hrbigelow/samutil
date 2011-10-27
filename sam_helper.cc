@@ -354,6 +354,12 @@ SamLine::SamLine(SAM_PARSE _parse_flag,
     {
         // FID.FLAG.RNAME.POS.MAPQ.CIGAR.TAGRAW[.TAG[.TAG[.TAG...]]]
         size_t fragment_id = this->parse_fragment_id(_qname);
+        if (fragment_id == QNAME_FORMAT_ERROR)
+        {
+            fprintf(stderr, "Error: samline_fragment_id: bad qname format in this qname\n%s\n\n",
+                    _qname);
+            exit(1);
+        }
 
         sprintf(line, "%Zu\t%Zu\t%s\t%Zu\t%Zu\t%s\t%Zu",
                 fragment_id, _flagval, _rname, reported_pos,
@@ -679,6 +685,13 @@ void SamLine::Init(char const* samline_string)
             {
                 this->fragment_id = this->parse_fragment_id(qname);
 
+                if (this->fragment_id == QNAME_FORMAT_ERROR)
+                {
+                    fprintf(stderr, "Error: samline_fragment_id: bad qname format in this line\n%s\n\n",
+                            qname);
+                    exit(1);
+                }
+
                 if (SamLine::retain_qname_string)
                 {
                     this->qname_string = qname;
@@ -814,11 +827,13 @@ void SamLine::print_aux(void * print_buf, bool to_file) const
 
     else if (this->flag.is_rsam_format)
     {
+        // is rSAM.
         size_t reported_pos = this->flag.this_fragment_unmapped ? 0 : this->ones_based_pos();
         
+        // FID.FLAG.RNAME.POS.MAPQ.CIGAR[.TAG[.TAG[.TAG...]]]
         FileUtils::switch_printf(to_file, & print_buf, "%zu\t%zu\t%s\t%zu\t%zu\t%s\t%zu",
-                                     this->fragment_id, this->flag.get_raw(), this->rname, reported_pos,
-                                     this->mapq, this->cigar, this->tags.get_raw());
+                                 this->fragment_id, this->flag.get_raw(), this->rname, reported_pos,
+                                 this->mapq, this->cigar, this->tags.get_raw());
         
         if (this->tag_string != NULL)
         {
@@ -998,7 +1013,7 @@ void SamLine::print_rsam_as_sam(char const* seq_data, char * out_string) const
                     this->mapq, cigar_substring, rnext, reported_pnext, used_tlen);
         
         size_t seq_len = std::distance(seqs[layout_index], quals[layout_index]) - 1;
-        if (flag.this_fragment_on_neg_strand)
+        if (outflag.this_fragment_on_neg_strand)
         {
             *out_string++ = '\t';
             reverse_comp_inplace(seqs[layout_index], seqs[layout_index] + seq_len, out_string);
@@ -1221,6 +1236,7 @@ char * ReadAllocSAMHeader(FILE * sam_fh)
         if ((p == '\0' || p == '\n') && n != '@')
         {
             ungetc(n, sam_fh);
+            clearerr(sam_fh);
             break;
         }
         p = n;

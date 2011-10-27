@@ -44,6 +44,15 @@ class SequenceProjection
 typedef std::unordered_map<char const*, SequenceProjection, to_integer, eqstr> PROJECTIONS;
 
 
+size_t ExpandedStartPos(SequenceProjection const& projection,
+                        size_t local_start_pos,
+                        char const* cigar);
+
+
+size_t ExpandedPos(SequenceProjection const& projection,
+                   int64_t pos);
+
+
 bool ApplySequenceProjection(SequenceProjection const& projection,
                              SamLine * samline,
                              bool inserts_are_introns);

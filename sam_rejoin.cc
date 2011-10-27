@@ -63,7 +63,7 @@ struct less_index
 };
 
 std::vector<SamLine *>::iterator
-find_rsam_by_id(std::vector<SamLine *>::iterator beg,
+find_rsam_upper_bound(std::vector<SamLine *>::iterator beg,
                       std::vector<SamLine *>::iterator end,
                       size_t index);
 
@@ -192,7 +192,8 @@ int main_sam_rejoin(int argc, char ** argv)
     char * last_fragment;
     
     // iterator bounding last loaded record
-    INDEX_ITER loaded_seq_end = seq_index.begin();
+    INDEX_ITER last_index_with_data = seq_index.end(); // symbolizes 'uninitialized'
+    INDEX_ITER index_with_data_bound = seq_index.end();
 
     char * header_buf = ReadAllocSAMHeader(input_rsam_fh);
     size_t header_length = strlen(header_buf);
@@ -225,7 +226,9 @@ int main_sam_rejoin(int argc, char ** argv)
                                       rsam_records.begin(), parse_sam_unary());
 
             beg = rsam_records.begin();
-            end = find_rsam_by_id(rsam_records.begin(), rsam_records.end(), (*loaded_seq_end).index);
+            end = (last_index_with_data == seq_index.end())
+                ? rsam_records.begin()
+                : find_rsam_upper_bound(rsam_records.begin(), rsam_records.end(), (*last_index_with_data).index);
 
             nbytes_unused = strlen(last_fragment);
             memmove(rsam_buffer, last_fragment, nbytes_unused);
@@ -243,25 +246,33 @@ int main_sam_rejoin(int argc, char ** argv)
         {
             data_buffer_offset += n_databytes_read;
 
-            // loaded_seq_end should be the highest iterator such that
-            // start_offset <= seq_chunk_size. The range
-            // [seq_index.begin(), loaded_seq_end) is guaranteed to
-            // have seq data loaded for it.
+            // last_index_with_data should be the highest iterator such that
+            // start_offset <= seq_chunk_size.  the query index
+            // element, with offset 'seq_chunk_size +
+            // data_buffer_offset' is the next data item that would be
+            // loaded.  so, the range [seq_index.begin(),
+            // last_index_with_data) is guaranteed to have last_index_with_data
+            // should be the last real index element with loaded seq
+            // data.
             assert(! seq_index.empty());
-            loaded_seq_end = 
+            index_with_data_bound = 
                 std::lower_bound(seq_index.begin(), seq_index.end(),
                                  LineIndex(0, seq_chunk_size + data_buffer_offset, 0),
-                                 &less_offset) - 1;
+                                 &less_offset);
+            
+            last_index_with_data = index_with_data_bound - 1;
             
             size_t data_bytes_to_read = 
-                (*loaded_seq_end).start_offset - data_buffer_offset;
+                (*last_index_with_data).start_offset
+                + (*last_index_with_data).line_length
+                - data_buffer_offset;
 
-            assert(data_bytes_to_read <= seq_chunk_size);
+            //assert(data_bytes_to_read <= seq_chunk_size);
 
             // update data_buffer_offset *before* loading new data.
             n_databytes_read = fread(seq_buffer, 1, data_bytes_to_read, seq_data_fh);
 
-            end = find_rsam_by_id(beg, rsam_records.end(), (*loaded_seq_end).index);
+            end = find_rsam_upper_bound(beg, rsam_records.end(), (*last_index_with_data).index);
         }
                 
         // 3) The range [beg, end) needs to be converted to SAM strings
@@ -279,7 +290,7 @@ int main_sam_rejoin(int argc, char ** argv)
 
             // find the line index corresponding to the beg iterator
             INDEX_ITER lit = 
-                std::lower_bound(seq_index.begin(), loaded_seq_end, 
+                std::lower_bound(seq_index.begin(), index_with_data_bound, 
                                  LineIndex((*beg)->fragment_id, 0, 0), 
                                  less_index());
 
@@ -290,7 +301,7 @@ int main_sam_rejoin(int argc, char ** argv)
                  ++ii_iter, ++rec_iter)
             {
                 while ((*lit).index < (*rec_iter)->fragment_id
-                       && lit != loaded_seq_end)
+                       && lit != index_with_data_bound)
                 {
                     ++lit;
                 }
@@ -375,12 +386,12 @@ int main_sam_rejoin(int argc, char ** argv)
 }
 
 
-// finds the rsam iterator corresponding to index or 'end' if not
-// exists.  This is because index comes from a superset of all indices
+// find the iterator rit in [beg, end) such that for all it in [beg, rit)
+// (*it).index <= index
 std::vector<SamLine *>::iterator
-find_rsam_by_id(std::vector<SamLine *>::iterator beg,
-                std::vector<SamLine *>::iterator end,
-                size_t index)
+find_rsam_upper_bound(std::vector<SamLine *>::iterator beg,
+                      std::vector<SamLine *>::iterator end,
+                      size_t index)
 {
     if (beg == end)
     {
@@ -391,10 +402,8 @@ find_rsam_by_id(std::vector<SamLine *>::iterator beg,
         SamLine rsam_dummy(**beg);
         rsam_dummy.fragment_id = index;
         std::vector<SamLine *>::iterator rit =
-            std::lower_bound(beg, end, &rsam_dummy, less_fragment_id());
-
-        assert(rit == end || (*rit)->fragment_id == index);
-
+            std::upper_bound(beg, end, &rsam_dummy, less_fragment_id());
+        
         return rit;
     }
 }    

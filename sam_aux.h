@@ -30,16 +30,12 @@ struct pdp_result
 // allocates output.
 struct project_dedup_print
 {
-    PROJ_MAP const* projections;
-    SamOrder const* tx_sam_order;
     SamOrder const* genome_sam_order;
     bool inserts_are_introns;
     bool retain_unsequenced_projection;
     size_t average_rsam_line_length;
 
-    project_dedup_print(PROJ_MAP const* _proj_map,
-                        SamOrder const* _tx_order,
-                        SamOrder const* _genome_order,
+    project_dedup_print(SamOrder const* _genome_order,
                         bool _inserts_are_introns,
                         bool _retain_unseq,
                         size_t _ave_len);

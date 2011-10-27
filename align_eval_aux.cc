@@ -26,9 +26,9 @@ partial_index_aux::partial_index_aux(SamOrder const* _sam_order) : sam_order(_sa
 
 LineIndex partial_index_aux::operator()(char * samline)
 {
-    LineIndex index((this->sam_order->*(this->sam_order->sam_index))(samline), 
+    LineIndex line_index((this->sam_order->*(this->sam_order->sam_index))(samline), 
                     0, strlen(samline) + 1);
-    return index;
+    return line_index;
 }        
 
 
@@ -122,6 +122,12 @@ process_chunk(std::vector<char *> & samlines,
 }
 
 
+// find 'num_chunks' quantiles based on a key ordering. assume
+// line_index is ordered by (K,.). construct LineIndex sentinels to be
+// used to query each sub-range during catenate_subchunks.  since the
+// constructed sentinels will be real entries in line_index, exactly
+// one subchunk will contain the sentinel, and the 'lower_bound' call
+// in catenate_subchunks will not 
 void
 get_key_quantiles(std::vector<LineIndex> const& line_index,
                   size_t num_chunks,
@@ -397,7 +403,12 @@ void write_final_merge(std::vector<LineIndex> const& ok_index,
         // now initialize start offsets
         set_start_offsets((*ok_index_ptr).begin(), (*ok_index_ptr).end(), 0);
         
-        assert(lines_written == key_quantile_nlines[k]);
+        if (lines_written != key_quantile_nlines[k])
+        {
+            fprintf(stderr, "lines_written: %zu, key_quantile_nlines[%zu]: %zu\n",
+                    lines_written, k, key_quantile_nlines[k]);
+            assert(false);
+        }
 
         size_t bytes_written;
         //assert(bytes_written == key_quantile_sizes[k]);
