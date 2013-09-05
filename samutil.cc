@@ -21,6 +21,7 @@ int usage()
             "samutil truncate         Truncate a SAM file, replacing QNAME, SEQ, QUAL\n"
             "samutil rejoin           Convert rSAM to SAM (rejoin QNAME, SEQ, and QUAL)\n"
             "samutil seqindex         Generate a sequence and index from fastq, to recover QNAME, SEQ, QUAL\n"
+            "samutil filter           Filter records based on their Fragment ID\n"
 
             "\n\n"
             "Notes:\n\n"
@@ -103,6 +104,10 @@ int main(int argc, char *argv[])
     else if (strcmp(argv[1], "rejoin") == 0)
     {
         return main_sam_rejoin(argc - 1, argv + 1);
+    }
+    else if (strcmp(argv[1], "filter") == 0)
+    {
+        return main_sam_filter(argc - 1, argv + 1);
     }
     else
     {

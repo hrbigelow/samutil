@@ -301,6 +301,33 @@ void merge_ok_index(size_t const* subrange_sizes,
 
 }
 
+
+void check_unique_index(std::vector<LineIndex> const& line_index)
+{
+    size_t prior_key = SIZE_MAX;
+
+    bool qualified;
+
+    for (std::vector<LineIndex>::const_iterator li = line_index.begin();
+         li != line_index.end(); ++li)
+    {
+        qualified = (prior_key < (*li).index)
+            || prior_key == SIZE_MAX;
+
+        if (! qualified)
+        {
+            fprintf(stderr, "Error: check_index: non-ascending or duplicate line indices.\n"
+                    "prior_key: %zu\n"
+                    "curr_key : %zu\n", prior_key, (*li).index);
+            exit(1);
+        }
+        prior_key = (*li).index;
+    }
+    return;
+}
+
+
+
 //write blocks from 'unordered' to 'ordered' according to 'ordering'
 //index.  return number of bytes written
 size_t write_new_ordering(char const* unordered, 
@@ -352,6 +379,7 @@ size_t set_start_offsets(std::vector<LineIndex>::iterator beg,
 void write_final_merge(std::vector<LineIndex> const& ok_index,
                        std::vector<INDEX_ITER> const& offset_quantiles,
                        std::vector<FILE *> const& tmp_fhs,
+                       bool do_check_unique_index,
                        FILE * out_dat_fh,
                        FILE * out_ind_fh)
 {
@@ -415,9 +443,10 @@ void write_final_merge(std::vector<LineIndex> const& ok_index,
 
         merge_ok_index(subrange_sizes, num_chunks, & ok_index_ptr, & k_index_ptr);
 
-        bool is_sorted = std::is_sorted((*k_index_ptr).begin(), (*k_index_ptr).end(), less_key);
-
-        assert(is_sorted);
+        if (do_check_unique_index)
+        {
+            check_unique_index(* k_index_ptr);
+        }
 
         bytes_written = 
             write_new_ordering(chunk_buffer_in, k_index_ptr, chunk_buffer_out);
@@ -471,17 +500,18 @@ get_quantiles(std::vector<LineIndex> * line_index,
 {
     
     size_t lines_per_chunk = (*line_index).size() / num_chunks;
-    std::vector<INDEX_ITER> quantiles;
+    std::vector<INDEX_ITER> quantiles(num_chunks);
     
     INDEX_ITER iter = (*line_index).begin();
     INDEX_ITER end = (*line_index).end();
 
-    quantiles.push_back(iter);
+    quantiles[0] = iter;
     for (size_t n = 0; n != num_chunks - 1; ++n)
     {
         std::advance(iter, lines_per_chunk);
-        __gnu_parallel::nth_element(quantiles.back(), iter, end, less_fcn);
-        quantiles.push_back(iter);
+        std::nth_element(quantiles[n], iter, end, less_fcn);
+        //__gnu_parallel::nth_element(quantiles[n], iter, end, less_fcn);
+        quantiles[n + 1] = iter;
     }
     quantiles.push_back(end);
     return quantiles;

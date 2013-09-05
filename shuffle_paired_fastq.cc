@@ -34,11 +34,11 @@ int main(int argc, char ** argv){
     char spacer[1024];
     char quality_string[4096];
 
-    while (fscanf(first, "%s\n%s\n%s\n%s\n", id, sequence, spacer, quality_string) == 4)
+    while (fscanf(first, "%[^\n]\n%s\n%s\n%s\n", id, sequence, spacer, quality_string) == 4)
     {
         fprintf(stdout, "%s\n%s\n%s\n%s\n", id, sequence, spacer, quality_string);
 
-        fscanf(second, "%s\n%s\n%s\n%s\n", id, sequence, spacer, quality_string);
+        fscanf(second, "%[^\n]\n%s\n%s\n%s\n", id, sequence, spacer, quality_string);
         fprintf(stdout, "%s\n%s\n%s\n%s\n", id, sequence, spacer, quality_string);
 
     }

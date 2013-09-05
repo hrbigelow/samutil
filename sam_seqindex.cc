@@ -87,7 +87,15 @@ int main_sam_seqindex(int argc, char ** argv)
     char ** fq_chunks = new char *[nfq];
     char * fq_dat_in = new char[chunk_size * nfq];
     char * fq_dat_out = new char[chunk_size * nfq];
-    
+
+    if (fq_dat_in == NULL || fq_dat_out == NULL)
+    {
+        fprintf(stderr, "Error: Couldn't allocate one or more buffers (size %Zu).\n"
+                "Please run with smaller requested memory (-m option)\n",
+                chunk_size * nfq);
+        exit(1);
+    }
+
     for (size_t f = 0; f != nfq; ++f)
     {
         fastq_fhs[f] = gzopen(fastq_files[f].c_str(), "r");
@@ -257,7 +265,7 @@ int main_sam_seqindex(int argc, char ** argv)
             if (ftmp == NULL)
             {
                 fprintf(stderr, "Error: couldn't open temporary chunk file %s for reading/writing.\n",
-                        tmp_files[c]);
+                        tmp_file);
                 exit(1);
             }
             
@@ -304,20 +312,6 @@ int main_sam_seqindex(int argc, char ** argv)
     // describe the partitioning.
     size_t num_sort_chunks = chunk_num_lines.size();
 
-    // check uniqueness of keys in line_index
-
-    size_t prior_key = SIZE_MAX;
-    for (std::vector<LineIndex>::const_iterator li = line_index.begin();
-         li != line_index.end(); ++li)
-    {
-        if ((*li).index == prior_key)
-        {
-            fprintf(stderr, "Error: found duplicate key value %zu\n", prior_key);
-            exit(1);
-        }
-        prior_key = (*li).index;
-    }
-
     set_start_offsets(line_index.begin(), line_index.end(), 0);
 
     std::vector<INDEX_ITER> offset_quantiles;
@@ -335,9 +329,9 @@ int main_sam_seqindex(int argc, char ** argv)
         fseek(tmp_fhs[c], 0, std::ios::beg);
     }
 
-    // Now do the merge
+    // Now do the merge. (Also checks integrity of final index)
     
-    write_final_merge(line_index, offset_quantiles, tmp_fhs, 
+    write_final_merge(line_index, offset_quantiles, tmp_fhs, true,
                       out_data_fh, out_index_fh);
     
     fclose(out_data_fh);

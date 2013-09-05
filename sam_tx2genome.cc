@@ -239,8 +239,8 @@ int main_tx2genome(int argc, char ** argv)
                 cur_rec_index = (genome_sam_order.*(genome_sam_order.sam_index))(cur_rec_string);
 
             }
-            fprintf(stderr, "last: %zu, cur: %zu, jump: %zu\n",
-                    last_rec_index, cur_rec_index, cur_rec_index - last_rec_index);
+            // fprintf(stderr, "last: %zu, cur: %zu, jump: %zu\n",
+            //         last_rec_index, cur_rec_index, cur_rec_index - last_rec_index);
             
             delete cur_rec;
 
@@ -342,58 +342,3 @@ int main_tx2genome(int argc, char ** argv)
     
     return 0;
 }
-
-/*
-PROJ_MAP LoadProjectionMap(std::set<SequenceProjection, less_seq_projection> const& tx_to_genome,
-                           SamOrder const& genome_sam_order)
-{
-    // 1. tx_to_genome  (projections of transcripts to the genome)
-    // 2. tx_projections.  (tx names pointing to tx_to_genome iterators)
-    PROJ_MAP tx_projections;
-
-    CONTIG_OFFSETS::const_iterator genome_offset_iter = 
-        genome_sam_order.contig_offsets.begin();
-
-    size_t prev_flat_start_pos = 0;
-    for (SEQ_PROJ_ITER t = tx_to_genome.begin(); t != tx_to_genome.end(); ++t)
-    {
-        char * tx_name = new char[(*t).source_dna.size() + 1];
-        strcpy(tx_name, (*t).source_dna.c_str());
-        std::pair<NP_ITER, bool> ins = tx_projections.insert(std::make_pair(tx_name, t));
-
-        SequenceProjection const& p2 = (*t);
-                
-        if (! ins.second)
-        {
-            SequenceProjection const& p1 = *(*ins.first).second;
-            SequenceProjection const& p2 = (*t);
-                    
-            fprintf(stderr, "Error: duplicate transcript named %s encountered.\n"
-                    "First instance: %s\t%s\n"
-                    "Second instance: %s\t%ss\n", 
-                    tx_name,
-                    p1.source_dna.c_str(), (p1.same_strand ? "+" : "-"),
-                    p2.source_dna.c_str(), (p2.same_strand ? "+" : "-"));
-            exit(1);
-        }
-
-
-        size_t flat_start_pos = 
-            flattened_position_aux(p2.target_dna.c_str(), p2.target_start_pos(),
-                                   genome_sam_order.contig_offsets,
-                                   & genome_offset_iter);
-                
-        if (flat_start_pos < prev_flat_start_pos)
-        {
-            fprintf(stderr, "Error: previous projection %s has target start position\n"
-                    "before current one (%s).\n", 
-                    (*t).source_dna.c_str(),
-                    (*(--SEQ_PROJ_ITER(t))).source_dna.c_str());
-            exit(1);
-        }
-        prev_flat_start_pos = flat_start_pos;
-    }
-
-    return tx_projections;
-}
-*/

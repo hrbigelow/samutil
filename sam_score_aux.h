@@ -50,6 +50,7 @@ class FragmentScore
     CONTIG_SPACE contig_space; //map def
     int * score_table; //
     size_t table_shift_bits; // for use with score_table_index
+    size_t max_index;
 
     RawScoreComp raw_score_comp;
 

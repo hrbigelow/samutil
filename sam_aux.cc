@@ -211,6 +211,8 @@ char * rsam_to_sam_binary::operator()(SamLine * samline, INDEX_ITER li_iter)
 
         char tmp_buf[4096 * 8];
         samline->print_rsam_as_sam(seq_data, tmp_buf);
+        assert(strlen(tmp_buf) < 4096 * 7);
+
         alloc_buf = new char[strlen(tmp_buf) + 1];
         strcpy(alloc_buf, tmp_buf);
     }

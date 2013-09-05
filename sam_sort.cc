@@ -64,7 +64,9 @@ int sam_sort_usage(size_t mdef)
             "PROJALIGN: sort by genome-projected alignment position.  Requires -g flag\n"
             "GUIDE: sort by read-id encoded guide alignment position\n"
             "MIN_ALIGN_GUIDE: sort by the minimum of ALIGN or GUIDE\n"
-            "\n");
+            "\n"
+            "Note: PROJALIGN sub-sorts by fragment_id in unmapped records.\n"
+            "      For mapped records, the sort order of fragment_id is unspecified\n");
 
     return 1;
 }
@@ -360,7 +362,7 @@ int main_sam_sort(int argc, char ** argv)
             fseek(tmp_fhs[c], 0, std::ios::beg);
         }
 
-        write_final_merge(line_index, offset_quantiles, tmp_fhs, sorted_sam_fh, NULL);
+        write_final_merge(line_index, offset_quantiles, tmp_fhs, false, sorted_sam_fh, NULL);
 
         fprintf(stderr, ".\n");
         fprintf(stderr, "Cleaning up...");

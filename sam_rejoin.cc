@@ -37,7 +37,8 @@ int sam_rejoin_usage(size_t mdef, size_t qdef,
             "       Missing letters denote that no filtering occurs on that field and both categories are output\n"
             "\n\n"
             "       If present on command line, <output.unmapped.fq> is an intercalated fastq formatted\n"
-            "       file of all unmapped records. Entries do not have trailing /1, /2 etc, and entries\n"
+            "       file of all top-stratum unmapped records. (lower-stratum unmapped records are not output here.)\n"
+            "       Entries do not have trailing /1, /2 etc, and entries\n"
             "       are printed in intercalated fashion.  Use 'deal_fastq' to unmix them\n"
             ""
             , mdef, qdef, rdef, Sdef);
@@ -141,6 +142,7 @@ int main_sam_rejoin(int argc, char ** argv)
     SamLine::SetGlobalFlags(SAM_NUMERIC, "", "", 0, false);
 
     size_t index, start_offset;
+    size_t prev_index = 0;
     int line_length;
 
     std::vector<LineIndex> seq_index;
@@ -155,7 +157,16 @@ int main_sam_rejoin(int argc, char ** argv)
             fprintf(stderr, "Error: line %zu does not have three integers "
                     "(index, start_offset, line_length)\n", seq_index.size());
         }
+        if (! (prev_index < index) && prev_index != 0)
+        {
+            fprintf(stderr, "Error: line index is not strictly ascending by index value.\n"
+                    "prev_index: %zu\n"
+                    "curr_index: %zu\n", 
+                    prev_index, index);
+            exit(1);
+        }
         seq_index.push_back(LineIndex(index, start_offset, line_length));
+        prev_index = index;
     }
     size_t total_seq_size = (*seq_index.rbegin()).start_offset
         + (*seq_index.rbegin()).line_length;
@@ -232,7 +243,9 @@ int main_sam_rejoin(int argc, char ** argv)
 
             nbytes_unused = strlen(last_fragment);
             memmove(rsam_buffer, last_fragment, nbytes_unused);
+
             read_pointer = rsam_buffer + nbytes_unused;
+
             
         }
         
@@ -246,20 +259,26 @@ int main_sam_rejoin(int argc, char ** argv)
         {
             data_buffer_offset += n_databytes_read;
 
-            // last_index_with_data should be the highest iterator such that
-            // start_offset <= seq_chunk_size.  the query index
-            // element, with offset 'seq_chunk_size +
+            // last_index_with_data should be the highest iterator
+            // such that start_offset + line_length <= seq_chunk_size.
+            // the query index element, with offset 'seq_chunk_size +
             // data_buffer_offset' is the next data item that would be
             // loaded.  so, the range [seq_index.begin(),
-            // last_index_with_data) is guaranteed to have last_index_with_data
-            // should be the last real index element with loaded seq
-            // data.
-            assert(! seq_index.empty());
-            index_with_data_bound = 
+            // last_index_with_data) is guaranteed to have seq data
+            // loaded for it, and should be the last such element.
+            INDEX_ITER lb =
                 std::lower_bound(seq_index.begin(), seq_index.end(),
                                  LineIndex(0, seq_chunk_size + data_buffer_offset, 0),
                                  &less_offset);
+
             
+            if (std::distance(seq_index.begin(), lb) < 2)
+            {
+                fprintf(stderr, "Error: samutil rejoin: could not load any more fqd data\n");
+                exit(1);
+            }
+
+            index_with_data_bound = lb - 1;
             last_index_with_data = index_with_data_bound - 1;
             
             size_t data_bytes_to_read = 
@@ -267,12 +286,14 @@ int main_sam_rejoin(int argc, char ** argv)
                 + (*last_index_with_data).line_length
                 - data_buffer_offset;
 
-            //assert(data_bytes_to_read <= seq_chunk_size);
+            assert(data_bytes_to_read <= seq_chunk_size);
 
             // update data_buffer_offset *before* loading new data.
             n_databytes_read = fread(seq_buffer, 1, data_bytes_to_read, seq_data_fh);
 
             end = find_rsam_upper_bound(beg, rsam_records.end(), (*last_index_with_data).index);
+
+
         }
                 
         // 3) The range [beg, end) needs to be converted to SAM strings
@@ -295,7 +316,8 @@ int main_sam_rejoin(int argc, char ** argv)
                                  less_index());
 
             assert((*lit).index == (*beg)->fragment_id);
-
+            
+            // is this guaranteed to initialize all index_iters corresponding to [beg end) ?
             for (ii_iter = index_iters.begin(), rec_iter = beg; 
                  ii_iter != index_iters.end(); 
                  ++ii_iter, ++rec_iter)
@@ -313,23 +335,25 @@ int main_sam_rejoin(int argc, char ** argv)
                 }
                 (*ii_iter) = lit;
             }
+            assert(rec_iter == end);
 
             rsam_to_sam_binary rsb(seq_buffer, data_buffer_offset, & sam_filter);
+
+            assert(static_cast<size_t>(std::distance(beg, end)) <= sam_strings.size() - beg_elem);
 
             __gnu_parallel::transform(beg, end, 
                                       index_iters.begin(),
                                       sam_strings.begin() + beg_elem,
                                       rsb);
-
+            
             unmapped_rsam_to_fastq usb(seq_buffer, data_buffer_offset);
 
             if (output_fastq_fh != NULL)
             {
                 fqd_strings.resize(std::distance(beg, end));
-                __gnu_parallel::transform(beg, end,
-                                          index_iters.begin(),
-                                          fqd_strings.begin(),
-                                          usb);
+
+                __gnu_parallel::transform(beg, end, index_iters.begin(),
+                                          fqd_strings.begin(), usb);
 
                 std::vector<char const*>::iterator sit;
                 for (sit = fqd_strings.begin(); sit != fqd_strings.end(); ++sit)

@@ -24,7 +24,7 @@ bool GTFEntry::get_next_record(FILE * gtf_fh)
         }
     }
 
-    if (strncmp(line, "##", 2) == 0)
+    if (strncmp(line, "#", 1) == 0)
     {
         //skip comment lines
         this->clear_record();

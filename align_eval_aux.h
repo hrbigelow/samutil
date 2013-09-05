@@ -65,6 +65,7 @@ void
 write_final_merge(std::vector<LineIndex> const& ok_index,
                   std::vector<INDEX_ITER> const& offset_quantiles,
                   std::vector<FILE *> const& tmp_fhs,
+                  bool check_uniqueness,
                   FILE * out_dat_fh,
                   FILE * out_ind_fh);
 

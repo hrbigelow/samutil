@@ -775,8 +775,9 @@ void SamLine::SetCigarCompared()
     // is consumed.  By collapsing T to N, two CIGARs that differ in
     // the alignment of their unsequenced portion only, will be made
     // identical.
-    char cigar_in[512];
-    char cigar_out[512];
+    size_t cigar_strlen = strlen(this->cigar);
+    char * cigar_in = new char[cigar_strlen + 1];
+    char * cigar_out = new char[cigar_strlen + 1];
     strcpy(cigar_in, this->cigar);
 
     char * c = cigar_in;
@@ -787,6 +788,8 @@ void SamLine::SetCigarCompared()
     Cigar::Consolidate(cigar_in, cigar_out);
     this->cigar_compared = new char[strlen(cigar_out) + 1];
     strcpy(this->cigar_compared, cigar_out);
+    delete cigar_in;
+    delete cigar_out;
 }
 
 SamLine::~SamLine()

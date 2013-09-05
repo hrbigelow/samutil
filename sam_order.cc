@@ -434,6 +434,7 @@ void SamOrder::AddHeaderContigStats(char const* header)
             char contig_name[1000];
             
             size_t contig_length;
+            // need to convert this to something tag-agnostic
             sscanf(line, "@SQ\tSN:%[^\t]\tLN:%zu", contig_name, &contig_length);
             this->contig_lengths[std::string(contig_name)] = contig_length;
 
@@ -703,6 +704,8 @@ size_t parse_fragment_id_numeric(char const* qname)
 //compute the flattened coordinate start position.  
 //read id that starts out with illumina format:
 //@FLOWCELL:LANE:TILE:XPOS:YPOS
+// The layout, with high bits to the left, is the same
+// ffffllll tttttttt ttttxxxx xxxxxxxx xxxxxxxx xxyyyyyy yyyyyyyy yyyyyyyy
 struct IlluminaID
 {
     unsigned int ypos : 22;
@@ -719,11 +722,26 @@ size_t IlluminaID::get_raw() const
         (this->ypos % (1L<<22)
          | (this->xpos % (1L<<22))<<22
          | (this->tile % (1L<<12))<<44
+         | (this->lane % (1L<<4))<<56
+         | (this->flowcell % (1L<<4))<<60);
+
+    return raw;
+}
+ // buggy test version
+
+/*
+size_t IlluminaID::get_raw() const
+{
+    size_t raw = static_cast<size_t>
+        (this->ypos % (1L<<22)
+         | (this->xpos % (1L<<22))<<22
+         | (this->tile % (1L<<12))<<44
          | (this->lane % (1L<<4))<<48
          | (this->flowcell % (1L<<4))<<52);
 
     return raw;
 }
+*/
 
 
 //update record of flow cells.

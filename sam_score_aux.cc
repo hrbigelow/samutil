@@ -62,7 +62,7 @@ void FragmentScore::init(char const* score_cal_file, char const* contig_space_fi
     while (! feof(score_cal_fh))
     {
         int num_parsed =
-            fscanf(score_cal_fh, "%i\t%i\t%i\t%*i%*[^\n]\n", &top_raw_score, &sec_raw_score, &given_raw_score);
+            fscanf(score_cal_fh, "%i\t%i\t%i\t%*i\n", &top_raw_score, &sec_raw_score, &given_raw_score);
 
         if (num_parsed != 3)
         {
@@ -70,19 +70,24 @@ void FragmentScore::init(char const* score_cal_file, char const* contig_space_fi
             exit(1);
         }
 
-        this->max_fragment_score = std::max(this->max_fragment_score, top_raw_score);
-        this->min_fragment_score = std::min(this->min_fragment_score, given_raw_score);
+        this->max_fragment_score = std::max(this->max_fragment_score, 
+                                            std::max(top_raw_score, sec_raw_score));
+
+        this->min_fragment_score = std::min(this->min_fragment_score, 
+                                            std::min(top_raw_score, sec_raw_score));
     }
 
     this->table_shift_bits = 
         static_cast<size_t>(ceilf(log2f(static_cast<float>(this->max_fragment_score - this->min_fragment_score))));
 
-    size_t max_index = this->score_table_index(this->max_fragment_score,
-                                               this->max_fragment_score,
-                                               this->max_fragment_score);
+    // score_table_index uses max_index, so must first set it to a permissive value
+    this->max_index = SIZE_MAX;
+    this->max_index = this->score_table_index(this->max_fragment_score,
+                                              this->max_fragment_score,
+                                              this->max_fragment_score) + 1;
 
-    this->score_table = new int[max_index + 1];
-    std::fill(this->score_table, this->score_table + max_index, 0);
+    this->score_table = new int[this->max_index];
+    std::fill(this->score_table, this->score_table + this->max_index, 0);
 
     rewind(score_cal_fh);
     fscanf(score_cal_fh, "score_tag: %*s\n");
@@ -90,7 +95,7 @@ void FragmentScore::init(char const* score_cal_file, char const* contig_space_fi
     while (! feof(score_cal_fh))
     {
         int num_parsed = 
-            fscanf(score_cal_fh, "%i\t%i\t%i\t%i%*[^\n]\n",
+            fscanf(score_cal_fh, "%i\t%i\t%i\t%i\n",
                    &top_raw_score,
                    &sec_raw_score,
                    &given_raw_score,
@@ -103,7 +108,7 @@ void FragmentScore::init(char const* score_cal_file, char const* contig_space_fi
         }
 
         size_t index = this->score_table_index(top_raw_score, sec_raw_score, given_raw_score);
-        assert(index <= max_index);
+        assert(index <= this->max_index);
 
         this->score_table[index] = mapq;
         this->larger_score_better = top_raw_score > sec_raw_score;
@@ -219,7 +224,9 @@ size_t FragmentScore::score_table_index(int top_score, int sec_score, int given_
     index += sec_score - this->min_fragment_score;
     index = index<<this->table_shift_bits;
     index += given_score - this->min_fragment_score;
-    return index;
+
+    // censor the index if it is out-of-bounds
+    return std::min(index, this->max_index);
 }
 
 

@@ -116,12 +116,6 @@ int main_sam_checksort(int argc, char ** argv)
             {
                 if (line_index_chunk[l].index < line_index_chunk[l-1].index)
                 {
-                    char * ln1 = strchr(samlines[l - 1], '\n');
-                    *ln1 = '\0';
-
-                    char * ln2 = strchr(samlines[l], '\n');
-                    *ln2 = '\0';
-
                     fprintf(stderr, "Lines %zu and %zu are not in %s order:\n%s\n%s\n\n",
                             total_lines + l - 1,
                             total_lines + l,
@@ -129,9 +123,6 @@ int main_sam_checksort(int argc, char ** argv)
                             samlines[l - 1],
                             samlines[l]);
                     
-                    *ln1 = '\n';
-                    *ln2 = '\n';
-
                     exit(1);
                 }
             }
