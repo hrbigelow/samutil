@@ -2,6 +2,7 @@
 #define _ALIGN_EVAL_AUX_H
 
 #include <vector>
+#include <zlib.h>
 
 #include "sam_helper.h"
 #include "sam_order.h"
@@ -44,7 +45,6 @@ std::pair<size_t, size_t>
                   char * chunk_buffer_in,
                   char * chunk_buffer_out,
                   SamOrder const& sam_order,
-                  FILE * chunk_tmp_fh,
                   std::vector<LineIndex> * line_index);
 
 void
@@ -64,7 +64,10 @@ set_start_offsets(std::vector<LineIndex>::iterator beg,
 void 
 write_final_merge(std::vector<LineIndex> const& ok_index,
                   std::vector<INDEX_ITER> const& offset_quantiles,
-                  std::vector<FILE *> const& tmp_fhs,
+                  std::vector<gzFile_s *> const& tmp_fhs,
+                  // std::vector<FILE *> const& tmp_fhs,
+                  /* std::vector<z_stream *> const& zstreams, */
+                  /* size_t zstream_bufsize, */
                   bool check_uniqueness,
                   FILE * out_dat_fh,
                   FILE * out_ind_fh);

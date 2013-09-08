@@ -4,7 +4,6 @@
 #include "gtf.h"
 
 #include <set>
-#include <zlib.h>
 
 //!!! This is muddied in that it is partially up to the user, partly a nuissance.
 SamOrder::SamOrder(SAM_ORDER _so, char const* _sort_type) : 

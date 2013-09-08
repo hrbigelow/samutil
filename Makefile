@@ -10,7 +10,10 @@ SOURCES = $(shell find $(srcdir) -name "*.cc")
 BIN = fastq2fastq make_sq_header make_dnas_file fasta2cisfasta	\
 	 shuffle_paired_fastq fastq_type
 
-BIN += samutil align_eval deal_fastq
+BIN += samutil align_eval deal_fastq find_index_collisions
+
+BIN += nmer_spectrum
+
 # BIN += sim
 # BIN += pretty_plot
 # BIN += gtf_annotate_regions
@@ -51,19 +54,24 @@ all: $(BIN)
 #	$(CXX) $(CXXFLAGS) -lz -o $@ $^
 
 
+nmer_spectrum_OBJS = $(addprefix $(OBJDIR)/, nmer_spectrum.o dep/tools.o md5.o)
+nmer_spectrum : $(nmer_spectrum_OBJS)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^
+
+
 fastq2fastq_OBJS = $(addprefix $(OBJDIR)/, fastq2fastq.o fastq_tools.o)
 fastq2fastq: $(fastq2fastq_OBJS)
-	$(CXX) $(CXXFLAGS) -o $@ $^
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^
 
 
 fastq_type_OBJS = $(addprefix $(OBJDIR)/, fastq_type.o fastq_tools.o)
 fastq_type: $(fastq_type_OBJS)
-	$(CXX) $(CXXFLAGS) -o $@ $^
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^
 
 
 file_bytes_OBJS = $(addprefix $(OBJDIR)/, file_bytes.o file_utils.o)
 file_bytes: $(file_bytes_OBJS)
-	$(CXX) $(CXXFLAGS) -lz -o $@ $^
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -lz -o $@ $^
 
 
 shuffle_paired_fastq_OBJS = $(addprefix $(OBJDIR)/, shuffle_paired_fastq.o)
@@ -75,7 +83,7 @@ deal_fastq_OBJS = $(addprefix $(OBJDIR)/, deal_fastq.o file_utils.o	\
 dep/tools.o)
 
 deal_fastq: $(deal_fastq_OBJS)
-	$(CXX) $(CXXFLAGS) -lz -o $@ $^
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -lz -o $@ $^
 
 #filter_sam_by_score: filter_sam_by_score.o
 #	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^
@@ -110,12 +118,19 @@ samutil_OBJS = $(addprefix $(OBJDIR)/, samutil.o sam_tx2genome.o		\
 	dep/tools.o sam_score.o sam_truncate.o sam_seqindex.o sam_rejoin.o	\
 	sam_sort.o sam_checksort.o align_eval_aux.o sam_score_aux.o			\
 	sam_aux.o seq_projection.o gtf.o file_utils.o sam_buffer.o			\
-	sam_helper.o sam_order.o cigar_ops.o)
+	sam_helper.o sam_order.o cigar_ops.o sam_filter.o sam_filter_aux.o)
 
 
 samutil: $(samutil_OBJS)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -lz -lpthread -o $@ $^
 
+
+find_index_collisions_OBJS = $(addprefix $(OBJDIR)/,					\
+	find_index_collisions.o sam_order.o sam_helper.o seq_projection.o	\
+	gtf.o file_utils.o cigar_ops.o dep/tools.o)
+
+find_index_collisions: $(find_index_collisions_OBJS)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -lz -lpthread -o $@ $^
 
 
 #get_peak_regions: get_peak_regions.o

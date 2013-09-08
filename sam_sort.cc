@@ -24,6 +24,7 @@
 #include <map>
 #include <cstdlib>
 #include <cstdio>
+#include <zlib.h>
 
 #include <omp.h>
 
@@ -38,7 +39,7 @@
 #include "sam_order.h"
 
 
-int sam_sort_usage(size_t mdef)
+int sam_sort_usage(size_t mdef, size_t zdef, size_t ydef)
 {
     fprintf(stderr,
             "Usage:\n\n"
@@ -54,8 +55,11 @@ int sam_sort_usage(size_t mdef)
             "-g  STRING    If sort_order is PROJALIGN, this is the required GTF file defining projections.\n"
             "                -- For other sort_orders, this is ignored.\n"
             "-C  STRING    work in the directory named here [.]\n"
-            "-T  STRING    path/and/prefix of temp files [name of output file]\n\n",
-            mdef);
+            "-T  STRING    path/and/prefix of temp files [name of output file]\n"
+            "-z  INT       zlib compression level to be used on tmp files (0-9). 0 means no compression. [%Zu]\n"
+            "-y  INT       zlib compression strategy for tmp files (0-4).  [%Zu]\n"
+            "              0=Z_DEFAULT_STRATEGY, 1=Z_FILTERED, 2=Z_HUFFMAN_ONLY, 3=Z_RLE, 4=Z_FIXED\n",
+            mdef, zdef, ydef);
 
     fprintf(stderr,
             "sort_order must be one of:\n"
@@ -79,6 +83,12 @@ int main_sam_sort(int argc, char ** argv)
 
     bool filter_duplicates = false;
 
+    size_t tmp_file_gz_level_def = 2;
+    size_t tmp_file_gz_level = tmp_file_gz_level_def;
+
+    size_t tmp_file_gz_strategy_def = 0;
+    size_t tmp_file_gz_strategy = tmp_file_gz_strategy_def;
+
     size_t max_mem_def = 1024l * 1024l * 1024l * 4l; // 4 GB memory
     size_t max_mem = max_mem_def;
 
@@ -90,7 +100,7 @@ int main_sam_sort(int argc, char ** argv)
     char const* gtf_file = NULL;
 
     char c;
-    while ((c = getopt(argc, argv, "m:t:uh:g:C:T:")) >= 0)
+    while ((c = getopt(argc, argv, "m:t:uh:g:C:T:z:y:")) >= 0)
     {
         switch(c)
         {
@@ -101,18 +111,24 @@ int main_sam_sort(int argc, char ** argv)
         case 'g': gtf_file = optarg; break;
         case 'C': working_dir = optarg; break;
         case 'T': tmp_file_prefix = optarg; break;
-        default: return sam_sort_usage(max_mem_def); break;
+        case 'z': tmp_file_gz_level = static_cast<size_t>(atof(optarg)); break;
+        case 'y': tmp_file_gz_strategy = static_cast<size_t>(atof(optarg)); break;
+        default: return sam_sort_usage(max_mem_def, tmp_file_gz_level_def, tmp_file_gz_strategy_def); break;
         }
     }
 
     omp_set_dynamic(false);
     omp_set_num_threads(num_threads);
 
+    __gnu_parallel::_Settings psettings;
+    psettings.for_each_minimal_n = 2;
+    __gnu_parallel::_Settings::set(psettings);
 
     int arg_count = optind + 3;
     if (argc != arg_count)
     {
-        return sam_sort_usage(max_mem_def);
+        return sam_sort_usage(max_mem_def, tmp_file_gz_level_def,
+                              tmp_file_gz_strategy_def);
     }
 
     char const* sort_type = argv[optind];
@@ -248,7 +264,7 @@ int main_sam_sort(int argc, char ** argv)
     strcat(tmp_file_template, ".XXXXXX");
 
     std::vector<char *> tmp_files;
-    std::vector<FILE *> tmp_fhs;
+    std::vector<gzFile_s *> read_tmp_fhs;
 
     // build the index, and output the
     char * chunk_buffer_in = new char[chunk_size + 1];
@@ -273,74 +289,110 @@ int main_sam_sort(int argc, char ** argv)
         nbytes_read = fread(read_pointer, 1, chunk_size - nbytes_unused, alignment_sam_fh);
         read_pointer[nbytes_read] = '\0';
 
-        FILE * used_out_fh;
-        if (feof(alignment_sam_fh) && tmp_fhs.empty())
+        if (feof(alignment_sam_fh) && tmp_files.empty())
         {
             // special case: we can bypass the tmp file stage if the
             // entire input file fits in one chunk
-            used_out_fh = sorted_sam_fh;
+            std::vector<char *> sam_lines = 
+                FileUtils::find_complete_lines_nullify(chunk_buffer_in, & last_fragment);
+            
+            if (! sam_order.Initialized() && ! sam_lines.empty())
+            {
+                sam_order.InitFromID(sam_lines[0]);
+            }
+            
+            std::pair<size_t, size_t> chunk_info = 
+                process_chunk(sam_lines, chunk_buffer_in, chunk_buffer_out, 
+                              sam_order, & line_index);
+            
+            // the final write
+            fwrite(chunk_buffer_out, 1, chunk_info.first, sorted_sam_fh);
+
+            offset_quantile_sizes.push_back(chunk_info.first);
+            chunk_num_lines.push_back(chunk_info.second);
+            
+            fprintf(stderr, " %zu", chunk_num);
+            fflush(stderr);
+            
         }
         else
         {
             char * tmp_file = new char[template_length + 1];
             strcpy(tmp_file, tmp_file_template);
-            int fdes = mkstemp(tmp_file);
-            FILE * tmp_fh = fdopen(fdes, "w+");
-            if (tmp_fh == NULL)
+            mkstemp(tmp_file);
+            // FILE * tmp_fh = fdopen(fdes, "w+");
+            gzFile_s * write_tmp_fh = gzopen(tmp_file, "w");
+            gzsetparams(write_tmp_fh, tmp_file_gz_level, tmp_file_gz_strategy);
+
+            if (write_tmp_fh == NULL)
             {
                 fprintf(stderr, "Error: couldn't open temporary chunk file %s for reading/writing.\n",
                         tmp_file);
                 exit(1);
             }
 
+            // these names will be used later
             tmp_files.push_back(tmp_file);
-            tmp_fhs.push_back(tmp_fh);
+
+            std::vector<char *> sam_lines = 
+                FileUtils::find_complete_lines_nullify(chunk_buffer_in, & last_fragment);
             
-            used_out_fh = tmp_fh;
+            if (! sam_order.Initialized() && ! sam_lines.empty())
+            {
+                sam_order.InitFromID(sam_lines[0]);
+            }
+            
+            std::pair<size_t, size_t> chunk_info = 
+                process_chunk(sam_lines, chunk_buffer_in, chunk_buffer_out, 
+                              sam_order, & line_index);
+            
+            // as an experiment, let's try instead using a z_stream and writing
+            // individual chunks using the gzip encoding
+            
+
+            int nbytes_written = gzwrite(write_tmp_fh, chunk_buffer_out, chunk_info.first);
+            if ((size_t)nbytes_written != chunk_info.first)
+            {
+                fprintf(stderr, "Error: couldn't write tmp file %s\n", tmp_file);
+                exit(1);
+            }
+            gzclose(write_tmp_fh);
+            
+
+            gzFile_s * read_tmp_fh = gzopen(tmp_file, "r"); // is this safe?
+            read_tmp_fhs.push_back(read_tmp_fh);
+            
+            // now, line_index is in num_chunks pieces, each corresponding
+            // to a key-sorted temp file. Each chunk is just a roughly
+            // equal portion of the original file and in no particular
+            // order. The 'start_offset' fields in line index correspond
+            // to original start offsets before key sorting but that are
+            // local to the chunk.  (That is, the first entry in each
+            // chunk has a start offset of zero.
+            
+            offset_quantile_sizes.push_back(chunk_info.first);
+            chunk_num_lines.push_back(chunk_info.second);
+            
+            fprintf(stderr, " %zu", chunk_num);
+            fflush(stderr);
+            
+            nbytes_unused = strlen(last_fragment);
+            memmove(chunk_buffer_in, last_fragment, nbytes_unused);
+            read_pointer = chunk_buffer_in + nbytes_unused;
+            
+            ++chunk_num;
         }
-        
-        std::vector<char *> sam_lines = 
-            FileUtils::find_complete_lines_nullify(chunk_buffer_in, & last_fragment);
-
-        if (! sam_order.Initialized() && ! sam_lines.empty())
-        {
-            sam_order.InitFromID(sam_lines[0]);
-        }
-
-        std::pair<size_t, size_t> chunk_info = 
-            process_chunk(sam_lines, chunk_buffer_in, chunk_buffer_out, 
-                          sam_order, used_out_fh, & line_index);
-
-        // now, line_index is in num_chunks pieces, each corresponding
-        // to a key-sorted temp file. Each chunk is just a roughly
-        // equal portion of the original file and in no particular
-        // order. The 'start_offset' fields in line index correspond
-        // to original start offsets before key sorting but that are
-        // local to the chunk.  (That is, the first entry in each
-        // chunk has a start offset of zero.
-
-        offset_quantile_sizes.push_back(chunk_info.first);
-        chunk_num_lines.push_back(chunk_info.second);
-
-        fprintf(stderr, " %zu", chunk_num);
-        fflush(stderr);
-
-        nbytes_unused = strlen(last_fragment);
-        memmove(chunk_buffer_in, last_fragment, nbytes_unused);
-        read_pointer = chunk_buffer_in + nbytes_unused;
-        
-        ++chunk_num;
-    }
+    }        
 
     fprintf(stderr, ".\n");
     fflush(stderr);
     fclose(alignment_sam_fh);
-
+    
     delete [] chunk_buffer_in;
     delete [] chunk_buffer_out;
-
-    size_t num_chunks = tmp_fhs.empty() ? 1 : tmp_fhs.size();
-
+    
+    size_t num_chunks = read_tmp_fhs.empty() ? 1 : read_tmp_fhs.size();
+    
     // 0. Determine N quantiles based on file offset, offset_quantiles
     set_start_offsets(line_index.begin(), line_index.end(), 0);
 
@@ -357,12 +409,8 @@ int main_sam_sort(int argc, char ** argv)
     // line_index is sorted by (O,K)
     if (num_chunks > 1)
     {
-        for (size_t c = 0; c != num_chunks; ++c)
-        {
-            fseek(tmp_fhs[c], 0, std::ios::beg);
-        }
-
-        write_final_merge(line_index, offset_quantiles, tmp_fhs, false, sorted_sam_fh, NULL);
+        write_final_merge(line_index, offset_quantiles, read_tmp_fhs, 
+                          false, sorted_sam_fh, NULL);
 
         fprintf(stderr, ".\n");
         fprintf(stderr, "Cleaning up...");
@@ -370,10 +418,15 @@ int main_sam_sort(int argc, char ** argv)
 
         for (size_t o = 0; o != num_chunks; ++o)
         {
-            fclose(tmp_fhs[o]);
+            gzclose(read_tmp_fhs[o]);
             remove(tmp_files[o]);
             delete tmp_files[o];
         }
+        // for (size_t o = 0; o != zstreams.size(); ++o)
+        // {
+        //     delete zstreams[o];
+        // }
+
         fprintf(stderr, "done.\n");
         fflush(stderr);
     }

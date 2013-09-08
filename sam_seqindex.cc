@@ -4,12 +4,11 @@
 #include <cstdio>
 
 #include <omp.h>
+#include <zlib.h>
 
 #include "dep/tools.h"
 #include "align_eval_aux.h"
 #include "file_utils.h"
-
-#include <zlib.h>
 
 int sam_seqindex_usage(size_t mdef)
 {
@@ -121,7 +120,7 @@ int main_sam_seqindex(int argc, char ** argv)
     strcat(tmp_file_template, ".XXXXXX");
 
     std::vector<char *> tmp_files;
-    std::vector<FILE *> tmp_fhs;
+    std::vector<gzFile_s *> in_tmp_fhs;
 
     // main initializion
     size_t num_complete_records = 0;
@@ -258,18 +257,20 @@ int main_sam_seqindex(int argc, char ** argv)
 
             char * tmp_file = new char[strlen(tmp_file_template) + 1];
             strcpy(tmp_file, tmp_file_template);
-            int fdes = mkstemp(tmp_file);
+            mkstemp(tmp_file);
             
             tmp_files.push_back(tmp_file);
-            FILE * ftmp = fdopen(fdes, "w+");
-            if (ftmp == NULL)
+            gzFile_s * out_gz = gzopen(tmp_file, "w");
+            gzFile_s * in_gz = gzopen(tmp_file, "r");
+
+            if (out_gz == NULL)
             {
                 fprintf(stderr, "Error: couldn't open temporary chunk file %s for reading/writing.\n",
                         tmp_file);
                 exit(1);
             }
             
-            tmp_fhs.push_back(ftmp);
+            in_tmp_fhs.push_back(in_gz);
 
             char * last_fragment;
 
@@ -279,7 +280,10 @@ int main_sam_seqindex(int argc, char ** argv)
             assert(strlen(last_fragment) == 0);
 
             std::pair<size_t, size_t> chunk_info = 
-                process_chunk(lines, fq_dat_in, fq_dat_out, sam_order, ftmp, & line_index);
+                process_chunk(lines, fq_dat_in, fq_dat_out, sam_order, & line_index);
+
+            gzwrite(out_gz, fq_dat_out, chunk_info.first);
+            gzclose(out_gz);
 
             //offset_quantile_sizes.push_back(chunk_info.first);
             chunk_num_lines.push_back(chunk_info.second);
@@ -324,14 +328,11 @@ int main_sam_seqindex(int argc, char ** argv)
     }
     assert(iit == line_index.end());
 
-    for (size_t c = 0; c != num_sort_chunks; ++c)
-    {
-        fseek(tmp_fhs[c], 0, std::ios::beg);
-    }
-
     // Now do the merge. (Also checks integrity of final index)
-    
-    write_final_merge(line_index, offset_quantiles, tmp_fhs, true,
+
+    // dummy zstreams, for now.  we are not implementing zipping tmp
+    // files in this program
+    write_final_merge(line_index, offset_quantiles, in_tmp_fhs, true,
                       out_data_fh, out_index_fh);
     
     fclose(out_data_fh);
@@ -343,7 +344,7 @@ int main_sam_seqindex(int argc, char ** argv)
 
     for (size_t t = 0; t != tmp_files.size(); ++t)
     {
-        fclose(tmp_fhs[t]);
+        gzclose(in_tmp_fhs[t]);
         remove(tmp_files[t]);
         delete tmp_files[t];
     }

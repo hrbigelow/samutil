@@ -3,7 +3,7 @@
 
 #include <parallel/algorithm>
 #include <ext/algorithm>
-
+#include <zlib.h>
 
 //partial ordering
 bool less_offset(LineIndex const& a, LineIndex const& b)
@@ -70,7 +70,6 @@ process_chunk(std::vector<char *> & samlines,
               char * chunk_buffer_in,
               char * chunk_buffer_out,
               SamOrder const& sam_order,
-              FILE * chunk_tmp_fh,
               std::vector<LineIndex> * line_index)
 {
     size_t S = samlines.size();
@@ -111,9 +110,6 @@ process_chunk(std::vector<char *> & samlines,
     }
 
     size_t nbytes_written = std::distance(chunk_buffer_out, write_pointer);
-
-    fwrite(chunk_buffer_out, 1, nbytes_written, chunk_tmp_fh);
-    fflush(chunk_tmp_fh);
 
     (*line_index).insert((*line_index).end(), line_index_chunk, line_index_chunk + S);
     delete [] line_index_chunk;
@@ -162,6 +158,38 @@ get_key_quantiles(std::vector<LineIndex> const& line_index,
     }
 }
 
+// structure to pass to for_each loop in catenate_subchunks.  defines
+// the information needed to gzread a subchunk and write it to the
+// proper section of the buffer, in parallel.
+struct gzread_target
+{
+    gzread_target();
+    gzread_target(gzFile_s *, char *, size_t);
+    gzFile_s * source_file;
+    char * dest_buffer;
+    size_t bytes_to_read;
+};
+
+gzread_target::gzread_target() : source_file(NULL), dest_buffer(NULL), bytes_to_read(0) { }
+gzread_target::gzread_target(gzFile_s *s, char *d, size_t b) : source_file(s), dest_buffer(d), bytes_to_read(b) { }
+
+struct gzread_and_copy
+{
+    gzread_and_copy();
+    void operator()(gzread_target & item);
+};
+
+gzread_and_copy::gzread_and_copy() { }
+
+void gzread_and_copy::operator()(gzread_target & item)
+{
+    int bytes_read = gzread(item.source_file, item.dest_buffer, item.bytes_to_read);
+    if ((size_t)bytes_read != item.bytes_to_read) {
+        fprintf(stderr, "Error, tried to read %Zu bytes, could only read %Zu bytes, from tmp file\n",
+                item.bytes_to_read, (size_t)bytes_read);
+        exit(23);
+    }
+}
 
 // gathers next sub-chunks from each temp file, starting at
 // 'prev_chunk_starts', and using 'query_key_quantile' to find
@@ -172,7 +200,8 @@ get_key_quantiles(std::vector<LineIndex> const& line_index,
 // prev_chunk_starts updated to next set of chunk starts for next call
 // returns number of bytes written
 size_t catenate_subchunks(LineIndex const& query_key_quantile,
-                          std::vector<FILE *> const& tmp_fhs,
+                          // std::vector<FILE *> const& tmp_fhs,
+                          std::vector<gzFile_s *> const& tmp_fhs,
                           std::vector<INDEX_ITER> * prev_chunk_starts,
                           std::vector<INDEX_ITER> const& chunk_ends, /* ends of each chunk ordered by (O, K) */
                           char ** chunk_buffer,
@@ -185,12 +214,13 @@ size_t catenate_subchunks(LineIndex const& query_key_quantile,
         new std::pair<INDEX_ITER, INDEX_ITER>[num_chunks];
 
     char * write_pointer = (*chunk_buffer);
-    size_t buffer_pos = 0;
     size_t total_subrange_size = 0;
 
     INDEX_ITER beg, end, sub_k;
     size_t S;
+    std::vector<gzread_target> subrange_bytes(num_chunks);
 
+    // initialize subrange_iters, subrange_sizes and total_subrange_size
     for (size_t o = 0; o != num_chunks; ++o)
     {
         beg = (*prev_chunk_starts)[o];
@@ -208,9 +238,13 @@ size_t catenate_subchunks(LineIndex const& query_key_quantile,
         {
             S += (*kit).line_length;
         }
-        fread(write_pointer, 1, S, tmp_fhs[o]);
+
+        // the information we need to perform parallel gzreads below in the for_each loop
+        subrange_bytes[o] = gzread_target(tmp_fhs[o], write_pointer, S);
+
+        // gzread(tmp_fhs[o], write_pointer, S);
+
         write_pointer += S;
-        buffer_pos += S;
 
         // last_merged_size = merged.size();
         subrange_iters[o] = std::make_pair(beg, sub_k);
@@ -222,6 +256,13 @@ size_t catenate_subchunks(LineIndex const& query_key_quantile,
 
         (*prev_chunk_starts)[o] = sub_k;
     }
+
+    //initialize data pointed to by chunk_buffer by performing
+    //multiple gzread operations at the same time.  Unfortunately,
+    //for_each doesn't allow passing the iterator itself.
+    //so we use a dummy 'index'
+    __gnu_parallel::for_each(subrange_bytes.begin(), subrange_bytes.end(),
+                             gzread_and_copy());
 
     (*catenated_index).reserve(total_subrange_size);
     (*catenated_index).resize(0);
@@ -378,7 +419,7 @@ size_t set_start_offsets(std::vector<LineIndex>::iterator beg,
 
 void write_final_merge(std::vector<LineIndex> const& ok_index,
                        std::vector<INDEX_ITER> const& offset_quantiles,
-                       std::vector<FILE *> const& tmp_fhs,
+                       std::vector<gzFile_s *> const& tmp_fhs,
                        bool do_check_unique_index,
                        FILE * out_dat_fh,
                        FILE * out_ind_fh)

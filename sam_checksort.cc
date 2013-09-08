@@ -4,7 +4,6 @@
 #include "file_utils.h"
 
 #include <omp.h>
-#include <zlib.h>
 
 #include <parallel/algorithm>
 
