@@ -699,7 +699,6 @@ size_t parse_fragment_id_numeric(char const* qname)
 }
 
 
-
 //compute the flattened coordinate start position.  
 //read id that starts out with illumina format:
 //@FLOWCELL:LANE:TILE:XPOS:YPOS
@@ -777,11 +776,16 @@ size_t parse_fragment_id_illumina(char const* qname)
     int nfields_read = sscanf(qname, "%[^:]:%u:%u:%u:%u%n", 
                               flowcell, &lane, &tile, &xpos, &ypos,
                               &end_pos);
-    if (nfields_read != 5 ||
-        (! isspace(qname[end_pos]) 
-         && qname[end_pos] != '#' 
-         && qname[end_pos] != '/'
-         && qname[end_pos] != '\0'))
+    // if there is extra stuff on qname after ypos,
+    // it must be one of (<spaces>, '#', '/', or '\0')
+    // anything else generates an error
+    if (nfields_read != 5 
+        || (
+            ! isspace(qname[end_pos])
+            && qname[end_pos] != '#' 
+            && qname[end_pos] != '/'
+            && qname[end_pos] != '\0')
+        )
     {
         return QNAME_FORMAT_ERROR;
     }
@@ -858,4 +862,19 @@ size_t parse_fragment_id_casava_1_8(char const* qname)
 size_t parse_fragment_id_zero(char const* /* qname */)
 {
     return 0;
+}
+
+
+// cheaply extract the raw flag value from a samline
+// samline need not be zero-terminated
+size_t parse_flag_raw(char const* samline_string)
+{
+    size_t flag;
+    int nfields_read = sscanf(samline_string, "%*zu\t" "%zu\t", &flag);
+    if (nfienlds_read != 1)
+    {
+        fprintf(stderr, "Error: parse_flag_raw: Couldn't parse flag from raw samline string\n");
+        exit(53);
+    }
+    return flag;
 }

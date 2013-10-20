@@ -249,8 +249,6 @@ public:
 
     void print_rsam_as_sam(char const* seq_data, char * out_string) const;
 
-    void print_fastq(FILE * fastq_fh) const;
-
     int alignment_score(char const* tag, int default_if_missing, bool * has_score) const;
     //char alignment_space(char default_if_missing, bool * has_space) const;
 

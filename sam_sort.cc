@@ -25,6 +25,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <zlib.h>
+#include <ctime>
 
 #include <omp.h>
 
@@ -63,7 +64,7 @@ int sam_sort_usage(size_t mdef, size_t zdef, size_t ydef)
 
     fprintf(stderr,
             "sort_order must be one of:\n"
-            "FRAGMENT: sort by read id / pair flag (uniquely identifies the physical fragment)\n"
+            "FRAGMENT: sort by fragment ID (unspecified as to order of read1 or read2 in the pair)\n"
             "ALIGN: sort by alignment position\n"
             "PROJALIGN: sort by genome-projected alignment position.  Requires -g flag\n"
             "GUIDE: sort by read-id encoded guide alignment position\n"
@@ -278,15 +279,24 @@ int main_sam_sort(int argc, char ** argv)
     std::vector<size_t> offset_quantile_sizes;
     std::vector<LineIndex> line_index;
 
-    fprintf(stderr, "Writing chunks:");
-    fflush(stderr);
-
     size_t chunk_num = 0;
+    // clock_t time;
+    // time_t now;
+    // size_t ticks_per_ms = CLOCKS_PER_SEC / 1000;
+    timespec time_begin, time_end;
 
     while (! feof(alignment_sam_fh))
     {
 
+        clock_gettime(CLOCK_REALTIME, &time_begin);
+        fprintf(stderr, "Reading chunk %Zu...", chunk_num + 1);
+        fflush(stderr);
+
         nbytes_read = fread(read_pointer, 1, chunk_size - nbytes_unused, alignment_sam_fh);
+        clock_gettime(CLOCK_REALTIME, &time_end);
+        fprintf(stderr, "%Zu bytes read. %Zu ms\n", nbytes_read, elapsed_ms(time_begin, time_end));
+        fflush(stderr);
+
         read_pointer[nbytes_read] = '\0';
 
         if (feof(alignment_sam_fh) && tmp_files.empty())
@@ -301,63 +311,131 @@ int main_sam_sort(int argc, char ** argv)
                 sam_order.InitFromID(sam_lines[0]);
             }
             
+            clock_gettime(CLOCK_REALTIME, &time_begin);
+            fprintf(stderr, "processing chunk...");
+            fflush(stderr);
+
             std::pair<size_t, size_t> chunk_info = 
                 process_chunk(sam_lines, chunk_buffer_in, chunk_buffer_out, 
                               sam_order, & line_index);
-            
+            clock_gettime(CLOCK_REALTIME, &time_end);
+            fprintf(stderr, "done. %Zu ms\n", elapsed_ms(time_begin, time_end));
+            fflush(stderr);
+
             // the final write
             fwrite(chunk_buffer_out, 1, chunk_info.first, sorted_sam_fh);
 
             offset_quantile_sizes.push_back(chunk_info.first);
             chunk_num_lines.push_back(chunk_info.second);
             
-            fprintf(stderr, " %zu", chunk_num);
-            fflush(stderr);
-            
         }
         else
         {
             char * tmp_file = new char[template_length + 1];
             strcpy(tmp_file, tmp_file_template);
-            mkstemp(tmp_file);
-            // FILE * tmp_fh = fdopen(fdes, "w+");
-            gzFile_s * write_tmp_fh = gzopen(tmp_file, "w");
-            gzsetparams(write_tmp_fh, tmp_file_gz_level, tmp_file_gz_strategy);
-
-            if (write_tmp_fh == NULL)
-            {
-                fprintf(stderr, "Error: couldn't open temporary chunk file %s for reading/writing.\n",
-                        tmp_file);
-                exit(1);
-            }
+            int fdes = mkstemp(tmp_file);
+            FILE * tmp_fh = fdopen(fdes, "w");
+            // gzFile_s * write_tmp_fh = gzopen(tmp_file, "w");
+            // gzsetparams(write_tmp_fh, tmp_file_gz_level, tmp_file_gz_strategy);
 
             // these names will be used later
             tmp_files.push_back(tmp_file);
 
+            clock_gettime(CLOCK_REALTIME, &time_begin);
+            fprintf(stderr, "nullifying lines...");
+            fflush(stderr);
+
             std::vector<char *> sam_lines = 
                 FileUtils::find_complete_lines_nullify(chunk_buffer_in, & last_fragment);
+
+            clock_gettime(CLOCK_REALTIME, &time_end);
+            fprintf(stderr, "done. %Zu ms\n", elapsed_ms(time_begin, time_end));
+            fflush(stderr);
             
+            // time = clock();
+
             if (! sam_order.Initialized() && ! sam_lines.empty())
             {
                 sam_order.InitFromID(sam_lines[0]);
             }
             
+            clock_gettime(CLOCK_REALTIME, &time_begin);
+            fprintf(stderr, "Sorting...");
+            fflush(stderr);
+
             std::pair<size_t, size_t> chunk_info = 
                 process_chunk(sam_lines, chunk_buffer_in, chunk_buffer_out, 
                               sam_order, & line_index);
             
-            // as an experiment, let's try instead using a z_stream and writing
-            // individual chunks using the gzip encoding
-            
+            clock_gettime(CLOCK_REALTIME, &time_end);
+            fprintf(stderr, "done. %Zu ms\n", elapsed_ms(time_begin, time_end));
+            fflush(stderr);
+            clock_gettime(CLOCK_REALTIME, &time_begin);
 
-            int nbytes_written = gzwrite(write_tmp_fh, chunk_buffer_out, chunk_info.first);
-            if ((size_t)nbytes_written != chunk_info.first)
+
+            // initialize zstreams for writing
+            std::vector<z_stream> zstreams(num_threads);
+            std::vector<unsigned char *> z_chunk_starts(num_threads);
+            std::vector<unsigned int> input_chunk_lengths(num_threads);
+
+            char * z_chunk_buffer_out = new char[chunk_size];
+
+            size_t subchunk_size = chunk_size / num_threads;
+            size_t extra_at_end = chunk_size % num_threads;
+            for (size_t t = 0; t != num_threads; ++t)
             {
-                fprintf(stderr, "Error: couldn't write tmp file %s\n", tmp_file);
-                exit(1);
+                input_chunk_lengths[t] = (t == num_threads - 1) ? (subchunk_size + extra_at_end) : subchunk_size; 
+                z_chunk_starts[t] = (unsigned char *)(z_chunk_buffer_out + (t * subchunk_size));
+                zstreams[t].zalloc = Z_NULL;
+                zstreams[t].zfree = Z_NULL;
+                zstreams[t].opaque = Z_NULL;
+                deflateInit2(&zstreams[t], tmp_file_gz_level, 8, 15 + 16, 8, tmp_file_gz_strategy); // from minigzip.c, for writing gzip
+                zstreams[t].next_in = (unsigned char *)(chunk_buffer_out + (t * subchunk_size));
+                zstreams[t].avail_in = input_chunk_lengths[t];
+                zstreams[t].next_out = z_chunk_starts[t];
+                zstreams[t].avail_out = input_chunk_lengths[t];
             }
-            gzclose(write_tmp_fh);
+
+            fprintf(stderr, "Compressing...");
+            fflush(stderr);
+
+            // parallel deflate, writing the deflated contents into z_chunk_buffer_out
+            __gnu_parallel::for_each(zstreams.begin(), zstreams.end(), deflate_wrapper());
+
+            clock_gettime(CLOCK_REALTIME, &time_end);
+
+            fprintf(stderr, "done. %Zu ms\n", elapsed_ms(time_begin, time_end));
+            fflush(stderr);
+
+
+            clock_gettime(CLOCK_REALTIME, &time_begin);
+            fprintf(stderr, "Writing to file...");
+            fflush(stderr);
+
+
+            // sequential write of the subchunks into the tmp_fh
+            size_t nbytes_written = 0;
+            for (size_t t = 0; t != num_threads; ++t)
+            {
+                nbytes_written += fwrite(z_chunk_starts[t], 1, input_chunk_lengths[t] - zstreams[t].avail_out, tmp_fh);
+                deflateEnd(& zstreams[t]);
+            }
+            fclose(tmp_fh);
+
+            clock_gettime(CLOCK_REALTIME, &time_end);
+            fprintf(stderr, "%Zu bytes written. %Zu ms\n", nbytes_written, elapsed_ms(time_begin, time_end));
+            fflush(stderr);
+
+
+            // int nbytes_written = gzwrite(write_tmp_fh, chunk_buffer_out, chunk_info.first);
+            // if ((size_t)nbytes_written != chunk_info.first)
+            // {
+            //     fprintf(stderr, "Error: couldn't write tmp file %s\n", tmp_file);
+            //     exit(1);
+            // }
+            // gzclose(write_tmp_fh);
             
+            delete z_chunk_buffer_out;
 
             gzFile_s * read_tmp_fh = gzopen(tmp_file, "r"); // is this safe?
             read_tmp_fhs.push_back(read_tmp_fh);
@@ -373,9 +451,6 @@ int main_sam_sort(int argc, char ** argv)
             offset_quantile_sizes.push_back(chunk_info.first);
             chunk_num_lines.push_back(chunk_info.second);
             
-            fprintf(stderr, " %zu", chunk_num);
-            fflush(stderr);
-            
             nbytes_unused = strlen(last_fragment);
             memmove(chunk_buffer_in, last_fragment, nbytes_unused);
             read_pointer = chunk_buffer_in + nbytes_unused;
@@ -384,8 +459,6 @@ int main_sam_sort(int argc, char ** argv)
         }
     }        
 
-    fprintf(stderr, ".\n");
-    fflush(stderr);
     fclose(alignment_sam_fh);
     
     delete [] chunk_buffer_in;

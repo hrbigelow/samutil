@@ -191,6 +191,9 @@ void gzread_and_copy::operator()(gzread_target & item)
     }
 }
 
+
+
+
 // gathers next sub-chunks from each temp file, starting at
 // 'prev_chunk_starts', and using 'query_key_quantile' to find
 // the end of each subchunk.
@@ -556,4 +559,14 @@ get_quantiles(std::vector<LineIndex> * line_index,
     }
     quantiles.push_back(end);
     return quantiles;
+}
+
+
+
+// miscellaneous helper function
+size_t elapsed_ms(timespec & beg, timespec & end)
+{
+    return
+        ((end.tv_sec * 1000000000 + end.tv_nsec) - 
+         (beg.tv_sec * 1000000000 + beg.tv_nsec)) / 1000000;
 }

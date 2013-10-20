@@ -3,6 +3,7 @@
 
 #include <vector>
 #include <zlib.h>
+#include <time.h>
 
 #include "sam_helper.h"
 #include "sam_order.h"
@@ -78,5 +79,7 @@ get_quantiles(std::vector<LineIndex> * line_index,
               bool (less_fcn)(LineIndex const&, LineIndex const&),
               size_t num_chunks);
 
+
+size_t elapsed_ms(timespec & beg, timespec & end);
 
 #endif // _ALIGN_EVAL_AUX_H

@@ -131,4 +131,6 @@ size_t parse_fragment_id_casava_1_8(char const* qname);
 
 size_t parse_fragment_id_zero(char const* /* qname */);
 
+size_t parse_flag_raw(char const* samline_string);
+
 #endif // _SAM_ORDER_H
