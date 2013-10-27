@@ -10,6 +10,9 @@
 #include <functional>
 #include <unordered_map>
 
+// forward declaration
+class SamOrder;
+
 /*
   Policy: Assume either a SAM or rSAM format when parsing, according
   to the 'expect_rsam_format' flag.
@@ -219,6 +222,7 @@ public:
                                bool _retain_qname_string);
 
     static SAM_QNAME_FORMAT sam_qname_format;
+    static SamOrder * sam_order;
     static char expected_read_layout[256];
     static bool expect_rsam_format;
     static bool brief_records; // prints records with numeric qnames, and '*' for SEQ and QUAL
@@ -227,10 +231,7 @@ public:
     static bool initialized;
     static bool retain_qname_string;
 
-    static size_t (* parse_fragment_id)(char const* qname);
-
     SamLine();
-
     ~SamLine();
 
 
@@ -326,6 +327,11 @@ int SAM_cmp_qname_flag_aux(char const* qname1, int flag1,
 
 
 void PrintSAMHeader(FILE ** input_sam_fh, FILE * output_fh);
+
+void reverse_comp(char const* begin, char const* end, char * rcomp);
+
+void reverse_comp_inplace(char * begin, char * end);
+
 
 #endif // _SAM_HELPER_H
 

@@ -210,7 +210,7 @@ void reverse_comp(char const* begin, char const* end, char * rcomp)
 // outputs the reverse complement of a range defined by [begin, end)
 // into rcomp.  rcomp may be equal to begin or not, but it must contain
 // enough space
-void reverse_comp_inplace(char const* begin, char const* end)
+void reverse_comp_inplace(char * begin, char * end)
 {
     
     char * comp;
@@ -321,9 +321,7 @@ size_t SamLine::worst_fragment_score;
 bool SamLine::initialized = false;
 bool SamLine::retain_qname_string = false;
 
-size_t (* SamLine::parse_fragment_id)(char const* qname) = &parse_fragment_id_zero;
-
-
+SamOrder * SamLine::sam_order;
 
 void SamLine::SetGlobalFlags(SAM_QNAME_FORMAT _qname_format,
                              char const* _expected_layout,
@@ -332,13 +330,10 @@ void SamLine::SetGlobalFlags(SAM_QNAME_FORMAT _qname_format,
                              bool _retain_qname_string)
 {
     SamLine::sam_qname_format = _qname_format;
-    switch(SamLine::sam_qname_format)
-    {
-    case SAM_NUMERIC: SamLine::parse_fragment_id = &parse_fragment_id_numeric; break;
-    case SAM_ILLUMINA: SamLine::parse_fragment_id = &parse_fragment_id_illumina; break;
-    case SAM_CASAVA18: SamLine::parse_fragment_id = &parse_fragment_id_casava_1_8; break;
-    case SAM_NON_INTERPRETED: SamLine::parse_fragment_id = &parse_fragment_id_zero; break;
-    }
+    SamLine::sam_order = new SamOrder(SAM_RID, "ALIGN");
+
+    // this provides parse_fragment_id
+    SamLine::sam_order->InitFromChoice(_qname_format);
 
     strcpy(SamLine::expected_read_layout, _expected_layout);
     strcpy(SamLine::raw_score_tag, _raw_score_tag);
@@ -371,7 +366,7 @@ SamLine::SamLine(SAM_PARSE _parse_flag,
     if (SamLine::expect_rsam_format)
     {
         // FID.FLAG.RNAME.POS.MAPQ.CIGAR.TAGRAW[.TAG[.TAG[.TAG...]]]
-        size_t fragment_id = this->parse_fragment_id(_qname);
+        size_t fragment_id = (this->sam_order->*(this->sam_order->parse_fragment_id))(_qname);
         if (fragment_id == QNAME_FORMAT_ERROR)
         {
             fprintf(stderr, "Error: samline_fragment_id: bad qname format in this qname\n%s\n\n",
@@ -701,7 +696,7 @@ void SamLine::Init(char const* samline_string)
             }
             else
             {
-                this->fragment_id = this->parse_fragment_id(qname);
+                this->fragment_id = (this->sam_order->*(this->sam_order->parse_fragment_id))(qname);
 
                 if (this->fragment_id == QNAME_FORMAT_ERROR)
                 {

@@ -4,12 +4,15 @@
 #include "gtf.h"
 
 #include <set>
+#include <omp.h>
 
 //!!! This is muddied in that it is partially up to the user, partly a nuissance.
 SamOrder::SamOrder(SAM_ORDER _so, char const* _sort_type) : 
     order(_so),
     parse_fragment_id(NULL)
 {
+    omp_init_lock(&this->flowcell_hash_write_lock);
+
     strcpy(this->sort_type, _sort_type);
 
     switch (this->order)
@@ -100,6 +103,7 @@ SamOrder::~SamOrder()
     }
     this->projections.clear();
 
+    omp_destroy_lock(&this->flowcell_hash_write_lock);
 }
 
 
@@ -126,20 +130,23 @@ SAM_QNAME_FORMAT QNAMEFormat(char const* sam_dataline)
 {
     SAM_QNAME_FORMAT qname_format;
 
+    // the settings here don't matter.
+    SamOrder dummy(SAM_RID, "ALIGN");
+
     if (strlen(sam_dataline) == 0)
     {
         qname_format = SAM_NON_INTERPRETED;
     }
-    else if (parse_fragment_id_numeric(sam_dataline) != QNAME_FORMAT_ERROR)
+    else if (dummy.parse_fragment_id_numeric(sam_dataline) != QNAME_FORMAT_ERROR)
     {
         qname_format = SAM_NUMERIC;
     }
-    else if (parse_fragment_id_illumina(sam_dataline) != QNAME_FORMAT_ERROR)
+    else if (dummy.parse_fragment_id_illumina(sam_dataline) != QNAME_FORMAT_ERROR)
     {
         qname_format = SAM_ILLUMINA;
     }
     // 
-    else if (parse_fragment_id_casava_1_8(sam_dataline) != QNAME_FORMAT_ERROR)
+    else if (dummy.parse_fragment_id_casava_1_8(sam_dataline) != QNAME_FORMAT_ERROR)
     {
         qname_format = SAM_CASAVA18;
     }
@@ -170,10 +177,10 @@ void SamOrder::InitFromChoice(SAM_QNAME_FORMAT qname_format)
 {
     switch(qname_format)
     {
-    case SAM_NON_INTERPRETED: this->parse_fragment_id = &parse_fragment_id_zero; break;
-    case SAM_NUMERIC: this->parse_fragment_id = &parse_fragment_id_numeric; break;
-    case SAM_ILLUMINA: this->parse_fragment_id = &parse_fragment_id_illumina; break;
-    case SAM_CASAVA18: this->parse_fragment_id = &parse_fragment_id_casava_1_8; break;
+    case SAM_NON_INTERPRETED: this->parse_fragment_id = &SamOrder::parse_fragment_id_zero; break;
+    case SAM_NUMERIC: this->parse_fragment_id = &SamOrder::parse_fragment_id_numeric; break;
+    case SAM_ILLUMINA: this->parse_fragment_id = &SamOrder::parse_fragment_id_illumina; break;
+    case SAM_CASAVA18: this->parse_fragment_id = &SamOrder::parse_fragment_id_casava_1_8; break;
     default:
         fprintf(stderr, "Error: InitFromChoice: Don't know this qname format\n");
         exit(1);
@@ -482,7 +489,7 @@ void SamOrder::AddHeaderContigStats(char const* header)
 
 
 //produce index consistent with ordering [rname, pos]
-size_t SamOrder::samline_position_align(char const* samline) const
+size_t SamOrder::samline_position_align(char const* samline)
 {
 
     char contig[1024];
@@ -501,7 +508,7 @@ size_t SamOrder::samline_position_align(char const* samline) const
 // achieved by adding fragment_id to the index value only when.  contig_offsets by
 // convention assigns the offset of '*' (unmapped) to the last
 // position in the metacontig.
-size_t SamOrder::samline_projected_position_align(char const* samline) const
+size_t SamOrder::samline_projected_position_align(char const* samline)
 {
 
     char * contig;
@@ -534,7 +541,7 @@ size_t SamOrder::samline_projected_position_align(char const* samline) const
     // now, add in the sub-ordering if contig is 
     if (strcmp(contig, "*") == 0)
     {
-        flat_pos += this->parse_fragment_id(samline);
+        flat_pos += (this->*(this->parse_fragment_id))(samline);
     }
     
     delete contig;
@@ -544,9 +551,9 @@ size_t SamOrder::samline_projected_position_align(char const* samline) const
 
 
 //compute the fragment id assuming a numeric read id format
-size_t SamOrder::samline_fragment_id(char const* samline) const
+size_t SamOrder::samline_fragment_id(char const* samline)
 {
-    size_t fid = this->parse_fragment_id(samline);
+    size_t fid = (this->*(this->parse_fragment_id))(samline);
     if (fid == QNAME_FORMAT_ERROR)
     {
         fprintf(stderr, "Error: samline_fragment_id: bad qname format in this line\n%s\n\n",
@@ -582,7 +589,7 @@ bool less_seq_projection::operator()(SequenceProjection const& a,
 
 //compute the minimum collapsed start position between the alignment
 //and the guide.
-size_t SamOrder::samline_position_min_align_guide(char const* samline) const
+size_t SamOrder::samline_position_min_align_guide(char const* samline)
 {
     char guide_chrom_left[32];
     char guide_chrom_right[32];
@@ -685,7 +692,7 @@ void GenerateProjectionHeader(CONTIG_OFFSETS const& genome_contig_order,
 
 
 //compute the fragment id assuming a numeric read id format
-size_t parse_fragment_id_numeric(char const* qname)
+size_t SamOrder::parse_fragment_id_numeric(char const* qname)
 {
 
     size_t fragment_id;
@@ -745,24 +752,28 @@ size_t IlluminaID::get_raw() const
 //update record of flow cells.
 //contains a static member!
 //is this considered a memory leak?
-uint flowcell_hash_value(char const* flowcell)
+ // no, but it is not thread safe...
+uint SamOrder::flowcell_hash_value(char const* flowcell)
 {
-    static std::map<char const*, uint, less_char_ptr> flowcell_hash;
+    std::map<char const*, uint, less_char_ptr>::iterator fit = 
+        this->flowcell_hash.find(flowcell);
 
-    std::map<char const*, uint, less_char_ptr>::iterator fit = flowcell_hash.find(flowcell);
-    if (fit == flowcell_hash.end())
+    if (fit == this->flowcell_hash.end())
     {
-        size_t n = flowcell_hash.size();
+        // need to do mutex here...
+        omp_set_lock(&this->flowcell_hash_write_lock);
+        size_t n = this->flowcell_hash.size();
         char * fcopy = new char[strlen(flowcell) + 1];
         strcpy(fcopy, flowcell);
-        fit = flowcell_hash.insert(std::make_pair(fcopy, n + 1)).first;
+        fit = this->flowcell_hash.insert(std::make_pair(fcopy, n + 1)).first;
+        omp_unset_lock(&this->flowcell_hash_write_lock);
     }
     return (*fit).second;
 }
 
 
 // in case of format error, returns SIZE_MAX
-size_t parse_fragment_id_illumina(char const* qname)
+size_t SamOrder::parse_fragment_id_illumina(char const* qname)
 {
 
     //char flowcell[256];
@@ -790,7 +801,7 @@ size_t parse_fragment_id_illumina(char const* qname)
         return QNAME_FORMAT_ERROR;
     }
 
-    iid.flowcell = flowcell_hash_value(flowcell);
+    iid.flowcell = this->flowcell_hash_value(flowcell);
     iid.ypos = ypos;
     iid.xpos = xpos;
     iid.tile = tile;
@@ -826,7 +837,7 @@ size_t parse_fragment_id_illumina(char const* qname)
   @<instrument-name>:<run ID>:<flowcell ID>:<lane-number>:<tile-number>:<x-pos>:<y-pos>
 
 */
-size_t parse_fragment_id_casava_1_8(char const* qname)
+size_t SamOrder::parse_fragment_id_casava_1_8(char const* qname)
 {
 
     unsigned int lane, tile, xpos, ypos;
@@ -848,7 +859,7 @@ size_t parse_fragment_id_casava_1_8(char const* qname)
     strncpy(hashable_id, qname, hash_end_pos);
     hashable_id[hash_end_pos] = '\0';
 
-    iid.flowcell = flowcell_hash_value(hashable_id);
+    iid.flowcell = this->flowcell_hash_value(hashable_id);
     iid.lane = lane;
     iid.tile = tile;
     iid.xpos = xpos;
@@ -859,22 +870,7 @@ size_t parse_fragment_id_casava_1_8(char const* qname)
 
 
 
-size_t parse_fragment_id_zero(char const* /* qname */)
+size_t SamOrder::parse_fragment_id_zero(char const* /* qname */)
 {
     return 0;
-}
-
-
-// cheaply extract the raw flag value from a samline
-// samline need not be zero-terminated
-size_t parse_flag_raw(char const* samline_string)
-{
-    size_t flag;
-    int nfields_read = sscanf(samline_string, "%*zu\t" "%zu\t", &flag);
-    if (nfienlds_read != 1)
-    {
-        fprintf(stderr, "Error: parse_flag_raw: Couldn't parse flag from raw samline string\n");
-        exit(53);
-    }
-    return flag;
 }

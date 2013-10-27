@@ -26,8 +26,8 @@ bool less_key(LineIndex const& a, LineIndex const& b);
 
 struct partial_index_aux
 {
-    SamOrder const* sam_order;
-    partial_index_aux(SamOrder const* _sam_order);
+    SamOrder * sam_order;
+    partial_index_aux(SamOrder * _sam_order);
     LineIndex operator()(char * samline);
 };
 
@@ -45,7 +45,7 @@ std::pair<size_t, size_t>
     process_chunk(std::vector<char *> & sam_lines,
                   char * chunk_buffer_in,
                   char * chunk_buffer_out,
-                  SamOrder const& sam_order,
+                  SamOrder & sam_order,
                   std::vector<LineIndex> * line_index);
 
 void
@@ -80,6 +80,5 @@ get_quantiles(std::vector<LineIndex> * line_index,
               size_t num_chunks);
 
 
-size_t elapsed_ms(timespec & beg, timespec & end);
 
 #endif // _ALIGN_EVAL_AUX_H

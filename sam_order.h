@@ -8,6 +8,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <omp.h>
 
 enum SAM_ORDER
     {
@@ -45,14 +46,13 @@ class SamOrder
 
     PROJECTIONS projections;
 
+    // initialized in constructor
     bool (SamOrder::* less)(SamLine const& a, SamLine const& b) const;
     bool (SamOrder::* equal)(SamLine const& a, SamLine const& b) const;
+    size_t (SamOrder::* sam_index)(char const* samline);
 
-    // returns QNAME_FORMAT_ERROR in case of format error
-    size_t (* parse_fragment_id)(char const* qname);
-
-    size_t (SamOrder::* sam_index)(char const* samline) const;
-    
+    // initialized in SamOrder::InitFromChoice
+    size_t (SamOrder::* parse_fragment_id)(char const* qname);
     
     void AddHeaderContigStats(char const* header);
 
@@ -89,12 +89,24 @@ class SamOrder
     bool less_fragment_id_position(SamLine const& a, SamLine const& b) const;
     bool equal_fragment_id_position(SamLine const& a, SamLine const& b) const;
 
-    size_t samline_position_min_align_guide(char const* samline) const;
-    size_t samline_position_align(char const* samline) const;
-    size_t samline_projected_position_align(char const* samline) const;
+    size_t samline_position_min_align_guide(char const* samline);
+    size_t samline_position_align(char const* samline);
+    size_t samline_projected_position_align(char const* samline);
+    size_t samline_fragment_id(char const* samline);
 
     /* size_t samline_read_id(char const* samline) const; */
-    size_t samline_fragment_id(char const* samline) const;
+
+    uint flowcell_hash_value(char const* flowcell);
+
+    // maintains a record of all flowcells seen, and assigns integers to them.
+    omp_lock_t flowcell_hash_write_lock;
+    std::map<char const*, uint, less_char_ptr> flowcell_hash;
+
+    size_t parse_fragment_id_numeric(char const* qname);
+    size_t parse_fragment_id_illumina(char const* qname);
+    size_t parse_fragment_id_casava_1_8(char const* qname);
+    size_t parse_fragment_id_zero(char const* /* qname */);
+
 
 };
 
@@ -122,15 +134,5 @@ size_t flattened_position_aux(char const* contig,
 void GenerateProjectionHeader(CONTIG_OFFSETS const& genome_contig_order,
                               std::set<SequenceProjection> const& tx_to_genome,
                               FILE * out_sam_header_fh);
-
-size_t parse_fragment_id_numeric(char const* qname);
-
-size_t parse_fragment_id_illumina(char const* qname);
-
-size_t parse_fragment_id_casava_1_8(char const* qname);
-
-size_t parse_fragment_id_zero(char const* /* qname */);
-
-size_t parse_flag_raw(char const* samline_string);
 
 #endif // _SAM_ORDER_H

@@ -10,7 +10,9 @@ SOURCES = $(shell find $(srcdir) -name "*.cc")
 BIN = fastq2fastq make_sq_header make_dnas_file fasta2cisfasta	\
 	 shuffle_paired_fastq fastq_type
 
-BIN += samutil align_eval deal_fastq find_index_collisions
+BIN += samutil align_eval deal_fastq \
+
+# find_index_collisions
 
 BIN += nmer_spectrum
 
@@ -118,7 +120,8 @@ samutil_OBJS = $(addprefix $(OBJDIR)/, samutil.o sam_tx2genome.o		\
 	dep/tools.o sam_score.o sam_truncate.o sam_seqindex.o sam_rejoin.o	\
 	sam_sort.o sam_checksort.o align_eval_aux.o sam_score_aux.o			\
 	sam_aux.o seq_projection.o gtf.o file_utils.o sam_buffer.o			\
-	sam_helper.o sam_order.o cigar_ops.o sam_filter.o sam_filter_aux.o)
+	sam_helper.o sam_order.o cigar_ops.o sam_filter.o sam_filter_aux.o  \
+	zstream_tools.o sam_to_fastq.o sam_extract_fastq.o time_tools.o)
 
 
 samutil: $(samutil_OBJS)
@@ -193,7 +196,7 @@ scatter_smoothing : $(scatter_smoothing_OBJS)
 	$(CXX) $(CXXFLAGS) -lz $(LDFLAGS) -o $@ $^
 
 
--include $(subst .cc,$(OBJDIR)/.d,$(SOURCES))
+-include $(patsubst ./%.cc,$(OBJDIR)/%.d,$(SOURCES))
 
 define make-depend
 $(CXX) -MM -MF $3 -MP -MT $2 $(CXXFLAGS) $(CPPFLAGS) $1

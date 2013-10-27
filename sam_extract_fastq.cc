@@ -30,13 +30,14 @@ encountered.
 
 #include <parallel/algorithm>
 
-#include "align_eval_raw.h"
-#include "align_eval_aux.h"
+#include "sam_to_fastq.h"
+#include "time_tools.h"
+#include "zstream_tools.h"
 
 #include "file_utils.h"
-#include "dep/tools.h"
-#include "sam_helper.h"
-#include "sam_order.h"
+// #include "dep/tools.h"
+// #include "sam_helper.h"
+// #include "sam_order.h"
 
 
 int sam_extract_usage(size_t mdef, size_t zdef, size_t ydef)
@@ -47,7 +48,6 @@ int sam_extract_usage(size_t mdef, size_t zdef, size_t ydef)
             "Options:\n\n"
             "-m  INT       number bytes of memory to use [%Zu]\n"
             "-t  INT       number of threads to use [1]\n"
-            "-C  STRING    work in the directory named here [.]\n"
             "-z  INT       zlib compression level to be used on tmp files (0-9). 0 means no compression. [%Zu]\n"
             "-y  INT       zlib compression strategy for tmp files (0-4).  [%Zu]\n"
             "              0=Z_DEFAULT_STRATEGY, 1=Z_FILTERED, 2=Z_HUFFMAN_ONLY, 3=Z_RLE, 4=Z_FIXED\n\n",
@@ -75,8 +75,6 @@ int main_sam_extract(int argc, char ** argv)
 
     size_t num_threads = 1;
 
-    char const* tmp_file_prefix = NULL;
-
     char c;
     while ((c = getopt(argc, argv, "m:t:z:y:")) >= 0)
     {
@@ -86,7 +84,7 @@ int main_sam_extract(int argc, char ** argv)
         case 't': num_threads = static_cast<size_t>(atof(optarg)); break;
         case 'z': tmp_file_gz_level = static_cast<size_t>(atof(optarg)); break;
         case 'y': tmp_file_gz_strategy = static_cast<size_t>(atof(optarg)); break;
-        default: return sam_sort_usage(max_mem_def, tmp_file_gz_level_def, tmp_file_gz_strategy_def); break;
+        default: return sam_extract_usage(max_mem_def, tmp_file_gz_level_def, tmp_file_gz_strategy_def); break;
         }
     }
 
@@ -98,9 +96,9 @@ int main_sam_extract(int argc, char ** argv)
     __gnu_parallel::_Settings::set(psettings);
 
     size_t argcount = argc - optind;
-    bool paired_read_mode = (argcount == 3);
+    bool paired_read_mode = (argcount == 4);
 
-    if (argcount != 1 && argcount != 3)
+    if (argcount != 2 && argcount != 4)
     {
         return sam_extract_usage(max_mem_def, tmp_file_gz_level_def,
                                  tmp_file_gz_strategy_def);
@@ -113,7 +111,7 @@ int main_sam_extract(int argc, char ** argv)
     char const* orphan_fastq_file = "/dev/null";
 
     
-    if (argcount == 3)
+    if (paired_read_mode)
     {
         fastq2_file = argv[optind + 2];
         orphan_fastq_file = argv[optind + 3];
@@ -123,24 +121,30 @@ int main_sam_extract(int argc, char ** argv)
     FILE * fastq1_fh = open_if_present(fastq1_file, "w");
 
     // these will be NULL if we are in single read mode
-    FILE * fastq2_fh;
-    FILE * orphan_fastq_fh;
+    FILE * fastq2_fh = NULL;
+    FILE * orphan_fastq_fh = NULL;
 
+    size_t chunk_size;
     if (paired_read_mode)
     {    
         fastq2_fh = open_if_present(fastq2_file, "w");
         orphan_fastq_fh = open_if_present(orphan_fastq_file, "w");
+        chunk_size = max_mem / 4;
+    }
+    else
+    {
+        chunk_size = max_mem / 2;
     }
 
-    size_t chunk_size = max_mem / 2;
-
     char * chunk_buffer_in = new char[chunk_size + 1];
-    char * chunk_buffer_out[2];
+    char * chunk_buffer_out[2] = { NULL, NULL };
+    char * orphan_buffer_out = NULL;
 
     chunk_buffer_out[0] = new char[chunk_size + 1];
     if (paired_read_mode)
     {
         chunk_buffer_out[1] = new char[chunk_size + 1];
+        orphan_buffer_out = new char[chunk_size + 1];
     }
 
     char * read_pointer = chunk_buffer_in;
@@ -158,8 +162,9 @@ int main_sam_extract(int argc, char ** argv)
     delete dummy;
 
     bool is_last_chunk;
-    SamOrder sam_order(SAM_RID, "FRAGMENT");
 
+    zstream_tools zt(tmp_file_gz_strategy, tmp_file_gz_level);
+    
     while (! feof(sorted_sam_fh))
     {
 
@@ -181,34 +186,45 @@ int main_sam_extract(int argc, char ** argv)
         std::vector<char *> sam_lines = 
             FileUtils::find_complete_lines_nullify(chunk_buffer_in, & last_fragment);
 
+        size_t S = sam_lines.size();
+        SAMFastqView * fastq_view = new SAMFastqView[S];
+
         clock_gettime(CLOCK_REALTIME, &time_end);
         fprintf(stderr, "done. %Zu ms\n", elapsed_ms(time_begin, time_end));
         fflush(stderr);
             
-        if (! sam_order.Initialized() && ! sam_lines.empty())
-        {
-            sam_order.InitFromID(sam_lines[0]);
-        }
-
         // this won't work if we happen to read exactly the number of
         // bytes left in the file without tripping the 'feof' flag.
         is_last_chunk = feof(sorted_sam_fh);
 
-        size_t num_unprocessed_lines =
-            convert_chunk_sam_to_fastq(sam_lines,
-                                       & sam_order,
-                                       chunk_buffer_in, 
-                                       chunk_buffer_out[0],
-                                       chunk_buffer_out[1],
-                                       orphan_buffer_out,
-                                       is_last_chunk);
-            
+        init_fastq_view(sam_lines, fastq_view);
 
-        parallel_compress(chunk_buffer_out[0], chunk_size, num_threads, fastq1_fh);
-        if (paired_end_mode)
+        size_t s_last = find_last_fragment_bound(fastq_view, S, is_last_chunk);
+        size_t num_unprocessed_lines = S - s_last;
+
+        size_t nbytes_written[3];
+
+        if (paired_read_mode)
         {
-            parallel_compress(chunk_buffer_out[1], chunk_size, num_threads, fastq2_fh);
-            parallel_compress(orphan_buffer_out, chunk_size, num_threads, orphan_fastq_fh);
+            set_flags_fastq_view_paired(sam_lines, fastq_view, is_last_chunk);
+            write_fastq_view_paired(fastq_view, s_last, chunk_buffer_out[0],
+                                    chunk_buffer_out[1], orphan_buffer_out,
+                                    nbytes_written);
+        }
+        else
+        {
+            set_flags_fastq_view_single(sam_lines, fastq_view, is_last_chunk);
+            write_fastq_view_single(fastq_view, s_last, chunk_buffer_out[0], nbytes_written);
+            
+        }
+
+        delete [] fastq_view;
+
+        zt.parallel_compress(chunk_buffer_out[0], nbytes_written[0], num_threads, fastq1_fh);
+        if (paired_read_mode)
+        {
+            zt.parallel_compress(chunk_buffer_out[1], nbytes_written[1], num_threads, fastq2_fh);
+            zt.parallel_compress(orphan_buffer_out, nbytes_written[2], num_threads, orphan_fastq_fh);
         }
 
         // now need to put back the unprocessed lines plus number of

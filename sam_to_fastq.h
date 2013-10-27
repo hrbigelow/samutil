@@ -16,6 +16,7 @@
 
  */
 
+#include "sam_order.h"
 
 // a view of a SAM line entry as Fastq
 struct SAMFastqView
@@ -23,7 +24,7 @@ struct SAMFastqView
     char const* qname;
     size_t qname_len;
     size_t fragment_id;
-    size_t flag_raw;
+    SamFlag flag;
     char const* seq;
     char const* qual;
     size_t seqlen;
@@ -35,15 +36,15 @@ struct SAMFastqView
                  size_t _fragment_id, size_t _flag_raw, 
                  char const* _seq, char const* _qual, 
                  size_t _seqlen);
-    void print(char *outbuf);
+    char * print(char *outbuf);
 };
 
 
 // very similar to 'partial_index_aux' from align_eval_aux.h
 struct SAMFastqView_aux
 {
-    SAMOrder const* sam_order;
-    SAMFastqView_aux(SamOrder const* _sam_order);
+    SamOrder * sam_order;
+    SAMFastqView_aux(SamOrder * _sam_order);
     SAMFastqView operator()(char * samline_string);
 };
 
@@ -54,9 +55,38 @@ struct SAMFastqView_aux
 // otherwise assume paired-end reads
 // return the number of samlines NOT processed.
 size_t convert_chunk_sam_to_fastq(std::vector<char *> & samlines,
-                                  SAMOrder const* sam_order,
+                                  SamOrder const* sam_order,
                                   char * chunk_buffer_in,
                                   char * fastq1_buffer_out,
                                   char * fastq2_buffer_out,
                                   char * orphan_buffer_out,
                                   bool is_last_chunk);
+
+void init_fastq_view(std::vector<char *> & sam_lines,
+                     SAMFastqView * fastq_view);
+
+
+size_t find_last_fragment_bound(SAMFastqView * fastq_view, size_t S, bool is_last_chunk);
+
+void set_flags_fastq_view_paired(std::vector<char *> & sam_lines,
+                                 SAMFastqView * fastq_view,
+                                 bool is_last_chunk);
+
+
+void set_flags_fastq_view_single(std::vector<char *> & sam_lines,
+                                 SAMFastqView * fastq_view,
+                                 bool is_last_chunk);
+
+
+void write_fastq_view_paired(SAMFastqView * fastq_view,
+                             size_t vS,
+                             char * fastq1_buffer_out,
+                             char * fastq2_buffer_out,
+                             char * orphan_buffer_out,
+                             size_t * nbytes_written);
+
+
+void write_fastq_view_single(SAMFastqView * fastq_view,
+                             size_t vS,
+                             char * fastq_buffer_out,
+                             size_t * nbytes_written);

@@ -22,7 +22,7 @@ bool less_key(LineIndex const& a, LineIndex const& b)
 
 
 //unary function for computing index
-partial_index_aux::partial_index_aux(SamOrder const* _sam_order) : sam_order(_sam_order) { }
+partial_index_aux::partial_index_aux(SamOrder * _sam_order) : sam_order(_sam_order) { }
 
 LineIndex partial_index_aux::operator()(char * samline)
 {
@@ -69,7 +69,7 @@ std::pair<size_t, size_t>
 process_chunk(std::vector<char *> & samlines,
               char * chunk_buffer_in,
               char * chunk_buffer_out,
-              SamOrder const& sam_order,
+              SamOrder & sam_order,
               std::vector<LineIndex> * line_index)
 {
     size_t S = samlines.size();
@@ -559,14 +559,4 @@ get_quantiles(std::vector<LineIndex> * line_index,
     }
     quantiles.push_back(end);
     return quantiles;
-}
-
-
-
-// miscellaneous helper function
-size_t elapsed_ms(timespec & beg, timespec & end)
-{
-    return
-        ((end.tv_sec * 1000000000 + end.tv_nsec) - 
-         (beg.tv_sec * 1000000000 + beg.tv_nsec)) / 1000000;
 }
