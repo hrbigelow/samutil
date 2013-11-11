@@ -34,7 +34,7 @@ LDFLAGS =
 
 bindir = $(HOME)/usr/bin
 OBJDIR = obj
-CXXFLAGS = -ggdb3 -Wall -Wno-pointer-arith -std=c++0x -fopenmp $(OPT) $(DEBUG)
+CXXFLAGS = -ggdb3 -Wall -Wextra -std=c++0x -fopenmp $(OPT) $(DEBUG)
 
 
 .PHONY: all clean
@@ -120,9 +120,9 @@ samutil_OBJS = $(addprefix $(OBJDIR)/, samutil.o sam_tx2genome.o		\
 	dep/tools.o sam_score.o sam_truncate.o sam_seqindex.o sam_rejoin.o	\
 	sam_sort.o sam_checksort.o align_eval_aux.o sam_score_aux.o			\
 	sam_aux.o seq_projection.o gtf.o file_utils.o sam_buffer.o			\
-	sam_helper.o sam_order.o cigar_ops.o sam_filter.o sam_filter_aux.o  \
-	zstream_tools.o sam_to_fastq.o sam_extract_fastq.o time_tools.o)
-
+	sam_helper.o sam_order.o cigar_ops.o sam_filter.o sam_filter_aux.o	\
+	zstream_tools.o sam_to_fastq.o sam_extract_fastq.o time_tools.o		\
+	gzip_tools.o)
 
 samutil: $(samutil_OBJS)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -lz -lpthread -o $@ $^

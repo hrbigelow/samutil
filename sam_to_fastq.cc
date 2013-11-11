@@ -15,13 +15,18 @@ SAMFastqView::SAMFastqView() { }
 
 SAMFastqView::SAMFastqView(char const* _qname, size_t _qname_len, 
                            size_t _fragment_id, size_t _flag_raw, 
-                           char const* _seq, char const* _qual, size_t _seqlen) :
+                           char const* _seq, char const* _qual, 
+                           size_t _seqlen,
+                           bool _do_print,
+                           bool _is_orphan) :
     qname(_qname),
     qname_len(_qname_len),
     fragment_id(_fragment_id),
     seq(_seq),
     qual(_qual),
-    seqlen(_seqlen)
+    seqlen(_seqlen),
+    do_print(_do_print),
+    is_orphan(_is_orphan)
 { 
     this->flag.set_raw(_flag_raw);
 }
@@ -101,7 +106,7 @@ SAMFastqView SAMFastqView_aux::operator()(char * samline_string)
     qual = samline_string + qualstart;
     seqlen = seqend - seqstart;
 
-    return SAMFastqView(qname, qname_len, fragment_id, flag_raw, seq, qual, seqlen);
+    return SAMFastqView(qname, qname_len, fragment_id, flag_raw, seq, qual, seqlen, false, false);
 }
 
 
@@ -144,11 +149,12 @@ size_t find_last_fragment_bound(SAMFastqView * fastq_view, size_t S, bool is_las
     return s_last + 1;
 }                     
 
-
+// post-condition: any non-null member of marked_reads
+// will have its is_orphan field correctly set
 void init_orphan_field(SAMFastqView * marked_reads[])
 {
     bool is_orphan = (marked_reads[0] == NULL || marked_reads[1] == NULL);
-    
+    // assert(is_orphan == false);
     // the is_orphan field must wait until seeing all reads of this fragment
     if (marked_reads[0] != NULL)
     {
@@ -280,6 +286,8 @@ void write_fastq_view_paired(SAMFastqView * fastq_view,
     nbytes_written[0] = (write_pointer[0] - fastq1_buffer_out);
     nbytes_written[1] = (write_pointer[1] - fastq2_buffer_out);
     nbytes_written[2] = (orphan_pointer - orphan_buffer_out);
+    // printf("nbytes_written[2] = %Zu\n", nbytes_written[2]);
+    // printf("orphan_pointer - orphan_buffer_out = %li\n", (orphan_pointer - orphan_buffer_out));
 }
 
 

@@ -25,6 +25,7 @@ encountered.
 #include <cstdio>
 #include <zlib.h>
 #include <ctime>
+#include <time.h>
 
 #include <omp.h>
 
@@ -33,11 +34,9 @@ encountered.
 #include "sam_to_fastq.h"
 #include "time_tools.h"
 #include "zstream_tools.h"
+#include "gzip_tools.h"
 
 #include "file_utils.h"
-// #include "dep/tools.h"
-// #include "sam_helper.h"
-// #include "sam_order.h"
 
 
 int sam_extract_usage(size_t mdef, size_t zdef, size_t ydef)
@@ -48,7 +47,7 @@ int sam_extract_usage(size_t mdef, size_t zdef, size_t ydef)
             "Options:\n\n"
             "-m  INT       number bytes of memory to use [%Zu]\n"
             "-t  INT       number of threads to use [1]\n"
-            "-z  INT       zlib compression level to be used on tmp files (0-9). 0 means no compression. [%Zu]\n"
+            "-z  INT       zlib compression level to be used on tmp files (0-8). 0 means no compression. [%Zu]\n"
             "-y  INT       zlib compression strategy for tmp files (0-4).  [%Zu]\n"
             "              0=Z_DEFAULT_STRATEGY, 1=Z_FILTERED, 2=Z_HUFFMAN_ONLY, 3=Z_RLE, 4=Z_FIXED\n\n",
             mdef, zdef, ydef);
@@ -88,6 +87,12 @@ int main_sam_extract(int argc, char ** argv)
         }
     }
 
+    if (tmp_file_gz_level > 8)
+    {
+        fprintf(stderr, "Error: zlib compression level > 8 is not supported\n");
+        return sam_extract_usage(max_mem_def, tmp_file_gz_level_def,
+                                 tmp_file_gz_strategy_def);
+    }
     omp_set_dynamic(false);
     omp_set_num_threads(num_threads);
 
@@ -124,6 +129,7 @@ int main_sam_extract(int argc, char ** argv)
     FILE * fastq2_fh = NULL;
     FILE * orphan_fastq_fh = NULL;
 
+
     size_t chunk_size;
     if (paired_read_mode)
     {    
@@ -135,6 +141,8 @@ int main_sam_extract(int argc, char ** argv)
     {
         chunk_size = max_mem / 2;
     }
+
+    FILE * out_fhs[3] = { fastq1_fh, fastq2_fh, orphan_fastq_fh };
 
     char * chunk_buffer_in = new char[chunk_size + 1];
     char * chunk_buffer_out[2] = { NULL, NULL };
@@ -165,6 +173,23 @@ int main_sam_extract(int argc, char ** argv)
 
     zstream_tools zt(tmp_file_gz_strategy, tmp_file_gz_level);
     
+    time_t current_time = time(NULL);
+    // unsigned long fq_headlen[3];
+
+    if (tmp_file_gz_level > 0)
+    {
+        put_gzip_header(NULL, current_time, tmp_file_gz_level, fastq1_fh);
+    }
+
+    if (paired_read_mode && tmp_file_gz_level > 0)
+    {
+        put_gzip_header(NULL, current_time, tmp_file_gz_level, fastq2_fh);
+        put_gzip_header(NULL, current_time, tmp_file_gz_level, orphan_fastq_fh);
+    }
+
+    size_t total_raw_bytes[3] = { 0, 0, 0 };
+    unsigned long crc32_check[3] = { crc32(0L, Z_NULL, 0), crc32(0L, Z_NULL, 0), crc32(0L, Z_NULL, 0) };
+
     while (! feof(sorted_sam_fh))
     {
 
@@ -193,38 +218,76 @@ int main_sam_extract(int argc, char ** argv)
         fprintf(stderr, "done. %Zu ms\n", elapsed_ms(time_begin, time_end));
         fflush(stderr);
             
-        // this won't work if we happen to read exactly the number of
-        // bytes left in the file without tripping the 'feof' flag.
+        // clunky test for whether there is anything left to read
+        char test_char = getc(sorted_sam_fh);
+        ungetc(test_char, sorted_sam_fh);
         is_last_chunk = feof(sorted_sam_fh);
 
         init_fastq_view(sam_lines, fastq_view);
 
         size_t s_last = find_last_fragment_bound(fastq_view, S, is_last_chunk);
         size_t num_unprocessed_lines = S - s_last;
+        // printf("s_last = %Zu\n", s_last);
 
         size_t nbytes_written[3];
 
         if (paired_read_mode)
         {
+            clock_gettime(CLOCK_REALTIME, &time_begin);
+            fprintf(stderr, "Converting from sam to fastq (in memory)...");
+            fflush(stderr);
+
             set_flags_fastq_view_paired(sam_lines, fastq_view, is_last_chunk);
             write_fastq_view_paired(fastq_view, s_last, chunk_buffer_out[0],
                                     chunk_buffer_out[1], orphan_buffer_out,
                                     nbytes_written);
+
+            clock_gettime(CLOCK_REALTIME, &time_end);
+            fprintf(stderr, "done. %Zu ms\n", elapsed_ms(time_begin, time_end));
+            fflush(stderr);
+
+            char * bufs[3] = { chunk_buffer_out[0], chunk_buffer_out[1], orphan_buffer_out };
+
+            clock_gettime(CLOCK_REALTIME, &time_begin);
+            fprintf(stderr, "Computing CRC32 of fastq chunk...");
+            fflush(stderr);
+
+            for (size_t i = 0; i != 3; ++i)
+            {
+                crc32_check[i] = 
+                    crc32_comb(crc32_check[i], 
+                               crc32_chunk(bufs[i], nbytes_written[i]),
+                               nbytes_written[i]);
+                total_raw_bytes[i] += nbytes_written[i];
+                // printf("total_raw_bytes[%Zu] += %Zu\n", i, nbytes_written[i]);
+            }
+
+            clock_gettime(CLOCK_REALTIME, &time_end);
+            fprintf(stderr, "done. %Zu ms\n", elapsed_ms(time_begin, time_end));
+            fflush(stderr);
+
         }
         else
         {
             set_flags_fastq_view_single(sam_lines, fastq_view, is_last_chunk);
             write_fastq_view_single(fastq_view, s_last, chunk_buffer_out[0], nbytes_written);
+
+            crc32_check[0] = 
+                crc32_comb(crc32_check[0], 
+                           crc32_chunk(chunk_buffer_out[0], nbytes_written[0]),
+                           nbytes_written[0]);
+
+            total_raw_bytes[0] += *nbytes_written;
             
         }
 
         delete [] fastq_view;
 
-        zt.parallel_compress(chunk_buffer_out[0], nbytes_written[0], num_threads, fastq1_fh);
+        zt.parallel_compress(chunk_buffer_out[0], nbytes_written[0], num_threads, is_last_chunk, fastq1_fh);
         if (paired_read_mode)
         {
-            zt.parallel_compress(chunk_buffer_out[1], nbytes_written[1], num_threads, fastq2_fh);
-            zt.parallel_compress(orphan_buffer_out, nbytes_written[2], num_threads, orphan_fastq_fh);
+            zt.parallel_compress(chunk_buffer_out[1], nbytes_written[1], num_threads, is_last_chunk, fastq2_fh);
+            zt.parallel_compress(orphan_buffer_out, nbytes_written[2], num_threads, is_last_chunk, orphan_fastq_fh);
         }
 
         // now need to put back the unprocessed lines plus number of
@@ -246,19 +309,28 @@ int main_sam_extract(int argc, char ** argv)
         ++chunk_num;
     }        
 
+    for (size_t f = 0; f != 3; ++f)
+    {
+        if (out_fhs[f] != NULL && tmp_file_gz_level > 0)
+        {
+            put_gzip_trailer(total_raw_bytes[f], crc32_check[f], out_fhs[f]);
+        }
+        if (total_raw_bytes[f] == 0)
+        {
+            fflush(out_fhs[f]);
+            ftruncate(fileno(out_fhs[f]), 0);
+        }
+        close_if_present(out_fhs[f]);
+    }
     
     fclose(sorted_sam_fh);
-    fclose(fastq1_fh);
-
-    close_if_present(fastq2_fh);
-    close_if_present(orphan_fastq_fh);
     
-    delete [] chunk_buffer_in;
-    delete [] chunk_buffer_out[0];
+    delete chunk_buffer_in;
+    delete chunk_buffer_out[0];
     if (chunk_buffer_out[1] != NULL)
     {
-        delete [] chunk_buffer_out[1];
-        delete [] orphan_buffer_out;
+        delete chunk_buffer_out[1];
+        delete orphan_buffer_out;
     }
 
     return 0;

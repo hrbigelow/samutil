@@ -35,7 +35,7 @@ struct SAMFastqView
     SAMFastqView(char const* _qname, size_t _qname_len,
                  size_t _fragment_id, size_t _flag_raw, 
                  char const* _seq, char const* _qual, 
-                 size_t _seqlen);
+                 size_t _seqlen, bool _do_print, bool _is_orphan);
     char * print(char *outbuf);
 };
 

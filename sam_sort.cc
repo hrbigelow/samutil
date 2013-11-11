@@ -39,6 +39,7 @@
 #include "sam_helper.h"
 #include "sam_order.h"
 #include "zstream_tools.h"
+#include "gzip_tools.h"
 
 #include "time_tools.h"
 
@@ -59,7 +60,7 @@ int sam_sort_usage(size_t mdef, size_t zdef, size_t ydef)
             "                -- For other sort_orders, this is ignored.\n"
             "-C  STRING    work in the directory named here [.]\n"
             "-T  STRING    path/and/prefix of temp files [name of output file]\n"
-            "-z  INT       zlib compression level to be used on tmp files (0-9). 0 means no compression. [%Zu]\n"
+            "-z  INT       zlib compression level to be used on tmp files (0-8). 0 means no compression. [%Zu]\n"
             "-y  INT       zlib compression strategy for tmp files (0-4).  [%Zu]\n"
             "              0=Z_DEFAULT_STRATEGY, 1=Z_FILTERED, 2=Z_HUFFMAN_ONLY, 3=Z_RLE, 4=Z_FIXED\n",
             mdef, zdef, ydef);
@@ -98,7 +99,7 @@ int main_sam_sort(int argc, char ** argv)
     size_t num_threads = 1;
     char const* working_dir = ".";
 
-    char const* tmp_file_prefix = NULL;
+    char const* tmp_file_prefix = "samutil_sort_tmp";
 
     char const* gtf_file = NULL;
 
@@ -130,6 +131,13 @@ int main_sam_sort(int argc, char ** argv)
     int arg_count = optind + 3;
     if (argc != arg_count)
     {
+        return sam_sort_usage(max_mem_def, tmp_file_gz_level_def,
+                              tmp_file_gz_strategy_def);
+    }
+
+    if (tmp_file_gz_level > 8)
+    {
+        fprintf(stderr, "Error: zlib compression level > 8 is not supported\n");
         return sam_sort_usage(max_mem_def, tmp_file_gz_level_def,
                               tmp_file_gz_strategy_def);
     }
@@ -289,6 +297,8 @@ int main_sam_sort(int argc, char ** argv)
 
     zstream_tools zt(tmp_file_gz_strategy, tmp_file_gz_level);
 
+    bool is_last_chunk;
+
     while (! feof(alignment_sam_fh))
     {
 
@@ -300,6 +310,11 @@ int main_sam_sort(int argc, char ** argv)
         clock_gettime(CLOCK_REALTIME, &time_end);
         fprintf(stderr, "%Zu bytes read. %Zu ms\n", nbytes_read, elapsed_ms(time_begin, time_end));
         fflush(stderr);
+
+        // clunky test for whether there is anything left to read
+        char test_char = getc(alignment_sam_fh);
+        ungetc(test_char, alignment_sam_fh);
+        is_last_chunk = feof(alignment_sam_fh);
 
         read_pointer[nbytes_read] = '\0';
 
@@ -376,9 +391,22 @@ int main_sam_sort(int argc, char ** argv)
             fprintf(stderr, "done. %Zu ms\n", elapsed_ms(time_begin, time_end));
             fflush(stderr);
 
+            if (tmp_file_gz_level > 0)
+              {
+                time_t current_time = time(NULL);
+                put_gzip_header(NULL, current_time, tmp_file_gz_level, tmp_fh);
+              }
+            
             size_t nbytes_written = 
-                zt.parallel_compress(chunk_buffer_out, chunk_info.first, num_threads, tmp_fh);
+                zt.parallel_compress(chunk_buffer_out, chunk_info.first, num_threads, true, tmp_fh);
             nbytes_written = 0;
+
+            if (tmp_file_gz_level > 0)
+              {
+                put_gzip_trailer(chunk_info.first, crc32_chunk(chunk_buffer_out, chunk_info.first), tmp_fh);
+              }
+
+            fclose(tmp_fh);
 
             gzFile_s * read_tmp_fh = gzopen(tmp_file, "r"); // is this safe?
             read_tmp_fhs.push_back(read_tmp_fh);
