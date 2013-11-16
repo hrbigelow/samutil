@@ -202,6 +202,8 @@ int main_sam_extract(int argc, char ** argv)
         fprintf(stderr, "%Zu bytes read. %Zu ms\n", nbytes_read, elapsed_ms(time_begin, time_end));
         fflush(stderr);
 
+        is_last_chunk = feof(sorted_sam_fh);
+
         read_pointer[nbytes_read] = '\0';
 
         clock_gettime(CLOCK_REALTIME, &time_begin);
@@ -217,11 +219,6 @@ int main_sam_extract(int argc, char ** argv)
         clock_gettime(CLOCK_REALTIME, &time_end);
         fprintf(stderr, "done. %Zu ms\n", elapsed_ms(time_begin, time_end));
         fflush(stderr);
-            
-        // clunky test for whether there is anything left to read
-        char test_char = getc(sorted_sam_fh);
-        ungetc(test_char, sorted_sam_fh);
-        is_last_chunk = feof(sorted_sam_fh);
 
         init_fastq_view(sam_lines, fastq_view);
 

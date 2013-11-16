@@ -311,11 +311,6 @@ int main_sam_sort(int argc, char ** argv)
         fprintf(stderr, "%Zu bytes read. %Zu ms\n", nbytes_read, elapsed_ms(time_begin, time_end));
         fflush(stderr);
 
-        // clunky test for whether there is anything left to read
-        char test_char = getc(alignment_sam_fh);
-        ungetc(test_char, alignment_sam_fh);
-        is_last_chunk = feof(alignment_sam_fh);
-
         read_pointer[nbytes_read] = '\0';
 
         if (feof(alignment_sam_fh) && tmp_files.empty())

@@ -145,7 +145,7 @@ get_key_quantiles(std::vector<LineIndex> const& line_index,
         key_quantile_nlines[k] = std::distance(kit, kit_end);
 
         LineIndex sentinel = (kit_end == line_index_copy.end())
-            ? LineIndex(INT64_MAX, INT64_MAX, 0)
+            ? LineIndex(SIZE_MAX, SIZE_MAX, 0)
             : *kit_end;
 
         (*key_quantile_sentinels).push_back(sentinel);
@@ -181,13 +181,27 @@ struct gzread_and_copy
 
 gzread_and_copy::gzread_and_copy() { }
 
+// since gzread cannot read more than UINT_MAX uncompressed bytes,
+// we need to loop until it does so.
 void gzread_and_copy::operator()(gzread_target & item)
 {
-    int bytes_read = gzread(item.source_file, item.dest_buffer, item.bytes_to_read);
-    if ((size_t)bytes_read != item.bytes_to_read) {
-        fprintf(stderr, "Error, tried to read %Zu bytes, could only read %Zu bytes, from tmp file\n",
-                item.bytes_to_read, (size_t)bytes_read);
-        exit(23);
+
+    size_t bytes_remaining = item.bytes_to_read;
+    unsigned int bytes_to_read;
+    unsigned int bytes_read;
+    char * write_pointer = item.dest_buffer;
+
+    while (bytes_remaining > 0)
+    {
+        bytes_to_read = bytes_remaining < UINT_MAX ? bytes_remaining : UINT_MAX;
+        bytes_read = gzread(item.source_file, write_pointer, bytes_to_read);
+        if ((size_t)bytes_read != bytes_to_read) {
+            fprintf(stderr, "Error, tried to read %i bytes, could only read %i bytes, from tmp file\n",
+                    bytes_read, bytes_to_read);
+            exit(23);
+        }
+        bytes_remaining -= bytes_read;
+        write_pointer += bytes_read;
     }
 }
 

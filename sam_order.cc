@@ -749,10 +749,21 @@ size_t IlluminaID::get_raw() const
 */
 
 
-//update record of flow cells.
-//contains a static member!
-//is this considered a memory leak?
- // no, but it is not thread safe...
+ // update record of flow cells.
+ // requirements:
+ /*
+   Requirements:
+   1. Must assign an integer in [0,16) (needs to be extended to larger range)
+   2. The order in which each flowcell name is seen must NOT influence the relative order
+      of any two flowcells after they are seen.
+      For example, for the total set (in the proper order given) of flowcells [A,B,C,D],
+      if we see them in the order [A,D,C,B], the assigned integers will be:  [8,12,10,9]
+      if we see them in the order [D,C,B,A], the assigned integer will be: [8,4,2,1]
+      In both cases, the final order is the same.
+      However, obviously this is a problem since there are possibly many more than log2(16) = 4
+      possible flowcells.  So, what to do?
+   3. Once an integer as assigned to a given flowcell, it cannot be changed.
+  */
 uint SamOrder::flowcell_hash_value(char const* flowcell)
 {
     std::map<char const*, uint, less_char_ptr>::iterator fit = 
