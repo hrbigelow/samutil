@@ -12,15 +12,15 @@ int usage()
             "Usage:\n\n"
             "samutil sort             sort a SAM, tSAM or rSAM file\n"
             "samutil checksort        check sorted order\n"
-            "samutil genome2tx        Condense reads-to-genome alignments to reads-to-transcriptome\n"
-            "samutil tx2genome        Expand reads-to-transcriptome alignments to reads-to-genome alignments\n"
+            // "samutil genome2tx        Condense reads-to-genome alignments to reads-to-transcriptome\n"
+            // "samutil tx2genome        Expand reads-to-transcriptome alignments to reads-to-genome alignments\n"
             "samutil get_tx_sequence  Get transcript sequence from genomic sequence\n"
             "samutil gen_qcal         Generate qcal file for use with 'samutil score'\n"
-            "samutil score            Set mapq, XP, XY, XZ, and primary alignment flags from fragment-sorted SAM file\n"
+            // "samutil score            Set mapq, XP, XY, XZ, and primary alignment flags from fragment-sorted SAM file\n"
             "samutil gen_header       Generate a projection-order transcript header\n"      
-            "samutil truncate         Truncate a SAM file, replacing QNAME, SEQ, QUAL\n"
-            "samutil rejoin           Convert rSAM to SAM (rejoin QNAME, SEQ, and QUAL)\n"
-            "samutil seqindex         Generate a sequence and index from fastq, to recover QNAME, SEQ, QUAL\n"
+            // "samutil truncate         Truncate a SAM file, replacing QNAME, SEQ, QUAL\n"
+            // "samutil rejoin           Convert rSAM to SAM (rejoin QNAME, SEQ, and QUAL)\n"
+            // "samutil seqindex         Generate a sequence and index from fastq, to recover QNAME, SEQ, QUAL\n"
             "samutil filter           Filter records based on their Fragment ID\n"
             "samutil extract          Extract reads from SAM file and output fastq.gz\n"
 
@@ -70,10 +70,10 @@ int main(int argc, char *argv[])
         exit(1);
         //return main_genome_to_transcript(argc - 1, argv + 1);
     }
-    else if (strcmp(argv[1], "tx2genome") == 0)
-    {
-        return main_tx2genome(argc - 1, argv + 1);
-    }
+    // else if (strcmp(argv[1], "tx2genome") == 0)
+    // {
+    //     return main_tx2genome(argc - 1, argv + 1);
+    // }
     else if (strcmp(argv[1], "get_tx_sequence") == 0)
     {
         fprintf(stderr, "Not ported yet");
@@ -84,28 +84,28 @@ int main(int argc, char *argv[])
     // {
     //     return main_score_dist(argc - 1, argv + 1);
     // }
-    else if (strcmp(argv[1], "score") == 0)
-    {
-        return main_score(argc - 1, argv + 1);
-    }
+    // else if (strcmp(argv[1], "score") == 0)
+    // {
+    //     return main_score(argc - 1, argv + 1);
+    // }
     else if (strcmp(argv[1], "gen_header") == 0)
     {
         fprintf(stderr, "Not ported yet");
         exit(1);
         //return main_generate_projection_header(argc - 1, argv + 1);
     }
-    else if (strcmp(argv[1], "truncate") == 0)
-    {
-        return main_sam_truncate(argc - 1, argv + 1);
-    }
-    else if (strcmp(argv[1], "seqindex") == 0)
-    {
-        return main_sam_seqindex(argc - 1, argv + 1);
-    }
-    else if (strcmp(argv[1], "rejoin") == 0)
-    {
-        return main_sam_rejoin(argc - 1, argv + 1);
-    }
+    // else if (strcmp(argv[1], "truncate") == 0)
+    // {
+    //     return main_sam_truncate(argc - 1, argv + 1);
+    // }
+    // else if (strcmp(argv[1], "seqindex") == 0)
+    // {
+    //     return main_sam_seqindex(argc - 1, argv + 1);
+    // }
+    // else if (strcmp(argv[1], "rejoin") == 0)
+    // {
+    //     return main_sam_rejoin(argc - 1, argv + 1);
+    // }
     else if (strcmp(argv[1], "filter") == 0)
     {
         return main_sam_filter(argc - 1, argv + 1);

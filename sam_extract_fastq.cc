@@ -35,7 +35,8 @@ encountered.
 #include "time_tools.h"
 #include "zstream_tools.h"
 #include "gzip_tools.h"
-
+#include "dep/tools.h"
+#include "sam_file.h"
 #include "file_utils.h"
 
 
@@ -166,8 +167,12 @@ int main_sam_extract(int argc, char ** argv)
     timespec time_begin, time_end;
 
     // advance sorted_sam_fh to the reads section.
-    char * dummy = ReadAllocSAMHeader(sorted_sam_fh);
-    delete dummy;
+    contig_dict contig_dictionary;
+    char * header = ReadAllocSAMHeader(sorted_sam_fh);
+    init_contig_length_offset(header, & contig_dictionary);
+    delete header;
+
+    index_dict_t flowcell_dict;
 
     bool is_last_chunk;
 
@@ -220,7 +225,12 @@ int main_sam_extract(int argc, char ** argv)
         fprintf(stderr, "done. %Zu ms\n", elapsed_ms(time_begin, time_end));
         fflush(stderr);
 
-        init_fastq_view(sam_lines, fastq_view);
+        init_fastq_view(sam_lines.data(), 
+                        sam_lines.size(),
+                        num_threads, 
+                        fastq_view,
+                        &contig_dictionary,
+                        &flowcell_dict);
 
         size_t s_last = find_last_fragment_bound(fastq_view, S, is_last_chunk);
         size_t num_unprocessed_lines = S - s_last;

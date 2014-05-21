@@ -93,20 +93,17 @@ void fastq_extreme_chars(FILE * fastq_fh, char * minc, char * maxc)
 
     *maxc = static_cast<char>(0);
     *minc = static_cast<char>(127);
-    char s1, s2, s3;
+    char * max;
+    char * min;
 
     while (! feof(fastq_fh)){
-        nfields_read = 
-            fscanf(fastq_fh, "%*[^\n]\n%*s\n%*s\n%s\n", qualstr);
+        nfields_read = fscanf(fastq_fh, "%*[^\n]\n%*s\n%*s\n%s\n", qualstr);
 
         size_t s = strlen(qualstr);
-        s1 = qualstr[0];
-        s2 = qualstr[(s-1)/2];
-        s3 = qualstr[s-1];
 
-        // sample first, last, and middle characters
-        *maxc = std::max(std::max(s1, s2), std::max(s3, *maxc));
-        *minc = std::min(std::min(s1, s2), std::min(s3, *minc));
-        
+        max = std::max_element(qualstr, qualstr + s);
+        min = std::min_element(qualstr, qualstr + s);
+        *maxc = std::max(*maxc, *max);
+        *minc = std::min(*minc, *min);
     }
 }

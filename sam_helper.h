@@ -8,10 +8,13 @@
 #include <cassert>
 #include <map>
 #include <functional>
-#include <unordered_map>
 
-// forward declaration
-class SamOrder;
+#include "sam_flag.h"
+#include "seq_projection.h"
+#include "sam_index.h"
+
+struct contig_dict;
+
 
 /*
   Policy: Assume either a SAM or rSAM format when parsing, according
@@ -29,14 +32,6 @@ enum SAM_PARSE
         DATA_LINE
     };
 
-enum SAM_QNAME_FORMAT
-    {
-        SAM_NUMERIC,
-        SAM_ILLUMINA,
-        SAM_CASAVA18,
-        SAM_NON_INTERPRETED
-    };
-
 struct less_char_ptr
 {
     bool operator()(char const* a, char const* b) const
@@ -44,24 +39,6 @@ struct less_char_ptr
         return strcmp(a, b) < 0;
     }
 };
-
-
-struct eqstr
-{
-    bool operator()(const char* s1, const char* s2) const;
-};
-
-
-typedef std::hash<std::string> STRING_HASH;
-struct to_integer : public STRING_HASH
-{
-    size_t operator()(char const* k) const;
-};
-typedef std::unordered_map<char const*, char, to_integer, eqstr> CONTIG_SPACE;
-typedef std::unordered_map<char const*, size_t, to_integer, eqstr> CONTIG_OFFSETS;
-
-
-typedef CONTIG_OFFSETS::const_iterator OFFSETS_ITER;
 
 
 // The Not Applicable Read Layout used when parsing 
@@ -110,31 +87,6 @@ V parse_sam_tag(char const* tag_string,
   
  */
 
-struct SamFlag
-{
-    unsigned int multi_fragment_template : 1;     // SAM
-    unsigned int all_fragments_mapped : 1;        // SAM and rSAM
-    unsigned int this_fragment_unmapped : 1;      // SAM
-    unsigned int next_fragment_unmapped : 1;      // SAM
-    unsigned int this_fragment_on_neg_strand : 1; // SAM
-    unsigned int next_fragment_on_neg_strand : 1; // SAM
-    unsigned int first_fragment_in_template : 1;  // SAM
-    unsigned int last_fragment_in_template : 1;   // SAM
-    unsigned int alignment_not_primary : 1;       // SAM and rSAM
-    unsigned int failed_quality_check : 1;        // SAM and rSAM
-    unsigned int pcr_or_optical_duplicate : 1;    // SAM and rSAM
-    unsigned int template_layout : 1;             //         rSAM
-    unsigned int : 4; // padding to 16 bits
-
-    unsigned int is_rsam_format : 8;              //         rSAM
-    unsigned int num_fragments_in_template : 8;   //         rSAM
-    unsigned int read_layout : 32;                //         rSAM
-
-    size_t get_raw() const;
-    void set_raw(size_t raw);
-
-};
-
 struct SamTag
 {
     uint16_t raw_score;
@@ -180,7 +132,8 @@ class SamLine
 public:
 
     SAM_PARSE parse_flag;
-    size_t fragment_id;
+    //size_t fragment_id;
+    sam_index idx;
     SamFlag flag;
     char * rname;
     size_t pos;
@@ -210,8 +163,7 @@ public:
     SamLine(SamLine const* samlines[], size_t n_lines, char const* read_layout);
 
     void Init(char const* samline_string);
-    void SetFlattenedPosition(CONTIG_OFFSETS const& contig_offsets,
-                              CONTIG_OFFSETS::const_iterator * contig_iter);
+    void SetFlattenedPosition(contig_dict const* dict);
 
     void SetCigarCompared();
 
@@ -221,8 +173,7 @@ public:
                                size_t _worst_fragment_score,
                                bool _retain_qname_string);
 
-    static SAM_QNAME_FORMAT sam_qname_format;
-    static SamOrder * sam_order;
+    // static SamOrder * sam_order;
     static char expected_read_layout[256];
     static bool expect_rsam_format;
     static bool brief_records; // prints records with numeric qnames, and '*' for SEQ and QUAL
@@ -230,6 +181,7 @@ public:
     static size_t worst_fragment_score;
     static bool initialized;
     static bool retain_qname_string;
+    static SAM_QNAME_FORMAT qname_format;
 
     SamLine();
     ~SamLine();
@@ -295,10 +247,6 @@ struct SamFilter
 
 
 
-void SetToFirstDataLine(FILE ** sam_fh);
-
-char * ReadAllocSAMHeader(FILE * sam_fh);
-
 
 
 enum Strand
@@ -331,6 +279,21 @@ void PrintSAMHeader(FILE ** input_sam_fh, FILE * output_fh);
 void reverse_comp(char const* begin, char const* end, char * rcomp);
 
 void reverse_comp_inplace(char * begin, char * end);
+
+
+// sequence projection operations
+bool ApplySequenceProjection(SequenceProjection const& projection,
+                             SamLine * samline,
+                             bool inserts_are_introns);
+
+
+bool ApplyProjectionToSAM(SequenceProjection const& projection,
+                          char const* alignment_space,
+                          SamLine * samline,
+                          bool inserts_are_introns,
+                          bool add_cufflinks_xs_tag);
+
+
 
 
 #endif // _SAM_HELPER_H

@@ -16,14 +16,19 @@
 
  */
 
-#include "sam_order.h"
+// #include "sam_order.h"
+
+#include "sam_index.h"
+#include "sam_flag.h"
+
+#include <vector>
 
 // a view of a SAM line entry as Fastq
 struct SAMFastqView
 {
     char const* qname;
     size_t qname_len;
-    size_t fragment_id;
+    sam_index idx;
     SamFlag flag;
     char const* seq;
     char const* qual;
@@ -33,19 +38,10 @@ struct SAMFastqView
 
     SAMFastqView();
     SAMFastqView(char const* _qname, size_t _qname_len,
-                 size_t _fragment_id, size_t _flag_raw, 
+                 sam_index idx, size_t _flag_raw, 
                  char const* _seq, char const* _qual, 
                  size_t _seqlen, bool _do_print, bool _is_orphan);
     char * print(char *outbuf);
-};
-
-
-// very similar to 'partial_index_aux' from align_eval_aux.h
-struct SAMFastqView_aux
-{
-    SamOrder * sam_order;
-    SAMFastqView_aux(SamOrder * _sam_order);
-    SAMFastqView operator()(char * samline_string);
 };
 
 
@@ -54,16 +50,21 @@ struct SAMFastqView_aux
 // if fastq2_buffer_out is NULL, assume we have single-end reads
 // otherwise assume paired-end reads
 // return the number of samlines NOT processed.
-size_t convert_chunk_sam_to_fastq(std::vector<char *> & samlines,
-                                  SamOrder const* sam_order,
-                                  char * chunk_buffer_in,
-                                  char * fastq1_buffer_out,
-                                  char * fastq2_buffer_out,
-                                  char * orphan_buffer_out,
-                                  bool is_last_chunk);
+/* size_t convert_chunk_sam_to_fastq(std::vector<char *> & samlines, */
+/*                                   SamOrder const* sam_order, */
+/*                                   char * chunk_buffer_in, */
+/*                                   char * fastq1_buffer_out, */
+/*                                   char * fastq2_buffer_out, */
+/*                                   char * orphan_buffer_out, */
+/*                                   bool is_last_chunk); */
 
-void init_fastq_view(std::vector<char *> & sam_lines,
-                     SAMFastqView * fastq_view);
+// initialize fastq_view from sam_lines.  update flowcell_dict
+void init_fastq_view(char **samlines,
+                     size_t num_lines,
+                     size_t num_threads,
+                     SAMFastqView * fastq_view,
+                     contig_dict *cdict,
+                     index_dict_t *flowcell_dict);
 
 
 size_t find_last_fragment_bound(SAMFastqView * fastq_view, size_t S, bool is_last_chunk);

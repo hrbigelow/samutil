@@ -6,15 +6,15 @@
 #include "align_eval_aux.h"
 
 
-typedef std::set<SequenceProjection, less_seq_projection>::const_iterator SEQ_PROJ_ITER;
+// typedef std::set<SequenceProjection, less_seq_projection>::const_iterator SEQ_PROJ_ITER;
 
 typedef std::unordered_map<char const*, SEQ_PROJ_ITER, to_integer, eqstr> PROJ_MAP;
 
 typedef PROJ_MAP::const_iterator NP_ITER;
 
 
-SEQ_PROJ_ITER 
-non_overlapping_range(SEQ_PROJ_ITER start, SEQ_PROJ_ITER set_end);
+/* SEQ_PROJ_ITER  */
+/* non_overlapping_range(SEQ_PROJ_ITER start, SEQ_PROJ_ITER set_end); */
 
 
 struct pdp_result

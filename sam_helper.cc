@@ -2,9 +2,9 @@
 #include <stdint.h>
 
 #include "sam_helper.h"
-#include "sam_order.h"
 #include "cigar_ops.h"
 #include "file_utils.h"
+#include "sam_index.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -71,52 +71,6 @@ bool SamFilter::pass(SamLine const* samline) const
 }
 
 
-size_t SamFlag::get_raw() const
-{
-    size_t raw = static_cast<size_t>
-        (this->multi_fragment_template % 2
-         | (this->all_fragments_mapped % 2)<<1
-         | (this->this_fragment_unmapped % 2)<<2
-         | (this->next_fragment_unmapped % 2)<<3
-         | (this->this_fragment_on_neg_strand % 2)<<4
-         | (this->next_fragment_on_neg_strand % 2)<<5
-         | (this->first_fragment_in_template % 2)<<6
-         | (this->last_fragment_in_template % 2)<<7
-         | (this->alignment_not_primary % 2)<<8
-         | (this->failed_quality_check % 2)<<9
-         | (this->pcr_or_optical_duplicate % 2)<<10
-         | (this->template_layout % 2)<<11
-         )
-        | static_cast<size_t>(this->is_rsam_format % (1<<8))<<16
-        | static_cast<size_t>(this->num_fragments_in_template % (1<<8))<<24
-        | static_cast<size_t>(this->read_layout % (1L<<32))<<32;
-
-    return raw;
-}
-
-
-void SamFlag::set_raw(size_t raw)
-{
-    this->multi_fragment_template = static_cast<unsigned int>(raw % 2);
-    this->all_fragments_mapped = static_cast<unsigned int>((raw>>1) % 2);
-    this->this_fragment_unmapped = static_cast<unsigned int>((raw>>2) % 2);
-    this->next_fragment_unmapped = static_cast<unsigned int>((raw>>3) % 2);
-    this->this_fragment_on_neg_strand = static_cast<unsigned int>((raw>>4) % 2);
-    this->next_fragment_on_neg_strand = static_cast<unsigned int>((raw>>5) % 2);
-    this->first_fragment_in_template = static_cast<unsigned int>((raw>>6) % 2);
-    this->last_fragment_in_template = static_cast<unsigned int>((raw>>7) % 2);
-    this->alignment_not_primary = static_cast<unsigned int>((raw>>8) % 2);
-    this->failed_quality_check = static_cast<unsigned int>((raw>>9) % 2);
-    this->pcr_or_optical_duplicate = static_cast<unsigned int>((raw>>10) % 2);
-    this->template_layout = static_cast<unsigned int>((raw>>11) % 2);
-
-    this->is_rsam_format = static_cast<unsigned int>((raw>>16) % (1<<8));
-    this->num_fragments_in_template = static_cast<unsigned int>((raw>>24) % (1<<8));
-    this->read_layout = static_cast<unsigned int>((raw>>32) % (1<<8));
-
-}
-
-
 size_t SamTag::get_raw() const
 {
     size_t raw =
@@ -149,38 +103,6 @@ void SamTag::set_raw(size_t raw)
     this->raw_score_tag[0] = static_cast<char>((raw>>46) % (1<<8));
     this->raw_score_tag[1] = static_cast<char>((raw>>54) % (1<<8));
 }
-
-bool eqstr::operator()(const char* s1, const char* s2) const
-{
-    return strcmp(s1, s2) == 0;
-}
-
-
-//a hashing function.  Expects that k will either start or end with a string of digits.
-//if it does, the integer value of those digits is used.
-//Otherwise, if it is '*', zero is used.,
-//Otherwise, the default hash of its string value is used.
-size_t to_integer::operator()(char const* k) const
-{
-    size_t val = 0;
-    char dummy; //used as a test whether sscanf reached the end of the string
-    size_t dummy_int;
-
-    if (sscanf(k, "%*[^0-9]%zu%c", &val, &dummy) == 1 
-        || sscanf(k, "%zu%*[^0-9]%zu", &val, &dummy_int) == 1)
-    {
-        return val;
-    }
-    else if (k[0] == '*')
-    {
-        return 0;
-    }
-    else
-    {
-        return static_cast<STRING_HASH>(*this)(std::string(k, strlen(k)));
-    }
-}
-
 
 char base_to_complement[] =
     "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
@@ -226,7 +148,7 @@ void reverse_comp_inplace(char * begin, char * end)
 //
 void init_tags_from_string(char const* tag_string, 
                            char const* raw_score_tag,
-                           size_t worst_raw_score, 
+                           // size_t worst_raw_score, 
                            SamTag * tags,
                            char ** extra_tags)
 {
@@ -312,8 +234,6 @@ void init_tags_from_string(char const* tag_string,
 //'line' variable, with null's terminating each one.  non-string data
 //will be stored separately
 
-SAM_QNAME_FORMAT SamLine::sam_qname_format;
-
 char SamLine::expected_read_layout[256];
 bool SamLine::expect_rsam_format;
 char SamLine::raw_score_tag[3];
@@ -321,7 +241,8 @@ size_t SamLine::worst_fragment_score;
 bool SamLine::initialized = false;
 bool SamLine::retain_qname_string = false;
 
-SamOrder * SamLine::sam_order;
+SAM_QNAME_FORMAT SamLine::qname_format = SAM_FORMAT_UNDEFINED;
+// SamOrder * SamLine::sam_order;
 
 void SamLine::SetGlobalFlags(SAM_QNAME_FORMAT _qname_format,
                              char const* _expected_layout,
@@ -329,11 +250,11 @@ void SamLine::SetGlobalFlags(SAM_QNAME_FORMAT _qname_format,
                              size_t _worst_fragment_score,
                              bool _retain_qname_string)
 {
-    SamLine::sam_qname_format = _qname_format;
-    SamLine::sam_order = new SamOrder(SAM_RID, "ALIGN");
+    SamLine::qname_format = _qname_format;
+    // SamLine::sam_order = new SamOrder(SAM_RID, "ALIGN");
 
     // this provides parse_fragment_id
-    SamLine::sam_order->InitFromChoice(_qname_format);
+    // SamLine::sam_order->InitFromChoice(_qname_format);
 
     strcpy(SamLine::expected_read_layout, _expected_layout);
     strcpy(SamLine::raw_score_tag, _raw_score_tag);
@@ -366,17 +287,21 @@ SamLine::SamLine(SAM_PARSE _parse_flag,
     if (SamLine::expect_rsam_format)
     {
         // FID.FLAG.RNAME.POS.MAPQ.CIGAR.TAGRAW[.TAG[.TAG[.TAG...]]]
-        size_t fragment_id = (this->sam_order->*(this->sam_order->parse_fragment_id))(_qname);
-        if (fragment_id == QNAME_FORMAT_ERROR)
-        {
-            fprintf(stderr, "Error: samline_fragment_id: bad qname format in this qname\n%s\n\n",
-                    _qname);
-            exit(1);
-        }
+        set_sam_index(_qname, SAM_INDEX_FID, this->qname_format, NULL, &idx);
+        // size_t fragment_id = (this->sam_order->*(this->sam_order->parse_fragment_id))(_qname);
+        // if (fragment_id == QNAME_FORMAT_ERROR)
+        // {
+        //     fprintf(stderr, "Error: samline_fragment_id: bad qname format in this qname\n%s\n\n",
+        //             _qname);
+        //     exit(1);
+        // }
 
-        sprintf(line, "%Zu\t%Zu\t%s\t%Zu\t%Zu\t%s\t%Zu",
-                fragment_id, _flagval, _rname, reported_pos,
-                _mapq, _cigar, _tagval);
+        sprintf(line, "%ZX:%ZX\t%Zu\t%s\t%Zu\t%Zu\t%s\t%Zu",
+                idx.key.raw[0], idx.key.raw[1],
+                _flagval, _rname, reported_pos, _mapq, _cigar, _tagval);
+        
+        // sprintf(line, "%Zu\t%Zu\t%s\t%Zu\t%Zu\t%s\t%Zu",
+        //         fragment_id, _flagval, _rname, reported_pos, _mapq, _cigar, _tagval);
     }
     else
     {
@@ -425,7 +350,8 @@ SamLine::SamLine(char const* samline_string)
 
 SamLine::SamLine(SamLine const& s) :
     parse_flag(s.parse_flag),
-    fragment_id(s.fragment_id),
+    // fragment_id(s.fragment_id),
+    idx(s.idx),
     flag(s.flag),
     rname(NULL),
     pos(s.pos),
@@ -474,17 +400,18 @@ SamLine::SamLine(SamLine const& s) :
 
 
 //Merge two or more SAMlines that are part of the same fragment
-SamLine::SamLine(SamLine const* samlines[], size_t n_lines, char const* read_layout)
-    : parse_flag(samlines[0]->parse_flag),
-      fragment_id(samlines[0]->fragment_id),
-      pos(samlines[0]->pos),
-      mapq(samlines[0]->mapq),
-      rnext(NULL),
-      pnext(0),
-      tlen(0),
-      flattened_pos(samlines[0]->flattened_pos),
-      cigar_compared(NULL),
-      qname_string(NULL) 
+SamLine::SamLine(SamLine const* samlines[], size_t n_lines, char const* read_layout) :
+    parse_flag(samlines[0]->parse_flag),
+    idx(samlines[0]->idx),
+    // fragment_id(samlines[0]->fragment_id),
+    pos(samlines[0]->pos),
+    mapq(samlines[0]->mapq),
+    rnext(NULL),
+    pnext(0),
+    tlen(0),
+    flattened_pos(samlines[0]->flattened_pos),
+    cigar_compared(NULL),
+    qname_string(NULL) 
 // since we are merging SAM (not rSAM), we don't yet have a use for
 // cigar_compared
 {
@@ -630,10 +557,19 @@ void SamLine::Init(char const* samline_string)
 
             int num_fields =
                 sscanf(samline_string, 
-                       "%zu\t" "%zu\t" "%a[^\t]\t" "%zu\t" "%zu\t"
+                       "%zX:%zX\t" "%zu\t" "%a[^\t]\t" "%zu\t" "%zu\t"
                        "%as\t" "%zu%n",
-                       &this->fragment_id, &flag_raw, &this->rname, &this->pos, &this->mapq, 
+                       &this->idx.key.raw[0],
+                       &this->idx.key.raw[1],
+                       &flag_raw, &this->rname, &this->pos, &this->mapq, 
                        &this->cigar, &tag_raw, &tag_start);
+            
+            // int num_fields =
+            //     sscanf(samline_string, 
+            //            "%zu\t" "%zu\t" "%a[^\t]\t" "%zu\t" "%zu\t"
+            //            "%as\t" "%zu%n",
+            //            &this->fragment_id, &flag_raw, &this->rname, &this->pos, &this->mapq, 
+            //            &this->cigar, &tag_raw, &tag_start);
 
             this->flag.set_raw(flag_raw);
             this->tags.set_raw(tag_raw);
@@ -686,7 +622,7 @@ void SamLine::Init(char const* samline_string)
             // initialize tags and tag_string
             init_tags_from_string(samline_string + tag_start, 
                                   SamLine::raw_score_tag,
-                                  SamLine::worst_fragment_score,
+                                  // SamLine::worst_fragment_score,
                                   & this->tags,
                                   & this->tag_string);
         
@@ -696,14 +632,15 @@ void SamLine::Init(char const* samline_string)
             }
             else
             {
-                this->fragment_id = (this->sam_order->*(this->sam_order->parse_fragment_id))(qname);
+                set_sam_index(qname, SAM_INDEX_FID, this->qname_format, NULL, &this->idx);
+                // this->fragment_id = (this->sam_order->*(this->sam_order->parse_fragment_id))(qname);
 
-                if (this->fragment_id == QNAME_FORMAT_ERROR)
-                {
-                    fprintf(stderr, "Error: samline_fragment_id: bad qname format in this line\n%s\n\n",
-                            qname);
-                    exit(1);
-                }
+                // if (this->fragment_id == QNAME_FORMAT_ERROR)
+                // {
+                //     fprintf(stderr, "Error: samline_fragment_id: bad qname format in this line\n%s\n\n",
+                //             qname);
+                //     exit(1);
+                // }
 
                 if (SamLine::retain_qname_string)
                 {
@@ -755,18 +692,11 @@ void SamLine::Init(char const* samline_string)
 }
 
 
-void SamLine::SetFlattenedPosition(CONTIG_OFFSETS const& contig_offsets,
-                                   CONTIG_OFFSETS::const_iterator * contig_iter)
+void SamLine::SetFlattenedPosition(contig_dict const* dict)
 {
-    //assume contig_iter is valid
-    assert(*contig_iter != contig_offsets.end());
-    //memoize the lookup, since we anticipate same lookups
+    HMAP::const_iterator iter = dict->name_map.find(this->rname);
 
-    *contig_iter = strcmp((**contig_iter).first, this->rname) == 0
-        ? *contig_iter 
-        : contig_offsets.find(this->rname);
-    
-    if (*contig_iter == contig_offsets.end())
+    if (iter == dict->name_map.end())
     {
         fprintf(stderr, "SetFlattenedPosition: error: rname %s (at %Zu) "
                 "does not exist in provided contig index\n",
@@ -774,7 +704,7 @@ void SamLine::SetFlattenedPosition(CONTIG_OFFSETS const& contig_offsets,
         exit(1);
     }
     
-    this->flattened_pos = (**contig_iter).second + this->zero_based_pos();
+    this->flattened_pos = dict->offset[(*iter).second] + this->zero_based_pos();
 }
 
 
@@ -822,7 +752,7 @@ SamLine::~SamLine()
     }
 }
 
-
+/*
 void SamLine::fprint(FILE * sam_fh) const
 {
     this->print_aux(sam_fh, true);
@@ -879,6 +809,7 @@ void SamLine::print_aux(void * print_buf, bool to_file) const
     }
     return;
 }
+*/
 
 
 
@@ -1186,7 +1117,8 @@ bool AreSequencedMatePairs(SamLine const& a, SamLine const& b)
     assert(! (a.flag.is_rsam_format || b.flag.is_rsam_format));
 
     return 
-        a.fragment_id == b.fragment_id
+        samidx_equal_key(a.idx, b.idx)
+        // a.fragment_id == b.fragment_id
         && (a.flag.first_fragment_in_template != b.flag.first_fragment_in_template)
         && a.flag.multi_fragment_template
         && b.flag.multi_fragment_template;
@@ -1237,56 +1169,6 @@ char const* strand_to_char(Strand strand)
 }
 
 
-// reads and allocates a buffer loaded with the sam header
-char * ReadAllocSAMHeader(FILE * sam_fh)
-{
-    std::vector<char> header;
-    header.reserve(1000);
-
-    char p,n;
-    p = '\0';
-
-    while (! feof(sam_fh))
-    {
-        n = fgetc(sam_fh);
-        if ((p == '\0' || p == '\n') && n != '@')
-        {
-            ungetc(n, sam_fh);
-            clearerr(sam_fh);
-            break;
-        }
-        p = n;
-        header.push_back(p);
-    }
-    char * header_string = new char[header.size() + 1];
-    std::copy(header.begin(), header.end(), header_string);
-    header_string[header.size()] = '\0';
-
-    return header_string;
-}
-
-
-//sets sam_fh to position of first data line
-void SetToFirstDataLine(FILE ** sam_fh)
-{
-    rewind(*sam_fh);
-
-    //set just after first newline that doesn't begin with '@'
-    char c;
-    size_t dummy;
-    char *line = NULL;
-
-    while ((c = fgetc(*sam_fh)) == '@')
-    {
-        ungetc(c, *sam_fh);
-        getline(&line, &dummy, *sam_fh);
-    }
-    ungetc(c, *sam_fh);
-
-    return;
-}
-
-
 char const* SamLine::next_fragment_ref_name() const
 {
     return strcmp(this->rnext, "=") == 0 ? this->rname : this->rnext;
@@ -1300,19 +1182,75 @@ char const* SamLine::cigar_for_comparison() const
         : this->cigar_compared;
 }
 
-void PrintSAMHeader(FILE ** input_sam_fh, FILE * output_fh)
+
+
+
+//apply a partial projection to rSAM line
+//this is a helper function for ApplyProjectionToSAM
+//returns true if projection successfully applied
+bool ApplySequenceProjection(SequenceProjection const& projection,
+                             SamLine * samline,
+                             bool inserts_are_introns)
 {
-    SetToFirstDataLine(input_sam_fh);
+    if (! samline->flag.all_fragments_mapped)
+    {
+        return false;
+    }
 
-    size_t header_length = ftell(*input_sam_fh);
-    rewind(*input_sam_fh);
+    Cigar::CIGAR_VEC source_to_read = Cigar::FromString(samline->cigar, 0);
 
-    char * header_buf = new char[header_length];
-    fread(header_buf, 1, header_length, *input_sam_fh);
-    fwrite(header_buf, 1, header_length, output_fh);
-    delete [] header_buf;
-    fflush(output_fh);
+    size_t start_offset = projection.same_strand 
+        ? samline->pos
+        : (projection.total_block_length 
+           - Cigar::Length(source_to_read, true)
+           - samline->pos);
+
+    if (! projection.same_strand)
+    {
+        //reverse alignment.  right_offset is the distance from end of
+        //read alignment to end of source.
+        std::reverse(source_to_read.begin(), source_to_read.end());
+
+        // flip the template-to-reference, since the reference is
+        //changing from transcriptome to genome and they are in
+        //opposite directions.
+        samline->flag.template_layout ^= 1; 
+    }
+
+    size_t expanded_start_offset;
+
+    Cigar::CIGAR_VEC target_to_read =
+        Cigar::Expand(projection.transformation, source_to_read, 
+                      start_offset, & expanded_start_offset,
+                      inserts_are_introns);
+
+    Cigar::CIGAR_ITER trimmed_left, trimmed_right;
+    Cigar::Trim(target_to_read, false, &trimmed_left, &trimmed_right);
+
+    size_t overlap = Cigar::Overlap(trimmed_left, trimmed_right);
+
+    if (overlap > 0)
+    {
+        char cigar_new[1024];
+        Cigar::ToString(trimmed_left, trimmed_right, cigar_new);
+
+        char const* rname_new = projection.target_dna.c_str();
+        if (strlen(samline->rname) < strlen(rname_new))
+        {
+            delete samline->rname;
+            samline->rname = new char[strlen(rname_new) + 1];
+        }
+        strcpy(samline->rname, rname_new);
+
+        if (strlen(samline->cigar) < strlen(cigar_new))
+        {
+            delete samline->cigar;
+            samline->cigar = new char[strlen(cigar_new) + 1];
+        }
+        strcpy(samline->cigar, cigar_new);
+
+        samline->pos = expanded_start_offset;
+    }
+    return overlap > 0;
+
 }
-
-
-

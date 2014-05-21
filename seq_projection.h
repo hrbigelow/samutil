@@ -1,10 +1,10 @@
 #ifndef _SEQ_PROJECTION_H
 #define _SEQ_PROJECTION_H
 
-#include "sam_helper.h"
-
 #include <vector>
 #include <unordered_map>
+#include <string>
+#include <cstddef>
 
 struct block_offsets
 {
@@ -38,10 +38,10 @@ class SequenceProjection
 
     SequenceProjection(SequenceProjection const& sp);
 
+    SequenceProjection();
+
     bool operator<(SequenceProjection const& b) const;
 };
-
-typedef std::unordered_map<char const*, SequenceProjection, to_integer, eqstr> PROJECTIONS;
 
 
 size_t ExpandedStartPos(SequenceProjection const& projection,
@@ -49,19 +49,7 @@ size_t ExpandedStartPos(SequenceProjection const& projection,
                         char const* cigar);
 
 
-size_t ExpandedPos(SequenceProjection const& projection,
-                   int64_t pos);
+size_t ExpandedPos(SequenceProjection const& projection, int64_t pos);
 
-
-bool ApplySequenceProjection(SequenceProjection const& projection,
-                             SamLine * samline,
-                             bool inserts_are_introns);
-
-
-bool ApplyProjectionToSAM(SequenceProjection const& projection,
-                          char const* alignment_space,
-                          SamLine * samline,
-                          bool inserts_are_introns,
-                          bool add_cufflinks_xs_tag);
 
 #endif // _SEQ_PROJECTION_H

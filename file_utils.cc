@@ -6,7 +6,8 @@
 #include <cstring>
 #include <cassert>
 #include <cstdarg>
-
+#include <ctime>
+#include <time.h>
 
 
 //optionally prints to a string or a file.  to make a string behave
@@ -140,6 +141,49 @@ std::vector<size_t> FileUtils::ChunkLengths(gzFile input_fh, size_t chunk_approx
     return lengths;
 }
 
+// find actual sizes of chunks of a file that end in newlines
+// sizes will be equal to chunk_approx_size plus however many bytes
+// until the next newline
+// it is an error if the file does not end in a newline, or
+// if after reading the next chunk_approx_size, there is no newline
+// in the next max_line bytes
+std::vector<size_t> FileUtils::chunk_lengths(FILE * input_fh, size_t chunk_approx_size,
+                                             size_t max_line)
+{
+    std::vector<size_t> lengths;
+    char * buf = new char[max_line + 1]; //allow for an extremely long line
+    long pos, prev_pos;
+
+    while (! feof(input_fh))
+    {
+        fseek(input_fh, chunk_approx_size, SEEK_CUR);
+        if (feof(input_fh))
+        {
+            // this is a special case
+            fseek(input_fh, -1L, SEEK_END);
+            buf[0] = getc(input_fh);
+            buf[1] = '\0';
+        }
+        else
+        {
+            // not at end of file.  need to scan forward to fine a newline
+            fgets(buf, max_line, input_fh);
+        }
+
+        size_t frag_size = strlen(buf);
+        if (buf[frag_size - 1] != '\n')
+        {
+            fprintf(stderr, "FileUtils::chunk_lengths: Error: no newline found at end of file\n");
+            exit(10);
+        }
+        pos = ftell(input_fh);
+        lengths.push_back(static_cast<size_t>(pos - prev_pos));
+        prev_pos = pos;
+    }
+    delete buf;
+    return lengths;
+}
+
 
 //
 std::vector<char *> 
@@ -224,6 +268,71 @@ std::vector<char *>
 FileUtils::find_complete_lines_nullify(char * lines, char ** last_fragment)
 {
     return find_complete_lines_aux(lines, true, last_fragment);
+}
+
+
+// reads into buffer, bytes_wanted plus up to max_line_length bytes
+// from fh until a newline is encountered.  if a newline is not encountered
+// between bytes_wanted and max_line_length, exits with a message on stderr
+// buffer is assumed to have bytes_wanted + max_line_length space
+// it will be null-terminated by this function.
+size_t FileUtils::read_until_newline(char * buffer, size_t bytes_wanted, 
+                                     size_t max_line_length, 
+                                     FILE * fh,
+                                     size_t * fread_elapsed_nsec)
+{
+
+    timespec time_beg, time_end;
+    clock_gettime(CLOCK_REALTIME, &time_beg);
+
+    size_t nbytes_read = fread(buffer, 1, bytes_wanted, fh);
+    buffer[nbytes_read] = '\0';
+
+    clock_gettime(CLOCK_REALTIME, &time_end);
+    *fread_elapsed_nsec = 
+        (time_end.tv_sec - time_beg.tv_sec) * 1e9
+        + (time_end.tv_nsec - time_beg.tv_nsec);
+
+    if (nbytes_read == bytes_wanted)
+    {
+        // keep reading until we hit the next newline
+        char * cur = buffer + nbytes_read;
+        char * test = fgets(cur, max_line_length, fh);
+        if (test != cur)
+        {
+            fprintf(stderr, "Error: unexpected line size\n");
+            exit(2);
+        }
+        size_t last_bytes = strlen(cur);
+        if (last_bytes == max_line_length - 1)
+        {
+            fprintf(stderr, "Error: did not find a newline within %Zu bytes\n", max_line_length);
+            exit(3);
+        }
+        nbytes_read += last_bytes;
+        assert(buffer[nbytes_read -1] == '\n');
+    }
+    else if (nbytes_read == 0)
+    {
+        // all good.  do nothing
+    }
+    else
+    {
+        // didn't get the requested bytes.  should be at the end of the file...
+        if (buffer[nbytes_read - 1] != '\n')
+        {
+            fprintf(stderr, "Error: File doesn't end in a newline\n");
+            exit(1);
+        }
+        else
+        {
+            // all good.  do nothing
+        }
+    }
+    assert(buffer[nbytes_read] == '\0');
+    assert(nbytes_read < bytes_wanted + max_line_length);
+
+    return nbytes_read;
 }
 
 

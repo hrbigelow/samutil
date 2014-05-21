@@ -1,6 +1,8 @@
 #include "seq_projection.h"
 
 #include <algorithm>
+#include <cassert>
+#include <cstring>
 
 #include "cigar_ops.h"
 
@@ -72,6 +74,8 @@ SequenceProjection::SequenceProjection(SequenceProjection const& sp) :
     transformation(sp.transformation),
     total_block_length(sp.total_block_length) { }
 
+
+SequenceProjection::SequenceProjection() { }
 
 
 //order by coordinates of 
@@ -156,77 +160,4 @@ size_t ExpandedPos(SequenceProjection const& projection,
         ++iter;
     }
     return ex_pos;
-}
-
-
-
-
-//apply a partial projection to rSAM line
-//this is a helper function for ApplyProjectionToSAM
-//returns true if projection successfully applied
-bool ApplySequenceProjection(SequenceProjection const& projection,
-                             SamLine * samline,
-                             bool inserts_are_introns)
-{
-    if (! samline->flag.all_fragments_mapped)
-    {
-        return false;
-    }
-
-    Cigar::CIGAR_VEC source_to_read = Cigar::FromString(samline->cigar, 0);
-
-    size_t start_offset = projection.same_strand 
-        ? samline->pos
-        : (projection.total_block_length 
-           - Cigar::Length(source_to_read, true)
-           - samline->pos);
-
-    if (! projection.same_strand)
-    {
-        //reverse alignment.  right_offset is the distance from end of
-        //read alignment to end of source.
-        std::reverse(source_to_read.begin(), source_to_read.end());
-
-        // flip the template-to-reference, since the reference is
-        //changing from transcriptome to genome and they are in
-        //opposite directions.
-        samline->flag.template_layout ^= 1; 
-    }
-
-    size_t expanded_start_offset;
-
-    Cigar::CIGAR_VEC target_to_read =
-        Cigar::Expand(projection.transformation, source_to_read, 
-                      start_offset, & expanded_start_offset,
-                      inserts_are_introns);
-
-    Cigar::CIGAR_ITER trimmed_left, trimmed_right;
-    Cigar::Trim(target_to_read, false, &trimmed_left, &trimmed_right);
-
-    size_t overlap = Cigar::Overlap(trimmed_left, trimmed_right);
-
-    if (overlap > 0)
-    {
-        char cigar_new[1024];
-        Cigar::ToString(trimmed_left, trimmed_right, cigar_new);
-
-        char const* rname_new = projection.target_dna.c_str();
-        if (strlen(samline->rname) < strlen(rname_new))
-        {
-            delete samline->rname;
-            samline->rname = new char[strlen(rname_new) + 1];
-        }
-        strcpy(samline->rname, rname_new);
-
-        if (strlen(samline->cigar) < strlen(cigar_new))
-        {
-            delete samline->cigar;
-            samline->cigar = new char[strlen(cigar_new) + 1];
-        }
-        strcpy(samline->cigar, cigar_new);
-
-        samline->pos = expanded_start_offset;
-    }
-    return overlap > 0;
-
 }

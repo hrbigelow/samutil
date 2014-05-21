@@ -1,4 +1,5 @@
 #include "sam_helper.h"
+#include "sam_index.h"
 #include "sam_to_fastq.h"
 #include "time_tools.h"
 
@@ -14,20 +15,21 @@ SAMFastqView::SAMFastqView() { }
 //       seq(NULL), qual(NULL), seqlen(0) { }
 
 SAMFastqView::SAMFastqView(char const* _qname, size_t _qname_len, 
-                           size_t _fragment_id, size_t _flag_raw, 
+                           sam_index _idx, size_t _flag_raw, 
                            char const* _seq, char const* _qual, 
                            size_t _seqlen,
                            bool _do_print,
                            bool _is_orphan) :
     qname(_qname),
     qname_len(_qname_len),
-    fragment_id(_fragment_id),
+    idx(_idx),
     seq(_seq),
     qual(_qual),
     seqlen(_seqlen),
     do_print(_do_print),
     is_orphan(_is_orphan)
 { 
+    
     this->flag.set_raw(_flag_raw);
 }
 
@@ -63,69 +65,109 @@ char * SAMFastqView::print(char * outbuf)
 }
 
 
-SAMFastqView_aux::SAMFastqView_aux(SamOrder * _sam_order) : sam_order(_sam_order) { }
-
-
-// Expect a Spec-conformant samline_string, not necessarily zero-terminated
-SAMFastqView SAMFastqView_aux::operator()(char * samline_string)
+struct init_fastq_view_input_t
 {
-    size_t fragment_id;
+    SAMFastqView * fastq_view;
+    char **samlines;
+    char **end;
+    SAM_QNAME_FORMAT qfmt;
+    const contig_dict *cdict;
+    index_dict_t *fdict;
+    
+};
+
+void *init_fastq_view_worker(void *input)
+{
+    init_fastq_view_input_t *ii = static_cast<init_fastq_view_input_t *>(input);
+
+    sam_index idx;
     size_t flag_raw;
-    char * qname = samline_string;
-    char const* seq;
-    char const* qual;
+    char * qname;
+    const char *seq;
+    const char *qual;
     int seqstart, seqend;
     int qualstart, qualend;
     size_t seqlen;
     int qname_len;
+    char *samline;
 
-    // (taken from sam_helper.cc)
-    // QNAME.FLAG.RNAME.POS.MAPQ.CIGAR.RNEXT.PNEXT.TLEN.SEQ.QUAL[.TAG[.TAG[.TAG...]]]
-    // !!! left off here (need to find a way to
-    int num_fields =
-        sscanf(samline_string, 
-               "%*[^\t]%n\t" "%zu\t" 
-               "%*[^\t]\t" "%*u\t" "%*u\t" "%*s\t" "%*s\t" "%*u\t" "%*i\t"
-               "%n%*[^\t]%n\t" "%n%*[^\t]%n\t",
-               &qname_len, &flag_raw, &seqstart, &seqend, &qualstart, &qualend);
-
-    // all but one of these fields are location fields that aren't registered in the return value count
-    if (num_fields != 1)
+    while (ii->samlines  != ii->end)
     {
-        fprintf(stderr, "Error: SAMFastqView_aux: couldn't parse samline string into a Fastq view\n");
-        exit(35);
+        // (taken from sam_helper.cc)
+        // QNAME.FLAG.RNAME.POS.MAPQ.CIGAR.RNEXT.PNEXT.TLEN.SEQ.QUAL[.TAG[.TAG[.TAG...]]]
+        samline = *ii->samlines++;
+        qname = samline;
+        int num_fields =
+            sscanf(samline, 
+                   "%*[^\t]%n\t" "%zu\t" 
+                   "%*[^\t]\t" "%*u\t" "%*u\t" "%*s\t" "%*s\t" "%*u\t" "%*i\t"
+                   "%n%*[^\t]%n\t" "%n%*[^\t]%n\t",
+                   &qname_len, &flag_raw, &seqstart, &seqend, &qualstart, &qualend);
+        
+        // all but one of these fields are location fields that aren't registered in the return value count
+        if (num_fields != 1)
+        {
+            fprintf(stderr, "Error: init_fastq_view_worker: couldn't parse samline string into a Fastq view\n");
+            exit(35);
+        }
+        
+        set_sam_index(samline, SAM_INDEX_FID, ii->qfmt, ii->cdict, ii->fdict, &idx);
+        // fragment_id = (this->sam_order->*(this->sam_order->sam_index))(qname);
+        
+        seq = samline + seqstart;
+        qual = samline + qualstart;
+        seqlen = seqend - seqstart;
+        *ii->fastq_view++ =  SAMFastqView(qname, qname_len, idx, flag_raw, seq, qual, seqlen, false, false);
     }
 
-    fragment_id = (this->sam_order->*(this->sam_order->sam_index))(qname);
-
-    if (fragment_id == QNAME_FORMAT_ERROR)
-    {
-        fprintf(stderr, "Error: SAMFastqView_aux: invalid qname (not Illumina format): %s\n", qname);
-    }
-    seq = samline_string + seqstart;
-    qual = samline_string + qualstart;
-    seqlen = seqend - seqstart;
-
-    return SAMFastqView(qname, qname_len, fragment_id, flag_raw, seq, qual, seqlen, false, false);
+    pthread_exit((void*) 0);
 }
 
 
-void init_fastq_view(std::vector<char *> & sam_lines,
-                     SAMFastqView * fastq_view)
+// initialize fastq_view from sam_lines.  update flowcell_dict
+void init_fastq_view(char **samlines,
+                     size_t num_lines,
+                     size_t num_threads,
+                     SAMFastqView * fastq_view,
+                     contig_dict *cdict,
+                     index_dict_t *flowcell_dict)
 {
-    if (sam_lines.empty())
+    if (num_lines == 0)
     {
         return;
     }
     // We are simply taking advantage of sam_order's facility to parse the qname field
     // and transform it into a fragment_id index.  The "FRAGMENT" part is of no consequence.
+    SAM_QNAME_FORMAT qfmt = qname_format(samlines[0]);
+    
+    pthread_t * threads = new pthread_t[num_threads];
+    init_fastq_view_input_t * inputs = new init_fastq_view_input_t[num_threads];
 
-    SamOrder sam_order(SAM_RID, "FRAGMENT");
-    sam_order.InitFromID(sam_lines[0]);
+    // initialize inputs
+    for (size_t t = 0; t != num_threads; ++t)
+    {
+        inputs[t].samlines = samlines + (num_lines * t) / num_threads;
+        inputs[t].end = samlines + (num_lines * (t + 1)) / num_threads;
+        inputs[t].fastq_view = fastq_view + (num_lines * t) / num_threads;
+        inputs[t].qfmt = qfmt;
+        inputs[t].cdict = cdict;
+        inputs[t].fdict = flowcell_dict;
+    }
 
-    SAMFastqView_aux s2v_aux(& sam_order);
-    __gnu_parallel::transform(sam_lines.begin(), sam_lines.end(), fastq_view, s2v_aux);
+    for (size_t t = 0; t != num_threads; ++t)
+    {
+        int rc = pthread_create(&threads[t], NULL, &init_fastq_view_worker, 
+                                static_cast<void *>(&inputs[t]));
+        assert(! rc);
+    }
 
+    for (size_t t = 0; t != num_threads; ++t) {
+        int rc = pthread_join(threads[t], NULL);
+        assert(! rc);
+    }
+
+    delete threads;
+    delete inputs;
 }
 
 
@@ -140,9 +182,9 @@ size_t find_last_fragment_bound(SAMFastqView * fastq_view, size_t S, bool is_las
         return S;
     }
     size_t s_last = S - 1;
-    size_t last_fragment_id = fastq_view[s_last].fragment_id;
+    sam_index const& last_idx = fastq_view[s_last].idx;
     
-    while(s_last > 0 && fastq_view[s_last].fragment_id == last_fragment_id)
+    while(s_last > 0 && samidx_equal_key(fastq_view[s_last].idx, last_idx))
     {
         --s_last;
     }
@@ -187,14 +229,19 @@ void set_flags_fastq_view_paired(std::vector<char *> & sam_lines,
 
     // current_fragment_id is initialized so that the first iteration of the loop
     // looks like it is NOT a new chunk
-    size_t current_fragment_id = (s_last > 0) ? fastq_view[0].fragment_id : SIZE_MAX;
+    // size_t current_fragment_id = (s_last > 0) ? fastq_view[0].fragment_id : SIZE_MAX;
+
+    sam_index max_idx = samidx_make_max();
+    sam_index const* current_idx = (s_last > 0) ? &fastq_view[0].idx : &max_idx;
+
     for (SAMFastqView * vit = fastq_view; vit != vit_end; ++vit)
     {
         read_index = (*vit).flag.first_fragment_in_template ? 0 : 1;
 
         // update the is_orphan state of the marked reads by looking at the pair.
         // if we are in a new fragment, initialize state variables to their naive state.
-        if (current_fragment_id != (*vit).fragment_id)
+        if (! samidx_equal_key(*current_idx, (*vit).idx))
+        // if (current_fragment_id != (*vit).fragment_id)
         {
             init_orphan_field(marked_reads);
 
@@ -210,7 +257,8 @@ void set_flags_fastq_view_paired(std::vector<char *> & sam_lines,
             (*vit).do_print = true;
             marked_reads[read_index] = vit;
         }
-        current_fragment_id = (*vit).fragment_id;
+        current_idx = & (*vit).idx;
+        // current_fragment_id = (*vit).fragment_id;
     }
 
     // this is necessary at the end of the loop
@@ -231,10 +279,14 @@ void set_flags_fastq_view_single(std::vector<char *> & sam_lines,
     // single end reads
     SAMFastqView * marked_read = NULL;
 
-    size_t current_fragment_id = (s_last > 0) ? fastq_view[0].fragment_id : SIZE_MAX;
+    // size_t current_fragment_id = (s_last > 0) ? fastq_view[0].fragment_id : SIZE_MAX;
+    sam_index max_idx = samidx_make_max();
+    sam_index const* current_idx = (s_last > 0) ? & fastq_view[0].idx : &max_idx;
+
     for (SAMFastqView * vit = fastq_view; vit != vit_end; ++vit)
     {
-        if (current_fragment_id != (*vit).fragment_id)
+        //if (current_fragment_id != (*vit).fragment_id)
+        if (! samidx_equal_key(*current_idx, (*vit).idx))
         {
             // reset the state variables for this new fragment
             marked_read = NULL;
@@ -243,7 +295,8 @@ void set_flags_fastq_view_single(std::vector<char *> & sam_lines,
         // the do_print field can be initialized as soon as it is seen.
         (*vit).do_print = (marked_read == NULL);
         marked_read = vit;
-        current_fragment_id = (*vit).fragment_id;
+        // current_fragment_id = (*vit).fragment_id;
+        current_idx = & (*vit).idx;
     }
 }
 

@@ -1,7 +1,8 @@
 #include "align_eval_aux.h"
 #include "dep/tools.h"
-#include "sam_order.h"
 #include "file_utils.h"
+#include "sam_index.h"
+#include "sam_file.h"
 
 #include <omp.h>
 
@@ -67,15 +68,15 @@ int main_sam_checksort(int argc, char ** argv)
 
     FILE * sorted_sam_fh = open_if_present(sorted_sam_file, "r");
     
-    SamOrder sam_order(SAM_RID, sort_type);
+    contig_dict contig_dictionary;
+    index_dict_t flowcell_dict;
 
-    SAM_QNAME_FORMAT qname_fmt = sam_order.InitFromFile(sorted_sam_fh);
+    init_contig_length_offset(NULL, & contig_dictionary);
+
+    SAM_INDEX_TYPE index_type = sam_index_type_from_string(sort_type);
 
     char * header_buf = ReadAllocSAMHeader(sorted_sam_fh);
-    sam_order.AddHeaderContigStats(header_buf);
     delete [] header_buf;
-
-    SamLine::SetGlobalFlags(qname_fmt, "", "", 0, false);
 
     SetToFirstDataLine(&sorted_sam_fh);
 
@@ -99,21 +100,22 @@ int main_sam_checksort(int argc, char ** argv)
         read_pointer[nbytes_read] = '\0';
 
         samlines = FileUtils::find_complete_lines_nullify(chunk_buffer_in, & last_fragment);
-
-
-        partial_index_aux paux(&sam_order);
-
-        LineIndex * line_index_chunk = new LineIndex[samlines.size()];
-        __gnu_parallel::transform(samlines.begin(), samlines.end(), line_index_chunk, paux);
+        
+        SAM_QNAME_FORMAT qfmt = qname_format(samlines[0]);
+        
+        sam_index * line_index_chunk = new sam_index[samlines.size()];
+        samlines_to_index(num_threads, samlines.data(), samlines.size(), 
+                          index_type, qfmt, & contig_dictionary, line_index_chunk, & flowcell_dict);
         
         is_sorted = is_sorted &&
-            std::is_sorted(line_index_chunk, line_index_chunk + samlines.size(), less_key);
+            std::is_sorted(line_index_chunk, line_index_chunk + samlines.size(), samidx_less_key);
 
         if (! is_sorted)
         {
             for (size_t l = 1; l != samlines.size(); ++l)
             {
-                if (line_index_chunk[l].index < line_index_chunk[l-1].index)
+                if (samidx_less_key(line_index_chunk[l], line_index_chunk[l-1]))
+                // if (line_index_chunk[l].index < line_index_chunk[l-1].index)
                 {
                     fprintf(stderr, "Lines %zu and %zu are not in %s order:\n%s\n%s\n\n",
                             total_lines + l - 1,

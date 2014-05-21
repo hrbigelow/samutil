@@ -4,8 +4,8 @@
 #include <map>
 #include <utility>
 
-#include "sam_buffer.h"
-#include "sam_helper.h"
+// #include "sam_buffer.h"
+// #include "sam_helper.h"
 #include "align_eval_raw.h"
 #include "cigar_ops.h"
 

@@ -9,7 +9,7 @@
 #include "cisortho/nested.h"
 #include "dep/tools.h"
 #include "cisortho/region.h"
-#include "sam_buffer.h"
+// #include "sam_buffer.h"
 #include "sam_helper.h"
 #include "sam_score_aux.h"
 #include "sam_aux.h"
@@ -44,12 +44,6 @@ int tx2genome_usage(size_t mdef)
             );
     return 1;
 }
-
-
-// PROJ_MAP 
-// LoadProjectionMap(std::set<SequenceProjection, less_seq_projection> const& tx_to_genome,
-//                   SamOrder const& genome_sam_order);
-
 
 
 int main_tx2genome(int argc, char ** argv)
@@ -105,6 +99,8 @@ int main_tx2genome(int argc, char ** argv)
     FILE * input_genome_sam_header_fh = open_or_die(input_genome_sam_header_file, "r", "Input genome SAM header file");
     FILE * output_genome_sam_fh = open_or_die(output_genome_sam_file, "w", "Output genome-projected SAM file");
 
+    contig_dict contig_dictionary;
+    
     SamOrder genome_sam_order(SAM_POSITION_RID, "PROJALIGN");
 
     // just to slurp up the tx header.
@@ -115,11 +111,17 @@ int main_tx2genome(int argc, char ** argv)
     fclose(input_genome_sam_header_fh);
 
     size_t genome_header_length = strlen(genome_header_buf);
-    genome_sam_order.AddHeaderContigStats(genome_header_buf);
+
+    // genome_sam_order.AddHeaderContigStats(genome_header_buf);
+    init_contig_length_offsets(genome_header_buf, &contig_dictionary);
+
     fwrite(genome_header_buf, 1, genome_header_length, output_genome_sam_fh);
     fflush(output_genome_sam_fh);
     delete [] genome_header_buf;
-    genome_sam_order.InitProjection(gtf_file);
+
+    //genome_sam_order.InitProjection(gtf_file);
+    init_sequence_projection(gtf_file, &contig_dictionary);
+
 
     fprintf(stderr, "Starting Projection...\n");
     fflush(stderr);

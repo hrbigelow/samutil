@@ -4,66 +4,61 @@
 #include <vector>
 #include <zlib.h>
 #include <time.h>
+#include <cstdio>
 
-#include "sam_helper.h"
-#include "sam_order.h"
+#include "sam_index.h"
 
-struct LineIndex
-{
-    size_t index;
-    size_t start_offset;
-    int line_length;
-    LineIndex(size_t _i, size_t _s, int _l) : index(_i), start_offset(_s), line_length(_l) { }
-    LineIndex() : index(0), start_offset(0), line_length(0) { }
-};
-
-
-typedef std::vector<LineIndex>::iterator INDEX_ITER;
-
-bool less_offset(LineIndex const& a, LineIndex const& b);
-bool less_key(LineIndex const& a, LineIndex const& b);
-
+typedef std::vector<sam_index>::iterator INDEX_ITER;
 
 struct partial_index_aux
 {
-    SamOrder * sam_order;
-    partial_index_aux(SamOrder * _sam_order);
-    LineIndex operator()(char * samline);
+    char const* base_buffer;
+    SAM_INDEX_TYPE index_type;
+    SAM_QNAME_FORMAT qname_format;
+    contig_dict * contig_dictionary;
+    partial_index_aux(char const* _base_buffer, SAM_INDEX_TYPE _itype,
+                      SAM_QNAME_FORMAT _qfmt, contig_dict * _cdict);
+
+    sam_index operator()(char * samline);
 };
 
-
-// input: full_samline raw string
-// output: in-place modified string containing truncated string
-struct truncate_sam_unary
-{
-    truncate_sam_unary();
-    char * operator()(char * full_samline);
-};
-
+// initialize line_index_chunk, and augment flowcell_dict
+void samlines_to_index(size_t num_threads, 
+                       char **samlines,
+                       size_t num_lines,
+                       SAM_INDEX_TYPE itype,
+                       SAM_QNAME_FORMAT qfmt,
+                       const contig_dict *cdict,
+                       sam_index *line_index_chunk,
+                       index_dict_t *flowcell_dict);
 
 std::pair<size_t, size_t> 
-    process_chunk(std::vector<char *> & sam_lines,
-                  char * chunk_buffer_in,
-                  char * chunk_buffer_out,
-                  SamOrder & sam_order,
-                  std::vector<LineIndex> * line_index);
+process_chunk(std::vector<char *> & samlines,
+              char * chunk_buffer_in,
+              char * chunk_buffer_out,
+              size_t num_threads,
+              SAM_INDEX_TYPE itype,
+              SAM_QNAME_FORMAT qfmt,
+              const contig_dict *contig_dict,
+              index_dict_t * index_dict, // this will accumulate each time process_chunk is called
+              std::vector<sam_index> * line_index);
 
 void
-get_key_quantiles(std::vector<LineIndex> const& line_index,
+get_key_quantiles(std::vector<sam_index> const& line_index,
                   size_t num_chunks,
                   size_t * key_quantile_sizes,
                   size_t * key_quantile_nlines,
-                  std::vector<LineIndex> * key_quantile_sentinels);
+                  std::vector<sam_index> * key_quantile_sentinels);
 
 
 size_t
-set_start_offsets(std::vector<LineIndex>::iterator beg,
-                  std::vector<LineIndex>::iterator end,
+set_start_offsets(std::vector<sam_index>::iterator beg,
+                  std::vector<sam_index>::iterator end,
                   size_t initial_offset);
 
 
 void 
-write_final_merge(std::vector<LineIndex> const& ok_index,
+write_final_merge(std::vector<sam_index> const& ok_index,
                   std::vector<INDEX_ITER> const& offset_quantiles,
                   std::vector<gzFile_s *> const& tmp_fhs,
                   // std::vector<FILE *> const& tmp_fhs,
@@ -74,9 +69,16 @@ write_final_merge(std::vector<LineIndex> const& ok_index,
                   FILE * out_ind_fh);
 
 
-std::vector<INDEX_ITER> 
-get_quantiles(std::vector<LineIndex> * line_index,
-              bool (less_fcn)(LineIndex const&, LineIndex const&),
+/* std::vector<INDEX_ITER>  */
+/* get_quantiles(std::vector<sam_index> * line_index, */
+/*               bool (less_fcn)(sam_index const&, sam_index const&), */
+/*               size_t num_chunks); */
+
+
+sam_index const***
+get_quantiles(sam_index const** line_index,
+              size_t index_size,
+              bool (less_fcn)(sam_index const&, sam_index const&),
               size_t num_chunks);
 
 

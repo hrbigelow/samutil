@@ -99,6 +99,8 @@ size_t zstream_tools::parallel_compress(char const* source_buf,
                                         FILE * out_fh)
 {
 
+    // deflate doesn't work properly if it has zero size, or does it?
+
     timespec time_begin, time_end;
 
     std::vector<chunk_buffers> parts(num_threads);
@@ -152,3 +154,5 @@ size_t zstream_tools::parallel_compress(char const* source_buf,
 
     return nbytes_written;
 }
+
+

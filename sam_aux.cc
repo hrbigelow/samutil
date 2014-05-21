@@ -35,6 +35,7 @@
 
 
 // Find a breakpoint where  
+/*
 SEQ_PROJ_ITER 
 non_overlapping_range(SEQ_PROJ_ITER start, SEQ_PROJ_ITER set_end)
 {
@@ -69,6 +70,7 @@ non_overlapping_range(SEQ_PROJ_ITER start, SEQ_PROJ_ITER set_end)
         return end;
     }
 }
+*/
 
 
 
@@ -94,19 +96,21 @@ pdp_result
 project_dedup_print::operator()(std::pair<SAMIT, SAMIT> const& range)
 {
     SamBuffer output_buf(this->genome_sam_order, false);
+    contig_dict * dict = this->contig_dictionary;
 
     pdp_result result;
 
     // project them
     SINGLE_READ_SET::iterator beg, sit, end;
 
-    PROJECTIONS::const_iterator proj_iter = this->genome_sam_order->projections.end();
-
-    //PROJ_MAP::const_iterator proj_iter = this->projections->end();
+    // PROJECTIONS::const_iterator proj_iter = this->genome_sam_order->projections.end();
+    HMAP::const_iterator proj_iter = dict->projected_name_map.end();
 
     char prev_unprojected_rname[256] = "";
-    CONTIG_OFFSETS::const_iterator contig_iter = 
-        this->genome_sam_order->contig_offsets.begin();
+
+    // CONTIG_OFFSETS::const_iterator contig_iter = 
+    //     this->genome_sam_order->contig_offsets.begin();
+    HMAP::const_iterator contig_iter = dict->name_map.begin();
 
     char transcript_strand[2] = "";
 
@@ -120,25 +124,39 @@ project_dedup_print::operator()(std::pair<SAMIT, SAMIT> const& range)
         if (strcmp(prev_unprojected_rname, (*cur)->rname) != 0)
         {
             // update proj_iter if necessary
-            proj_iter = this->genome_sam_order->projections.find((*cur)->rname);
-            transcript_strand[0] = proj_iter == this->genome_sam_order->projections.end()
-                ? '.' 
-                : ((*proj_iter).second.same_strand ? '+' : '-');
+            // proj_iter = this->genome_sam_order->projections.find((*cur)->rname);
+            // transcript_strand[0] = proj_iter == this->genome_sam_order->projections.end()
+            //     ? '.' 
+            //     : ((*proj_iter).second.same_strand ? '+' : '-');
+
+            proj_iter = dict->projected_name_map.find((*cur)->rname);
+            transcript_strand[0] = (proj_iter == dict->projected_name_map.end())
+                ? '.'
+                : (dict->projections[(*proj_iter).second].same_strand ? '+' : '-');
 
             strcpy(prev_unprojected_rname, (*cur)->rname);
         }
 
         if ((*cur)->flag.all_fragments_mapped)
         {
-            if (proj_iter != this->genome_sam_order->projections.end())
+            // if (proj_iter != this->genome_sam_order->projections.end())
+            // {
+            //     ApplySequenceProjection((*proj_iter).second, samline, this->inserts_are_introns);
+            //     samline->add_tag("XS", 'A', transcript_strand);
+            // }
+            if (proj_iter != dict->projected_name_map.end())
             {
-                ApplySequenceProjection((*proj_iter).second, samline, this->inserts_are_introns);
+                ApplySequenceProjection(dict->projections[(*proj_iter).second],
+                                        samline,
+                                        this->inserts_are_introns);
                 samline->add_tag("XS", 'A', transcript_strand);
             }
+
         }
         
-        samline->SetFlattenedPosition(this->genome_sam_order->contig_offsets, 
-                                      & contig_iter);
+        // samline->SetFlattenedPosition(this->genome_sam_order->contig_offsets, 
+        // & contig_iter);
+        samline->SetFlattenedPosition(contig_dictionary);
 
         if (! this->retain_unsequenced_projection)
         {

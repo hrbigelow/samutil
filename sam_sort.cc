@@ -31,13 +31,12 @@
 
 #include <parallel/algorithm>
 
-#include "align_eval_raw.h"
 #include "align_eval_aux.h"
 
 #include "file_utils.h"
 #include "dep/tools.h"
-#include "sam_helper.h"
-#include "sam_order.h"
+#include "sam_index.h"
+#include "sam_file.h"
 #include "zstream_tools.h"
 #include "gzip_tools.h"
 
@@ -164,7 +163,12 @@ int main_sam_sort(int argc, char ** argv)
 
     FILE * output_header_fh;
 
-    SamOrder sam_order(SAM_RID, sort_type);
+    contig_dict contig_dictionary;
+    index_dict_t flowcell_dict;
+
+    SAM_INDEX_TYPE index_type = sam_index_type_from_string(sort_type);
+
+                                
     if (strcmp(sort_type, "PROJALIGN") == 0)
     {
         if (gtf_file == NULL)
@@ -187,10 +191,13 @@ int main_sam_sort(int argc, char ** argv)
             // still remains, even though they are in a special
             // projected order. So, the output header must be taken
             // from the original alignment SAM file.
-            sam_order.InitProjection(gtf_file);
+            init_sequence_projection(gtf_file, & contig_dictionary);
+
             char * offsets_header_buf = ReadAllocSAMHeader(alternate_header_fh);
-            sam_order.AddHeaderContigStats(offsets_header_buf);
-            delete [] offsets_header_buf;
+            init_contig_length_offset(offsets_header_buf, & contig_dictionary);
+
+            // sam_order.AddHeaderContigStats(offsets_header_buf);
+            delete offsets_header_buf;
 
             output_header_fh = alignment_sam_fh;
             char * output_header_buf = ReadAllocSAMHeader(output_header_fh);
@@ -211,9 +218,12 @@ int main_sam_sort(int argc, char ** argv)
         char * output_header_buf = ReadAllocSAMHeader(output_header_fh);
         size_t header_length = strlen(output_header_buf);
         fwrite(output_header_buf, 1, header_length, sorted_sam_fh);
-        sam_order.AddHeaderContigStats(output_header_buf);
+
+        init_contig_length_offset(output_header_buf, & contig_dictionary);
+
+        // sam_order.AddHeaderContigStats(output_header_buf);
         
-        delete [] output_header_buf;
+        delete output_header_buf;
     }
 
     // merely to slurp up the alignment_sam_fh header
@@ -287,17 +297,12 @@ int main_sam_sort(int argc, char ** argv)
 
     std::vector<size_t> chunk_num_lines;
     std::vector<size_t> offset_quantile_sizes;
-    std::vector<LineIndex> line_index;
+    std::vector<sam_index> line_index;
 
     size_t chunk_num = 0;
-    // clock_t time;
-    // time_t now;
-    // size_t ticks_per_ms = CLOCKS_PER_SEC / 1000;
     timespec time_begin, time_end;
 
     zstream_tools zt(tmp_file_gz_strategy, tmp_file_gz_level);
-
-    bool is_last_chunk;
 
     while (! feof(alignment_sam_fh))
     {
@@ -319,19 +324,19 @@ int main_sam_sort(int argc, char ** argv)
             // entire input file fits in one chunk
             std::vector<char *> sam_lines = 
                 FileUtils::find_complete_lines_nullify(chunk_buffer_in, & last_fragment);
-            
-            if (! sam_order.Initialized() && ! sam_lines.empty())
-            {
-                sam_order.InitFromID(sam_lines[0]);
-            }
-            
+
+            SAM_QNAME_FORMAT qfmt = qname_format(sam_lines[0]);
+
             clock_gettime(CLOCK_REALTIME, &time_begin);
             fprintf(stderr, "processing chunk...");
             fflush(stderr);
 
             std::pair<size_t, size_t> chunk_info = 
-                process_chunk(sam_lines, chunk_buffer_in, chunk_buffer_out, 
-                              sam_order, & line_index);
+                process_chunk(sam_lines, chunk_buffer_in, chunk_buffer_out,
+                              num_threads, index_type, qfmt,
+                              & contig_dictionary,
+                              & flowcell_dict,
+                              & line_index);
 
             clock_gettime(CLOCK_REALTIME, &time_end);
             fprintf(stderr, "done. %Zu ms\n", elapsed_ms(time_begin, time_end));
@@ -363,44 +368,44 @@ int main_sam_sort(int argc, char ** argv)
             std::vector<char *> sam_lines = 
                 FileUtils::find_complete_lines_nullify(chunk_buffer_in, & last_fragment);
 
+            SAM_QNAME_FORMAT qfmt = qname_format(sam_lines[0]);
+
             clock_gettime(CLOCK_REALTIME, &time_end);
             fprintf(stderr, "done. %Zu ms\n", elapsed_ms(time_begin, time_end));
             fflush(stderr);
             
             // time = clock();
 
-            if (! sam_order.Initialized() && ! sam_lines.empty())
-            {
-                sam_order.InitFromID(sam_lines[0]);
-            }
-            
             clock_gettime(CLOCK_REALTIME, &time_begin);
             fprintf(stderr, "Sorting...");
             fflush(stderr);
 
             std::pair<size_t, size_t> chunk_info = 
-                process_chunk(sam_lines, chunk_buffer_in, chunk_buffer_out, 
-                              sam_order, & line_index);
+                process_chunk(sam_lines, chunk_buffer_in, chunk_buffer_out,
+                              num_threads, index_type, qfmt,
+                              & contig_dictionary,
+                              & flowcell_dict,
+                              & line_index);
             
             clock_gettime(CLOCK_REALTIME, &time_end);
             fprintf(stderr, "done. %Zu ms\n", elapsed_ms(time_begin, time_end));
             fflush(stderr);
 
             if (tmp_file_gz_level > 0)
-              {
+            {
                 time_t current_time = time(NULL);
                 put_gzip_header(NULL, current_time, tmp_file_gz_level, tmp_fh);
-              }
+            }
             
             size_t nbytes_written = 
                 zt.parallel_compress(chunk_buffer_out, chunk_info.first, num_threads, true, tmp_fh);
             nbytes_written = 0;
-
+            
             if (tmp_file_gz_level > 0)
-              {
+            {
                 put_gzip_trailer(chunk_info.first, crc32_chunk(chunk_buffer_out, chunk_info.first), tmp_fh);
-              }
-
+            }
+            
             fclose(tmp_fh);
 
             gzFile_s * read_tmp_fh = gzopen(tmp_file, "r"); // is this safe?

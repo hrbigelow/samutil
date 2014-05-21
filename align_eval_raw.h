@@ -3,7 +3,7 @@
 
 #include "align_eval.h"
 #include "sam_helper.h"
-#include "sam_order.h"
+// #include "sam_order.h"
 
 #include <map>
 #include <cstring>

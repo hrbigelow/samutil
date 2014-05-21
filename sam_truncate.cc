@@ -2,7 +2,7 @@
 #include "file_utils.h"
 #include "sam_helper.h"
 #include "dep/tools.h"
-#include "align_eval_aux.h"
+// #include "align_eval_aux.h"
 
 
 #include <vector>
@@ -28,6 +28,32 @@ int sam_truncate_usage(size_t mdef)
             );
     return 1;
 }
+
+
+// input: full_samline raw string
+// output: in-place modified string containing truncated string
+struct truncate_sam_unary
+{
+    truncate_sam_unary() { }
+    char * operator()(char * full_samline)
+    {
+        SamLine * sam = new SamLine(full_samline);
+        if (sam->parse_flag == PARSE_ERROR)
+        {
+            fprintf(stderr, "Encountered error parsing input\n");
+            exit(1);
+        }
+        
+        sam->sprint(full_samline);
+        delete sam;
+        return full_samline;
+    }
+};
+
+
+
+
+
 
 
 int main_sam_truncate(int argc, char ** argv)
