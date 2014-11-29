@@ -10,17 +10,14 @@
 
 typedef std::vector<sam_index>::iterator INDEX_ITER;
 
-struct partial_index_aux
-{
-    char const* base_buffer;
-    SAM_INDEX_TYPE index_type;
-    SAM_QNAME_FORMAT qname_format;
-    contig_dict * contig_dictionary;
-    partial_index_aux(char const* _base_buffer, SAM_INDEX_TYPE _itype,
-                      SAM_QNAME_FORMAT _qfmt, contig_dict * _cdict);
+sam_index **
+create_load_ranges(sam_index *line_index, size_t num_threads, size_t num_lines);
 
-    sam_index operator()(char * samline);
-};
+
+//transform a set of <num_threads> loads of index, remapping the
+//flowcell ids according to work_remap
+void apply_remap(size_t num_threads, sam_index **line_index_loads, 
+                 SAM_INDEX_TYPE itype, unsigned int **work_remap);
 
 // initialize line_index_chunk, and augment flowcell_dict
 void samlines_to_index(size_t num_threads, 
@@ -52,9 +49,7 @@ get_key_quantiles(std::vector<sam_index> const& line_index,
 
 
 size_t
-set_start_offsets(std::vector<sam_index>::iterator beg,
-                  std::vector<sam_index>::iterator end,
-                  size_t initial_offset);
+set_start_offsets(sam_index *beg, sam_index *end, size_t initial_offset);
 
 
 void 

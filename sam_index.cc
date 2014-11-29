@@ -2,8 +2,6 @@
 #include "seq_projection.h"
 #include "file_utils.h"
 #include "gtf.h"
-
-//#include "sam_helper.h"
 #include "sam_flag.h"
 
 #include <cassert>
@@ -15,6 +13,21 @@
 /*
   functions for indexing the lines in a SAM or BAM file.
  */
+void idx_t::set_fp(size_t F, size_t L, size_t T, 
+                   size_t X, size_t Y, size_t P)
+{
+    this->raw[0] = (F<<48) | (L<<40) | (T<<24) | X;
+    this->raw[1] = (Y<<40) | P;
+}
+
+
+void idx_t::set_pf(size_t P, size_t F, size_t L,
+                   size_t T, size_t X, size_t Y)
+{
+    this->raw[0] = (P<<24) | (F<<8) | L;
+    this->raw[1] = (T<<48) | (X<<24) | Y;
+}
+
 
 sam_index::sam_index(size_t *_key, size_t _so, int _ll) : 
     start_offset(_so), line_length(_ll) { 
@@ -481,21 +494,11 @@ bool parse_fragment_id_illumina(const char *qname,
 
     if (frag_first)
     {
-        idx->key.fp.F = flowcell_id;
-        idx->key.fp.L = lane;
-        idx->key.fp.T = tile;
-        idx->key.fp.X = xpos;
-        idx->key.fp.Y = ypos;
-        idx->key.fp.P = position;
+        idx->key.set_fp(flowcell_id, lane, tile, xpos, ypos, position);
     }
     else
     {
-        idx->key.pf.F = flowcell_id;
-        idx->key.pf.L = lane;
-        idx->key.pf.T = tile;
-        idx->key.pf.X = xpos;
-        idx->key.pf.Y = ypos;
-        idx->key.pf.P = position;
+        idx->key.set_pf(position, flowcell_id, lane, tile, xpos, ypos);
     }
 
     return true;
@@ -564,21 +567,11 @@ bool parse_fragment_id_casava_1_8(const char *qname,
 
     if (frag_first)
     {
-        idx->key.fp.F = flowcell_id;
-        idx->key.fp.L = lane;
-        idx->key.fp.T = tile;
-        idx->key.fp.X = xpos;
-        idx->key.fp.Y = ypos;
-        idx->key.fp.P = position;
+        idx->key.set_fp(flowcell_id, lane, tile, xpos, ypos, position);
     }
     else
     {
-        idx->key.pf.F = flowcell_id;
-        idx->key.pf.L = lane;
-        idx->key.pf.T = tile;
-        idx->key.pf.X = xpos;
-        idx->key.pf.Y = ypos;
-        idx->key.pf.P = position;
+        idx->key.set_pf(position, flowcell_id, lane, tile, xpos, ypos);
     }
 
     return true;
@@ -655,6 +648,7 @@ void set_sam_index(char const* samline, SAM_INDEX_TYPE itype, SAM_QNAME_FORMAT q
         break;
     case SAM_INDEX_FID:
     case SAM_INDEX_UNDEFINED:
+        pos = 0;
         break;
     }
 
@@ -691,24 +685,31 @@ void set_sam_index(char const* samline, SAM_INDEX_TYPE itype, SAM_QNAME_FORMAT q
         exit(23);
         break;
     }
+
+    idx->line_length = strlen(samline) + 1;
 }
 
 
 // update this index's flowcell id in place
 void sam_update_flowcell_id(const unsigned int * remap, SAM_INDEX_TYPE itype, sam_index * idx)
 {
+    size_t F;
     switch(itype)
     {
     case SAM_INDEX_FID:
     case SAM_INDEX_FID_ALN:
     case SAM_INDEX_FID_MAGALN:
     case SAM_INDEX_FID_PROJALN:
-        idx->key.fp.F = remap[idx->key.fp.F];
+        F = remap[idx->key.raw[0]>>48]; // original F is top 16 bits of raw[0]
+        idx->key.raw[0] &= ~(~0UL<<48);  // zero out the top 16 bits of raw[0]
+        idx->key.raw[0] |= F<<48; // reset the top 16 bits with the new F
         break;
     case SAM_INDEX_ALN_FID:
     case SAM_INDEX_MAGALN_FID:
     case SAM_INDEX_PROJALN_FID:
-        idx->key.pf.F = remap[idx->key.pf.F];
+        F = remap[(idx->key.raw[0] ^ (~0UL<<24))>>8]; // F is bits 8-24 (zero out bits above 24, then shift down 8)
+        idx->key.raw[0] &= ~(~(~0UL<<16)<<8); // zero out bits 8-24
+        idx->key.raw[0] |= (F<<8); // reset chosen bits
         break;
     case SAM_INDEX_UNDEFINED:
         break;

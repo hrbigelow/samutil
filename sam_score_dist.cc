@@ -5,7 +5,7 @@
 
 #include "sam_score_aux.h"
 #include "dep/tools.h"
-#include "sam_helper.h"
+#include "sam_line.h"
 #include "sam_order.h"
 
 /*

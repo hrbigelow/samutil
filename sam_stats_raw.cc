@@ -1,7 +1,7 @@
 #include "sam_stats.h"
 #include "sam_stats_aux.h"
 #include "matrix_tools.h"
-#include "sam_helper.h"
+#include "sam_line.h"
 #include "cigar_ops.h"
 #include "dep/tools.h"
 

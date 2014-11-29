@@ -1,6 +1,6 @@
 #include "sam_stats_aux.h"
 #include "dep/pileup_tools.h"
-#include "sam_helper.h"
+#include "sam_line.h"
 #include "dep/tools.h"
 
 #include <cstdio>

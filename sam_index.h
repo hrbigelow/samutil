@@ -57,11 +57,19 @@ struct position_flowcell_idx_t {
 };
 
 
-union idx_t {
-    flowcell_position_idx_t fp;
-    position_flowcell_idx_t pf;
+struct idx_t {
     size_t raw[2];
+    void set_fp(size_t F, size_t L, size_t T, 
+                size_t X, size_t Y, size_t P);
+    void set_pf(size_t P, size_t F, size_t L, 
+                size_t T, size_t X, size_t Y);
 };
+
+/* union idx_t { */
+/*     flowcell_position_idx_t fp; */
+/*     position_flowcell_idx_t pf; */
+/*     size_t raw[2]; */
+/* }; */
 
 struct less_str
 {

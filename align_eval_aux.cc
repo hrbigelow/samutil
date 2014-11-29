@@ -7,27 +7,6 @@
 #include <cassert>
 
 
-//unary function for computing index
-/*
-partial_index_aux::partial_index_aux(char const* _base_buffer,
-                                     SAM_INDEX_TYPE _itype,
-                                     SAM_QNAME_FORMAT _qfmt,
-                                     contig_dict * _cdict) :
-    base_buffer(_base_buffer),
-    index_type(_itype),
-    qname_format(_qfmt),
-    contig_dictionary(_cdict) { }
-
-sam_index partial_index_aux::operator()(char * samline)
-{
-    sam_index si;
-    si.start_offset = samline - this->base_buffer;
-    si.line_length = strlen(samline) + 1;
-    set_sam_index(samline, this->index_type, this->qname_format, this->contig_dictionary, &si);
-    return si;
-}        
-*/
-
 //tmp_fhs are open.  samlines chunk_buffer_out allocated.  line_index will be
 //appended with a K-sorted chunk range
 /*
@@ -69,7 +48,7 @@ void init_index(size_t num_threads,
                 SAM_INDEX_TYPE itype,
                 SAM_QNAME_FORMAT qfmt,
                 const contig_dict *cdict,
-                index_dict_t *index_dict)
+                index_dict_t *work_dict)
 {
 
     pthread_t * threads = new pthread_t[num_threads];
@@ -84,7 +63,7 @@ void init_index(size_t num_threads,
         inputs[t].itype = itype;
         inputs[t].qfmt = qfmt;
         inputs[t].cdict = cdict;
-        inputs[t].idict = index_dict;
+        inputs[t].idict = &work_dict[t];
     }
 
     for (size_t t = 0; t != num_threads; ++t)
@@ -141,13 +120,12 @@ void merge_and_remap_dict(index_dict_t *work_dict, size_t num_threads,
     }
     for (size_t t = 0; t != num_threads; ++t)
     {
-        size_t wi;
         index_dict_t::iterator ww;
-        for (w = work_dict[t].begin(), wi = 0; w != work_dict[t].end(); ++w, ++wi)
+        for (w = work_dict[t].begin(); w != work_dict[t].end(); ++w)
         {
             ww = (*dict).find((*w).first);
             assert(ww != (*dict).end());
-            work_remap[t][wi] = (*ww).second;
+            work_remap[t][(*w).second] = (*ww).second;
         }
     }
 }
@@ -171,8 +149,10 @@ void *apply_remap_worker(void *input)
     pthread_exit((void*) 0);
 }
 
-
-void apply_remap(size_t num_threads, sam_index **line_index_loads, SAM_INDEX_TYPE itype, unsigned int **work_remap)
+//transform a set of <num_threads> loads of index, remapping the
+//flowcell ids according to work_remap
+void apply_remap(size_t num_threads, sam_index **line_index_loads, 
+                 SAM_INDEX_TYPE itype, unsigned int **work_remap)
 {
     pthread_t * threads = new pthread_t[num_threads];
     apply_remap_input_t * inputs = new apply_remap_input_t[num_threads];
@@ -216,6 +196,15 @@ void clean_work_dicts(index_dict_t *work_dict, size_t num_threads)
     }    
 }
 
+sam_index **create_load_ranges(sam_index *line_index, size_t num_threads, size_t num_lines)
+{
+    sam_index **loads = new sam_index*[num_threads + 1];
+    for (size_t t = 0; t != num_threads + 1; ++t)
+    {
+        loads[t] = line_index + (num_lines * t) / num_threads;
+    }
+    return loads;
+}
 
 // initialize line_index_chunk, and augment flowcell_dict
 void samlines_to_index(size_t num_threads, 
@@ -227,18 +216,14 @@ void samlines_to_index(size_t num_threads,
                        sam_index *line_index_chunk,
                        index_dict_t *flowcell_dict)
 {
-    sam_index **line_index_loads = new sam_index*[num_threads + 1];
-    for (size_t t = 0; t != num_threads + 1; ++t)
-    {
-        line_index_loads[t] = line_index_chunk + (num_lines * t) / num_threads;
-    }
+    sam_index **line_index_loads = create_load_ranges(line_index_chunk, num_threads, num_lines);
 
     index_dict_t *work_dict = new index_dict_t[num_threads];
     init_work_dicts(flowcell_dict, work_dict, num_threads);
 
     // Let each thread traverse the input, updating its local copy
     // with new entries as it sees new flowcells.
-    init_index(num_threads, line_index_loads, samlines, itype, qfmt, cdict, flowcell_dict);
+    init_index(num_threads, line_index_loads, samlines, itype, qfmt, cdict, work_dict);
 
     // Integrate each of the T flowcell id dictionaries into the
     // working copy.
@@ -254,7 +239,7 @@ void samlines_to_index(size_t num_threads,
     apply_remap(num_threads, line_index_loads, itype, work_remap);
 
     // clean up
-    delete work_dict;
+    delete [] work_dict;
     for (size_t t = 0; t != num_threads; ++t)
     {
         delete work_remap[t];
@@ -287,7 +272,11 @@ process_chunk(std::vector<char *> & samlines,
     samlines_to_index(num_threads, samlines.data(), S, itype, qfmt, 
                       cdict, line_index_chunk, flowcell_dict);
 
+    set_start_offsets(line_index_chunk, line_index_chunk + S, 0);
+
     __gnu_parallel::sort(line_index_chunk, line_index_chunk + S, samidx_less_key);
+
+    
 
     char * write_pointer = chunk_buffer_out;
     sam_index * si;
@@ -645,16 +634,13 @@ size_t write_new_ordering(char const* unordered,
 }
 
 
-size_t set_start_offsets(std::vector<sam_index>::iterator beg,
-                         std::vector<sam_index>::iterator end,
-                         size_t initial_offset)
+size_t set_start_offsets(sam_index *beg, sam_index *end, size_t off)
 {
-    std::vector<sam_index>::iterator cur;
-    size_t off = initial_offset;
-    for (cur = beg; cur != end; ++cur)
+    while (beg != end)
     {
-        (*cur).start_offset = off;
-        off += (*cur).line_length;
+        beg->start_offset = off;
+        off += beg->line_length;
+        ++beg;
     }
     return off;
 }
@@ -722,7 +708,7 @@ void write_final_merge(std::vector<sam_index> const& ok_index,
                                & subrange_sizes);
 
         // now initialize start offsets
-        set_start_offsets((*ok_index_ptr).begin(), (*ok_index_ptr).end(), 0);
+        set_start_offsets(&(*ok_index_ptr)[0], &(*ok_index_ptr)[0] + (*ok_index_ptr).size(), 0);
         
         if (lines_written != key_quantile_nlines[k])
         {
@@ -836,27 +822,21 @@ get_quantiles(sam_index const** line_index,
     
     less_wrap less_ptr;
     less_ptr.less = less_fcn;
-    // less_wrap less_ptr(less_fcn);
 
     size_t lines_per_chunk = index_size / num_chunks;
     sam_index const*** quantiles = new sam_index const**[num_chunks + 1];
-    // std::vector<INDEX_ITER> quantiles(num_chunks);
     
     sam_index const**iter = line_index;
     sam_index const**end = line_index + index_size;
-    // INDEX_ITER iter = (*line_index).begin();
-    // INDEX_ITER end = (*line_index).end();
 
     quantiles[0] = iter;
     for (size_t n = 0; n != num_chunks - 1; ++n)
     {
         iter += lines_per_chunk;
-        // std::advance(iter, lines_per_chunk);
-        std::nth_element(quantiles[n], iter, end, less_ptr);
-        //__gnu_parallel::nth_element(quantiles[n], iter, end, less_fcn);
+        // std::nth_element(quantiles[n], iter, end, less_ptr);
+        __gnu_parallel::nth_element(quantiles[n], iter, end, less_ptr);
         quantiles[n + 1] = iter;
     }
     quantiles[num_chunks] = end;
-    // quantiles.push_back(end);
     return quantiles;
 }

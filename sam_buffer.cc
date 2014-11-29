@@ -2,7 +2,7 @@
 #include <algorithm>
 
 #include "sam_buffer.h"
-#include "sam_helper.h"
+#include "sam_line.h"
 #include "sam_order.h"
 #include "readsim_aux.h"
 

@@ -34,7 +34,7 @@ int main(int argc, char ** argv)
         }
         FILE * input_fh = fopen(input_file, "r");
         std::vector<size_t> chunk_lengths = FileUtils::chunk_lengths(input_fh, chunk_bytes, max_line_length);
-        fprintf(stdout, "%Zu\n", chunk_lengths.size());
+        fprintf(stdout, "%Zu chunks, [0 - %Zu)\n", chunk_lengths.size(), chunk_lengths.size());
         fclose(input_fh);
     }
     else if (strcmp(mode, "get") == 0)
@@ -52,9 +52,10 @@ int main(int argc, char ** argv)
             offset += chunk_lengths[c];
         }
         fseek(input_fh, offset, SEEK_SET);
-        size_t buf_size = 1000000;
+        size_t buf_size = 1e9;
         char * buf = new char[buf_size + 1];
         FileUtils::cat(buf, buf_size, chunk_lengths[chunk_num], input_fh, stdout);
+        delete[] buf;
         fclose(input_fh);
     }
     else

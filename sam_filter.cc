@@ -1,7 +1,7 @@
 #include "sam_filter_aux.h"
 #include "file_utils.h"
 #include "dep/tools.h"
-#include "sam_helper.h"
+#include "sam_line.h"
 #include "sam_file.h"
 
 #include <string.h>

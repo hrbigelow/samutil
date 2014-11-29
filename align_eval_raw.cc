@@ -28,7 +28,7 @@
 #include <getopt.h>
 
 #include "cigar_ops.h"
-#include "sam_helper.h"
+#include "sam_line.h"
 #include "sam_order.h"
 #include "dep/tools.h"
 #include "seq_projection.h"

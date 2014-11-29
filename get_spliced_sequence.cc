@@ -9,7 +9,7 @@
 #include "dep/tools.h"
 #include "cisortho/dnacol.h"
 #include "cisortho/dna.h"
-#include "sam_helper.h"
+#include "sam_line.h"
 #include "sam_buffer.h"
 
 int get_tx_sequence_usage(char const* ddef, size_t ldef)

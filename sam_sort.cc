@@ -436,9 +436,32 @@ int main_sam_sort(int argc, char ** argv)
     delete [] chunk_buffer_out;
     
     size_t num_chunks = read_tmp_fhs.empty() ? 1 : read_tmp_fhs.size();
-    
+
+    // do the final fix of the index
+    unsigned int **remap_loads = new unsigned int*[num_threads];
+    unsigned int *final_remap = new unsigned int[flowcell_dict.size()];
+    index_dict_t::iterator fit;
+    size_t n;
+    for (fit = flowcell_dict.begin(), n = 0; fit != flowcell_dict.end(); ++fit, ++n)
+    {
+        final_remap[(*fit).second] = n;
+    }
+    // simply create t identical references to the final remap here
+    for (size_t t = 0; t != num_threads; ++t)
+    {
+        remap_loads[t] = final_remap;
+    }
+    sam_index **line_index_loads = 
+        create_load_ranges(line_index.data(), num_threads, line_index.size());
+
+    apply_remap(num_threads, line_index_loads, index_type, remap_loads);
+
+    delete final_remap;
+    delete remap_loads;
+    delete line_index_loads;
+
     // 0. Determine N quantiles based on file offset, offset_quantiles
-    set_start_offsets(line_index.begin(), line_index.end(), 0);
+    set_start_offsets(&line_index[0], &line_index[0] + line_index.size(), 0);
 
     std::vector<INDEX_ITER> offset_quantiles;
     INDEX_ITER iit = line_index.begin();

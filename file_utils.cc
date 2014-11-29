@@ -152,21 +152,25 @@ std::vector<size_t> FileUtils::chunk_lengths(FILE * input_fh, size_t chunk_appro
 {
     std::vector<size_t> lengths;
     char * buf = new char[max_line + 1]; //allow for an extremely long line
-    long pos, prev_pos;
+    long pos, prev_pos = 0;
 
     while (! feof(input_fh))
     {
         fseek(input_fh, chunk_approx_size, SEEK_CUR);
+        char peek = fgetc(input_fh);
+        
         if (feof(input_fh))
         {
             // this is a special case
             fseek(input_fh, -1L, SEEK_END);
-            buf[0] = getc(input_fh);
+            buf[0] = fgetc(input_fh);
             buf[1] = '\0';
+            fgetc(input_fh); // re-set EOF flag
         }
         else
         {
             // not at end of file.  need to scan forward to fine a newline
+            ungetc(peek, input_fh);
             fgets(buf, max_line, input_fh);
         }
 

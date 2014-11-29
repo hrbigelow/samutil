@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <parallel/algorithm>
+#include <cassert>
 
 // do not initialize anything
 SAMFastqView::SAMFastqView() { }

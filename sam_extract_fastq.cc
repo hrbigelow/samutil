@@ -322,7 +322,7 @@ int main_sam_extract(int argc, char ** argv)
         {
             put_gzip_trailer(total_raw_bytes[f], crc32_check[f], out_fhs[f]);
         }
-        if (total_raw_bytes[f] == 0)
+        if (total_raw_bytes[f] == 0 && out_fhs[f] != NULL)
         {
             fflush(out_fhs[f]);
             ftruncate(fileno(out_fhs[f]), 0);

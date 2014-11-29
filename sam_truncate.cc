@@ -1,9 +1,7 @@
 #include "sam_truncate.h"
 #include "file_utils.h"
-#include "sam_helper.h"
+#include "sam_line.h"
 #include "dep/tools.h"
-// #include "align_eval_aux.h"
-
 
 #include <vector>
 #include <cstdio>
