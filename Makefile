@@ -16,18 +16,9 @@ BIN += samutil align_eval deal_fastq \
 
 BIN += nmer_spectrum
 
-# BIN += sim
-# BIN += pretty_plot
-# BIN += gtf_annotate_regions
-
-# BIN += filter_reads_for_tophat split_reads scatter_smoothing \
-# shuffle_paired_fastq union_regions 
-
-# BIN += test_cigar
-
 OPT = -O0
 
-CPPFLAGS = -I.
+CPPFLAGS = -I. -I..
 # LDFLAGS = -lgsl -lgslcblas -static-libgcc -L.
 # LDFLAGS = -lgsl -lgslcblas
 LDFLAGS = 
@@ -49,7 +40,7 @@ all: $(BIN)
 #clean:
 #	-rm $(BIN) *.o *.d cisortho/*.o cisortho/*.d dep/*.o dep/*.d
 
-#sam_eval_OBJS = $(addprefix $(OBJDIR)/, sam_eval.o sam_helper.o \
+#sam_eval_OBJS = $(addprefix $(OBJDIR)/, sam_eval.o sam_line.o \
 #	cigar_ops.o dep/alignment_stats.o dep/tools.o file_utils.o)
 
 #sam_eval : $(sam_eval_OBJS)
@@ -73,6 +64,10 @@ fastq_type: $(fastq_type_OBJS)
 
 file_bytes_OBJS = $(addprefix $(OBJDIR)/, file_bytes.o file_utils.o)
 file_bytes: $(file_bytes_OBJS)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -lz -o $@ $^
+
+last_bytes_OBJS = $(addprefix $(OBJDIR)/, last_bytes.o file_utils.o)
+last_bytes: $(last_bytes_OBJS)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -lz -o $@ $^
 
 
@@ -99,14 +94,14 @@ union_regions: $(union_regions_OBJS)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^
 
 #sam_stats: sam_stats.o sam_stats_raw.o sam_stats_out.o sam_stats_aux.o	\
-#	matrix_tools.o dep/tools.o cigar_ops.o sam_helper.o					\
+#	matrix_tools.o dep/tools.o cigar_ops.o sam_line.o					\
 #	dep/pileup_tools.o dep/nucleotide_stats.o dep/stats_tools.o
 #	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^
 
 
 sim_OBJS = $(addprefix $(OBJDIR)/, sim.o sim_reads.o sim_expression.o	\
 	transcript_generator.o readsim_aux.o cigar_ops.o sam_order.o		\
-	sam_helper.o dep/tools.o dep/simulation.o dep/nucleotide_stats.o	\
+	sam_line.o dep/tools.o dep/simulation.o dep/nucleotide_stats.o	\
 	cisortho/dna.o cisortho/dnacol.o cisortho/litestream.o				\
 	dep/stats_tools.o sam_buffer.o fragment_generator.o gtf.o			\
 	file_utils.o)
@@ -115,21 +110,21 @@ sim: $(sim_OBJS)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -lz -o $@ $^
 
 
-
-samutil_OBJS = $(addprefix $(OBJDIR)/, samutil.o sam_tx2genome.o		\
-	dep/tools.o sam_score.o sam_truncate.o sam_seqindex.o sam_rejoin.o	\
-	sam_sort.o sam_checksort.o align_eval_aux.o sam_score_aux.o			\
-	sam_aux.o seq_projection.o gtf.o file_utils.o sam_buffer.o			\
-	sam_helper.o sam_order.o cigar_ops.o sam_filter.o sam_filter_aux.o	\
-	zstream_tools.o sam_to_fastq.o sam_extract_fastq.o time_tools.o		\
-	gzip_tools.o)
+samutil_OBJS = $(addprefix $(OBJDIR)/, samutil.o dep/tools.o		\
+	sam_sort.o sam_index.o sam_checksort.o align_eval_aux.o			\
+	seq_projection.o gtf.o file_utils.o cigar_ops.o sam_filter.o	\
+	sam_filter_aux.o zstream_tools.o sam_to_fastq.o					\
+	sam_extract_fastq.o time_tools.o gzip_tools.o sam_file.o		\
+	sam_flag.o sam_helper.o)
+#   sam_tx2genome.o sam_aux.o sam_score.o sam_score_aux.o
+#	sam_truncate.o sam_rejoin.o sam_seqindex.o sam_buffer.o sam_order.o
 
 samutil: $(samutil_OBJS)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -lz -lpthread -o $@ $^
 
 
 find_index_collisions_OBJS = $(addprefix $(OBJDIR)/,					\
-	find_index_collisions.o sam_order.o sam_helper.o seq_projection.o	\
+	find_index_collisions.o sam_order.o sam_line.o seq_projection.o	\
 	gtf.o file_utils.o cigar_ops.o dep/tools.o)
 
 find_index_collisions: $(find_index_collisions_OBJS)
@@ -141,7 +136,7 @@ find_index_collisions: $(find_index_collisions_OBJS)
 
 pretty_plot_OBJS = $(addprefix $(OBJDIR)/, pretty_plot.o			\
 	pretty_plot_graph.o pretty_plot_gtf_sam.o cigar_ops.o nclist.o	\
-	sam_order.o sam_helper.o gtf.o seq_projection.o dep/tools.o		\
+	sam_order.o sam_line.o gtf.o seq_projection.o dep/tools.o		\
 	meta_gene.o file_utils.o)
 
 pretty_plot: $(pretty_plot_OBJS)
@@ -154,7 +149,7 @@ pretty_plot: $(pretty_plot_OBJS)
 align_eval_OBJS = $(addprefix $(OBJDIR)/, align_eval.o				\
 	align_eval_raw.o align_eval_aux.o align_eval_mask.o				\
 	align_eval_coverage.o align_eval_stats.o cigar_ops.o			\
-	seq_projection.o file_utils.o sam_helper.o sam_order.o gtf.o	\
+	seq_projection.o file_utils.o sam_line.o sam_order.o gtf.o	\
 	dep/tools.o)
 
 align_eval: $(align_eval_OBJS)
@@ -187,6 +182,10 @@ fasta2cisfasta_OBJS = $(addprefix $(OBJDIR)/, fasta2cisfasta.o dep/tools.o file_
 
 fasta2cisfasta : $(fasta2cisfasta_OBJS)
 	$(CXX) $(CXXFLAGS) -lz $(LDFLAGS) -o $@ $^
+
+
+fasta2bin : $(addprefix $(OBJDIR)/, fasta2bin.o) ../dep/obj/bindepth.o
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^
 
 
 scatter_smoothing_OBJS = $(addprefix $(OBJDIR)/, \
