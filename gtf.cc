@@ -4,8 +4,11 @@
 
 #include <set>
 #include <cstring>
+#include <assert.h>
 
-#include "dep/tools.h"
+extern "C" {
+#include "tools.h"
+}
 
 bool GTFEntry::get_next_record(FILE * gtf_fh)
 {
@@ -165,7 +168,7 @@ void GTFEntry::clear_record()
 std::map<std::string, std::string>
 gtf_to_transcript_gene_map(char const* gtf_file)
 {
-    FILE * gtf_fh = open_or_die(gtf_file, "r", "Input GTF file");
+    FILE *gtf_fh = open_if_present(gtf_file, "r");
     GTFEntry ge;
     std::map<std::string, std::string> transcript_gene_map;
     std::string t, g;

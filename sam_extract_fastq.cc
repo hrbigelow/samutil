@@ -35,9 +35,12 @@ encountered.
 #include "time_tools.h"
 #include "zstream_tools.h"
 #include "gzip_tools.h"
-#include "dep/tools.h"
 #include "sam_file.h"
 #include "file_utils.h"
+
+extern "C" {
+#include "tools.h"
+}
 
 
 int sam_extract_usage(size_t mdef, size_t zdef, size_t ydef)
@@ -123,8 +126,8 @@ int main_sam_extract(int argc, char ** argv)
         orphan_fastq_file = argv[optind + 3];
     }
     
-    FILE * sorted_sam_fh = open_if_present(sorted_sam_file, "r");
-    FILE * fastq1_fh = open_if_present(fastq1_file, "w");
+    FILE *sorted_sam_fh = open_if_present(sorted_sam_file, "r");
+    FILE *fastq1_fh = open_if_present(fastq1_file, "w");
 
     // these will be NULL if we are in single read mode
     FILE * fastq2_fh = NULL;

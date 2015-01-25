@@ -26,6 +26,7 @@
 #include <cstdio>
 #include <zlib.h>
 #include <ctime>
+#include <assert.h>
 
 #include <omp.h>
 
@@ -34,13 +35,16 @@
 #include "align_eval_aux.h"
 
 #include "file_utils.h"
-#include "dep/tools.h"
 #include "sam_index.h"
 #include "sam_file.h"
 #include "zstream_tools.h"
 #include "gzip_tools.h"
 
 #include "time_tools.h"
+
+extern "C" {
+#include "tools.h"
+}
 
 int sam_sort_usage(size_t mdef, size_t zdef, size_t ydef)
 {

@@ -10,7 +10,6 @@
 
 #include "cisortho/memory.h"
 #include "cigar_ops.h"
-#include "dep/tools.h"
 
 class GTFEntry
 {

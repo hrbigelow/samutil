@@ -41,7 +41,8 @@ void deflate_wrapper::operator()(chunk_buffers & cb)
     zs.next_out = cb.dest;
     zs.avail_out = 0;
 
-    // will be compressing a total of 'left' bytes, in chunks of no more than MAXP2 bytes each.
+    // will be compressing a total of 'left' bytes, in chunks of no
+    // more than MAXP2 bytes each.
     size_t left = cb.source_len;
 
     // deflate chunks of MAXP2 bytes at a time.  Use Z_FINISH at the last chunk.
@@ -154,5 +155,3 @@ size_t zstream_tools::parallel_compress(char const* source_buf,
 
     return nbytes_written;
 }
-
-

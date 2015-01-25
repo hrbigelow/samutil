@@ -1,5 +1,4 @@
 #include "align_eval_aux.h"
-#include "dep/tools.h"
 #include "file_utils.h"
 #include "sam_index.h"
 #include "sam_file.h"
@@ -9,6 +8,10 @@
 #include <parallel/algorithm>
 
 #include <getopt.h>
+
+extern "C" {
+#include "tools.h"
+}
 
 int sam_checksort_usage()
 {
