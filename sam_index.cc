@@ -17,11 +17,7 @@ void set_fp(struct idx_t *idx,
             size_t F, size_t L, size_t T, 
             size_t X, size_t Y, size_t P)
 {
-    /* F in bytes 7 and 6
-       L in byte 5
-       T in bytes 3 and 4 
-       X in bytes 0, 1, and 2
-    */
+    /* FFLTTXXX YYYPPPPP */
     idx->raw[0] = (F<<48) | (L<<40) | (T<<24) | X;
     idx->raw[1] = (Y<<40) | P;
 }
@@ -31,6 +27,7 @@ void set_pf(struct idx_t *idx,
             size_t P, size_t F, size_t L,
             size_t T, size_t X, size_t Y)
 {
+    /* PPPPPFL TTXXXYYY */
     idx->raw[0] = (P<<24) | (F<<8) | L;
     idx->raw[1] = (T<<48) | (X<<24) | Y;
 }
@@ -289,14 +286,15 @@ size_t samline_position_align(char const* samline, contig_dict const* dict)
 size_t samline_projected_position_align(char const* samline, contig_dict const* dict)
 {
 
-    char * contig;
-    char * cigar;
+    char contig[100];
+    char cigar[1000];
 
     size_t ones_based_pos;
     size_t flat_pos;
 
-    sscanf(samline, "%*[^\t]\t%*u\t%a[^\t]\t%zu\t%*i\t%as", 
-           &contig, &ones_based_pos, &cigar);
+    /* QNAME FLAG RNAME POS MAPQ CIGAR */
+    sscanf(samline, "%*[^\t]\t%*u\t%s[^\t]\t%zu\t%*i\t%s", 
+           contig, &ones_based_pos, cigar);
 
     size_t zero_based_pos = ones_based_pos == 0 ? 0 : ones_based_pos - 1;
 
@@ -320,8 +318,6 @@ size_t samline_projected_position_align(char const* samline, contig_dict const* 
     //     flat_pos += (this->*(this->parse_fragment_id))(samline);
     // }
     
-    delete contig;
-    delete cigar;
     return flat_pos;
 }
 

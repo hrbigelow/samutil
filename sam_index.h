@@ -40,26 +40,6 @@ enum SAM_QNAME_FORMAT
 
 
 // F = flowcell, L = lane, T = tile, X, Y, P = alignment position
-/*
-struct flowcell_position_idx_t {
-    size_t F : 16;
-    size_t L : 8;
-    size_t T : 16;
-    size_t X : 24;
-    size_t Y : 24;
-    size_t P : 40;
-};
-
-struct position_flowcell_idx_t {
-    size_t P : 40;
-    size_t F : 16;
-    size_t L : 8;
-    size_t T : 16;
-    size_t X : 24;
-    size_t Y : 24;
-};
-*/
-
 
 /* As far as I can tell, the byte order for a uint64_t is:
 BIG_ENDIAN   :  87654321
