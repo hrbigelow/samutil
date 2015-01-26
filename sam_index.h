@@ -37,7 +37,10 @@ enum SAM_QNAME_FORMAT
     };
 
 
+
+
 // F = flowcell, L = lane, T = tile, X, Y, P = alignment position
+/*
 struct flowcell_position_idx_t {
     size_t F : 16;
     size_t L : 8;
@@ -55,15 +58,31 @@ struct position_flowcell_idx_t {
     size_t X : 24;
     size_t Y : 24;
 };
+*/
+
+
+/* As far as I can tell, the byte order for a uint64_t is:
+BIG_ENDIAN   :  87654321
+LITTLE_ENDIAN:  12345678
+
+So, what does the bitshift do?  
+ */
 
 
 struct idx_t {
     size_t raw[2];
-    void set_fp(size_t F, size_t L, size_t T, 
-                size_t X, size_t Y, size_t P);
-    void set_pf(size_t P, size_t F, size_t L, 
-                size_t T, size_t X, size_t Y);
 };
+
+
+void set_fp(struct idx_t *idx,
+            size_t F, size_t L, size_t T, 
+            size_t X, size_t Y, size_t P);
+
+void set_pf(struct idx_t *idx,
+            size_t P, size_t F, size_t L, 
+            size_t T, size_t X, size_t Y);
+
+
 
 /* union idx_t { */
 /*     flowcell_position_idx_t fp; */

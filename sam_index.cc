@@ -13,19 +13,26 @@
 /*
   functions for indexing the lines in a SAM or BAM file.
  */
-void idx_t::set_fp(size_t F, size_t L, size_t T, 
-                   size_t X, size_t Y, size_t P)
+void set_fp(struct idx_t *idx,
+            size_t F, size_t L, size_t T, 
+            size_t X, size_t Y, size_t P)
 {
-    this->raw[0] = (F<<48) | (L<<40) | (T<<24) | X;
-    this->raw[1] = (Y<<40) | P;
+    /* F in bytes 7 and 6
+       L in byte 5
+       T in bytes 3 and 4 
+       X in bytes 0, 1, and 2
+    */
+    idx->raw[0] = (F<<48) | (L<<40) | (T<<24) | X;
+    idx->raw[1] = (Y<<40) | P;
 }
 
 
-void idx_t::set_pf(size_t P, size_t F, size_t L,
-                   size_t T, size_t X, size_t Y)
+void set_pf(struct idx_t *idx,
+            size_t P, size_t F, size_t L,
+            size_t T, size_t X, size_t Y)
 {
-    this->raw[0] = (P<<24) | (F<<8) | L;
-    this->raw[1] = (T<<48) | (X<<24) | Y;
+    idx->raw[0] = (P<<24) | (F<<8) | L;
+    idx->raw[1] = (T<<48) | (X<<24) | Y;
 }
 
 
@@ -493,13 +500,9 @@ bool parse_fragment_id_illumina(const char *qname,
     flowcell_id = (*fit).second;
 
     if (frag_first)
-    {
-        idx->key.set_fp(flowcell_id, lane, tile, xpos, ypos, position);
-    }
+        set_fp(&idx->key, flowcell_id, lane, tile, xpos, ypos, position);
     else
-    {
-        idx->key.set_pf(position, flowcell_id, lane, tile, xpos, ypos);
-    }
+        set_pf(&idx->key, position, flowcell_id, lane, tile, xpos, ypos);
 
     return true;
 }
@@ -566,13 +569,9 @@ bool parse_fragment_id_casava_1_8(const char *qname,
     flowcell_id = (*fit).second;
 
     if (frag_first)
-    {
-        idx->key.set_fp(flowcell_id, lane, tile, xpos, ypos, position);
-    }
+        set_fp(&idx->key, flowcell_id, lane, tile, xpos, ypos, position);
     else
-    {
-        idx->key.set_pf(position, flowcell_id, lane, tile, xpos, ypos);
-    }
+        set_pf(&idx->key, position, flowcell_id, lane, tile, xpos, ypos);
 
     return true;
 }
