@@ -81,7 +81,7 @@ int main_sam_seqindex(int argc, char ** argv)
 
 
     size_t nfq = fastq_files.size();
-    gzFile * fastq_fhs = new gzFile[nfq];
+    gzFile *fastq_fhs = new gzFile[nfq];
     size_t chunk_size = max_mem / nfq / 3;
     char ** fq_chunks = new char *[nfq];
     char * fq_dat_in = new char[chunk_size * nfq];
@@ -120,7 +120,7 @@ int main_sam_seqindex(int argc, char ** argv)
     strcat(tmp_file_template, ".XXXXXX");
 
     std::vector<char *> tmp_files;
-    std::vector<gzFile_s *> in_tmp_fhs;
+    std::vector<gzFile> in_tmp_fhs;
 
     // main initializion
     size_t num_complete_records = 0;
@@ -260,8 +260,8 @@ int main_sam_seqindex(int argc, char ** argv)
             mkstemp(tmp_file);
             
             tmp_files.push_back(tmp_file);
-            gzFile_s * out_gz = gzopen(tmp_file, "w");
-            gzFile_s * in_gz = gzopen(tmp_file, "r");
+            gzFile out_gz = gzopen(tmp_file, "w");
+            gzFile in_gz = gzopen(tmp_file, "r");
 
             if (out_gz == NULL)
             {

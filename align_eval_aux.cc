@@ -389,14 +389,14 @@ get_key_quantiles(std::vector<sam_index> const& line_index,
 struct gzread_target
 {
     gzread_target();
-    gzread_target(gzFile_s *, char *, size_t);
-    gzFile_s * source_file;
+    gzread_target(gzFile, char *, size_t);
+    gzFile source_file;
     char * dest_buffer;
     size_t bytes_to_read;
 };
 
 gzread_target::gzread_target() : source_file(NULL), dest_buffer(NULL), bytes_to_read(0) { }
-gzread_target::gzread_target(gzFile_s *s, char *d, size_t b) : source_file(s), dest_buffer(d), bytes_to_read(b) { }
+gzread_target::gzread_target(gzFile s, char *d, size_t b) : source_file(s), dest_buffer(d), bytes_to_read(b) { }
 
 struct gzread_and_copy
 {
@@ -443,7 +443,7 @@ void gzread_and_copy::operator()(gzread_target & item)
 // returns number of bytes written
 size_t catenate_subchunks(sam_index const& query_key_quantile,
                           // std::vector<FILE *> const& tmp_fhs,
-                          std::vector<gzFile_s *> const& tmp_fhs,
+                          std::vector<gzFile> const& tmp_fhs,
                           std::vector<INDEX_ITER> * prev_chunk_starts,
                           std::vector<INDEX_ITER> const& chunk_ends, /* ends of each chunk ordered by (O, K) */
                           char ** chunk_buffer,
@@ -657,7 +657,7 @@ size_t set_start_offsets(sam_index *beg, sam_index *end, size_t off)
 
 void write_final_merge(std::vector<sam_index> const& ok_index,
                        std::vector<INDEX_ITER> const& offset_quantiles,
-                       std::vector<gzFile_s *> const& tmp_fhs,
+                       std::vector<gzFile> const& tmp_fhs,
                        bool do_check_unique_index,
                        FILE * out_dat_fh,
                        FILE * out_ind_fh)
