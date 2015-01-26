@@ -17,7 +17,8 @@ create_load_ranges(sam_index *line_index, size_t num_threads, size_t num_lines);
 //transform a set of <num_threads> loads of index, remapping the
 //flowcell ids according to work_remap
 void apply_remap(size_t num_threads, sam_index **line_index_loads, 
-                 SAM_INDEX_TYPE itype, unsigned int **work_remap);
+                 SAM_INDEX_TYPE itype, SAM_QNAME_FORMAT qfmt, 
+                 unsigned int **work_remap);
 
 // initialize line_index_chunk, and augment flowcell_dict
 void samlines_to_index(size_t num_threads, 

@@ -307,6 +307,7 @@ int main_sam_sort(int argc, char ** argv)
     timespec time_begin, time_end;
 
     zstream_tools zt(tmp_file_gz_strategy, tmp_file_gz_level);
+    SAM_QNAME_FORMAT qfmt;
 
     while (! feof(alignment_sam_fh))
     {
@@ -329,7 +330,7 @@ int main_sam_sort(int argc, char ** argv)
             std::vector<char *> sam_lines = 
                 FileUtils::find_complete_lines_nullify(chunk_buffer_in, & last_fragment);
 
-            SAM_QNAME_FORMAT qfmt = qname_format(sam_lines[0]);
+            qfmt = qname_format(sam_lines[0]);
 
             clock_gettime(CLOCK_REALTIME, &time_begin);
             fprintf(stderr, "processing chunk...");
@@ -372,7 +373,7 @@ int main_sam_sort(int argc, char ** argv)
             std::vector<char *> sam_lines = 
                 FileUtils::find_complete_lines_nullify(chunk_buffer_in, & last_fragment);
 
-            SAM_QNAME_FORMAT qfmt = qname_format(sam_lines[0]);
+            qfmt = qname_format(sam_lines[0]);
 
             clock_gettime(CLOCK_REALTIME, &time_end);
             fprintf(stderr, "done. %Zu ms\n", elapsed_ms(time_begin, time_end));
@@ -447,18 +448,16 @@ int main_sam_sort(int argc, char ** argv)
     index_dict_t::iterator fit;
     size_t n;
     for (fit = flowcell_dict.begin(), n = 0; fit != flowcell_dict.end(); ++fit, ++n)
-    {
         final_remap[(*fit).second] = n;
-    }
+
     // simply create t identical references to the final remap here
     for (size_t t = 0; t != num_threads; ++t)
-    {
         remap_loads[t] = final_remap;
-    }
+
     sam_index **line_index_loads = 
         create_load_ranges(line_index.data(), num_threads, line_index.size());
 
-    apply_remap(num_threads, line_index_loads, index_type, remap_loads);
+    apply_remap(num_threads, line_index_loads, index_type, qfmt, remap_loads);
 
     delete final_remap;
     delete remap_loads;

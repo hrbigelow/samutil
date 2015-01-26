@@ -619,7 +619,8 @@ SAM_QNAME_FORMAT qname_format(char const* sam_dataline)
 
 
 // set the index fields of idx for this sam_line according to the chosen type and format
-void set_sam_index(char const* samline, SAM_INDEX_TYPE itype, SAM_QNAME_FORMAT qfmt, 
+void set_sam_index(char const* samline, SAM_INDEX_TYPE itype,
+                   SAM_QNAME_FORMAT qfmt, 
                    contig_dict const* dict, 
                    index_dict_t *flowcell_dict,
                    sam_index * idx)
@@ -685,10 +686,14 @@ void set_sam_index(char const* samline, SAM_INDEX_TYPE itype, SAM_QNAME_FORMAT q
 }
 
 
-// update this index's flowcell id in place
-void sam_update_flowcell_id(const unsigned int * remap, SAM_INDEX_TYPE itype, sam_index * idx)
+/* update this index's flowcell id in place.  this only needs to be
+   done for qfmt's that involve a flowcell */
+void sam_update_flowcell_id(const unsigned int * remap, 
+                            SAM_INDEX_TYPE itype,
+                            sam_index *idx)
 {
     size_t F;
+    
     switch(itype)
     {
     case SAM_INDEX_FID:

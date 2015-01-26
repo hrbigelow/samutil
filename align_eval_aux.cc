@@ -152,8 +152,14 @@ void *apply_remap_worker(void *input)
 //transform a set of <num_threads> loads of index, remapping the
 //flowcell ids according to work_remap
 void apply_remap(size_t num_threads, sam_index **line_index_loads, 
-                 SAM_INDEX_TYPE itype, unsigned int **work_remap)
+                 SAM_INDEX_TYPE itype, 
+                 SAM_QNAME_FORMAT qfmt,
+                 unsigned int **work_remap)
 {
+    if (qfmt != SAM_ILLUMINA &&
+        qfmt != SAM_CASAVA18)
+        return;
+
     pthread_t * threads = new pthread_t[num_threads];
     apply_remap_input_t * inputs = new apply_remap_input_t[num_threads];
 
@@ -225,25 +231,24 @@ void samlines_to_index(size_t num_threads,
     // with new entries as it sees new flowcells.
     init_index(num_threads, line_index_loads, samlines, itype, qfmt, cdict, work_dict);
 
-    // Integrate each of the T flowcell id dictionaries into the
-    // working copy.
+    /* Integrate each of the T flowcell id dictionaries into the
+       working copy. */
     unsigned int **work_remap = new unsigned int*[num_threads];
-
+    
     // Compare each of the T flowcell id dictionaries to the new
     // working copy, creating a remap array
     merge_and_remap_dict(work_dict, num_threads, flowcell_dict, work_remap);
-
+    
     clean_work_dicts(work_dict, num_threads);
     
     // Apply the remap array to the same workload, updating the mappings.
-    apply_remap(num_threads, line_index_loads, itype, work_remap);
-
+    apply_remap(num_threads, line_index_loads, itype, qfmt, work_remap);
+    
     // clean up
     delete [] work_dict;
     for (size_t t = 0; t != num_threads; ++t)
-    {
         delete work_remap[t];
-    }
+    
     delete work_remap;
 }
 
