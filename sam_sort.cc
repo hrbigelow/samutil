@@ -289,7 +289,7 @@ int main_sam_sort(int argc, char ** argv)
     strcat(tmp_file_template, ".XXXXXX");
 
     std::vector<char *> tmp_files;
-    std::vector<gzFile_s *> read_tmp_fhs;
+    std::vector<gzFile> read_tmp_fhs;
 
     // build the index, and output the
     char * chunk_buffer_in = new char[chunk_size + 1];
@@ -359,7 +359,7 @@ int main_sam_sort(int argc, char ** argv)
             strcpy(tmp_file, tmp_file_template);
             int fdes = mkstemp(tmp_file);
             FILE * tmp_fh = fdopen(fdes, "w");
-            // gzFile_s * write_tmp_fh = gzopen(tmp_file, "w");
+            // gzFile write_tmp_fh = gzopen(tmp_file, "w");
             // gzsetparams(write_tmp_fh, tmp_file_gz_level, tmp_file_gz_strategy);
 
             // these names will be used later
@@ -412,7 +412,7 @@ int main_sam_sort(int argc, char ** argv)
             
             fclose(tmp_fh);
 
-            gzFile_s * read_tmp_fh = gzopen(tmp_file, "r"); // is this safe?
+            gzFile read_tmp_fh = gzopen(tmp_file, "r"); // is this safe?
             read_tmp_fhs.push_back(read_tmp_fh);
             
             // now, line_index is in num_chunks pieces, each corresponding

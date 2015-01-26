@@ -55,7 +55,7 @@ set_start_offsets(sam_index *beg, sam_index *end, size_t initial_offset);
 void 
 write_final_merge(std::vector<sam_index> const& ok_index,
                   std::vector<INDEX_ITER> const& offset_quantiles,
-                  std::vector<gzFile_s *> const& tmp_fhs,
+                  std::vector<gzFile> const& tmp_fhs,
                   // std::vector<FILE *> const& tmp_fhs,
                   /* std::vector<z_stream *> const& zstreams, */
                   /* size_t zstream_bufsize, */
