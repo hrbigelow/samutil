@@ -5,7 +5,7 @@
 #include <ext/algorithm>
 #include <zlib.h>
 #include <cassert>
-
+#include <limits.h>
 
 //tmp_fhs are open.  samlines chunk_buffer_out allocated.  line_index will be
 //appended with a K-sorted chunk range
