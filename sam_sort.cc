@@ -307,7 +307,6 @@ int main_sam_sort(int argc, char ** argv)
     timespec time_begin, time_end;
 
     zstream_tools zt(tmp_file_gz_strategy, tmp_file_gz_level);
-    SAM_QNAME_FORMAT qfmt;
 
     while (! feof(alignment_sam_fh))
     {
@@ -330,15 +329,13 @@ int main_sam_sort(int argc, char ** argv)
             std::vector<char *> sam_lines = 
                 FileUtils::find_complete_lines_nullify(chunk_buffer_in, & last_fragment);
 
-            qfmt = qname_format(sam_lines[0]);
-
             clock_gettime(CLOCK_REALTIME, &time_begin);
             fprintf(stderr, "processing chunk...");
             fflush(stderr);
 
             std::pair<size_t, size_t> chunk_info = 
                 process_chunk(sam_lines, chunk_buffer_in, chunk_buffer_out,
-                              num_threads, index_type, qfmt,
+                              num_threads, index_type,
                               & contig_dictionary,
                               & flowcell_dict,
                               & line_index);
@@ -373,8 +370,6 @@ int main_sam_sort(int argc, char ** argv)
             std::vector<char *> sam_lines = 
                 FileUtils::find_complete_lines_nullify(chunk_buffer_in, & last_fragment);
 
-            qfmt = qname_format(sam_lines[0]);
-
             clock_gettime(CLOCK_REALTIME, &time_end);
             fprintf(stderr, "done. %Zu ms\n", elapsed_ms(time_begin, time_end));
             fflush(stderr);
@@ -387,7 +382,7 @@ int main_sam_sort(int argc, char ** argv)
 
             std::pair<size_t, size_t> chunk_info = 
                 process_chunk(sam_lines, chunk_buffer_in, chunk_buffer_out,
-                              num_threads, index_type, qfmt,
+                              num_threads, index_type,
                               & contig_dictionary,
                               & flowcell_dict,
                               & line_index);
@@ -457,7 +452,7 @@ int main_sam_sort(int argc, char ** argv)
     sam_index **line_index_loads = 
         create_load_ranges(line_index.data(), num_threads, line_index.size());
 
-    apply_remap(num_threads, line_index_loads, index_type, qfmt, remap_loads);
+    apply_remap(num_threads, line_index_loads, index_type, remap_loads);
 
     delete final_remap;
     delete remap_loads;

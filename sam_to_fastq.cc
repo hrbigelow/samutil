@@ -71,7 +71,7 @@ struct init_fastq_view_input_t
     SAMFastqView * fastq_view;
     char **samlines;
     char **end;
-    SAM_QNAME_FORMAT qfmt;
+    // SAM_QNAME_FORMAT qfmt;
     const contig_dict *cdict;
     index_dict_t *fdict;
     
@@ -112,7 +112,7 @@ void *init_fastq_view_worker(void *input)
             exit(35);
         }
         
-        set_sam_index(samline, SAM_INDEX_FID, ii->qfmt, ii->cdict, ii->fdict, &idx);
+        set_sam_index(samline, SAM_INDEX_FID, ii->cdict, ii->fdict, &idx);
         // fragment_id = (this->sam_order->*(this->sam_order->sam_index))(qname);
         
         seq = samline + seqstart;
@@ -139,7 +139,6 @@ void init_fastq_view(char **samlines,
     }
     // We are simply taking advantage of sam_order's facility to parse the qname field
     // and transform it into a fragment_id index.  The "FRAGMENT" part is of no consequence.
-    SAM_QNAME_FORMAT qfmt = qname_format(samlines[0]);
     
     pthread_t * threads = new pthread_t[num_threads];
     init_fastq_view_input_t * inputs = new init_fastq_view_input_t[num_threads];
@@ -150,7 +149,7 @@ void init_fastq_view(char **samlines,
         inputs[t].samlines = samlines + (num_lines * t) / num_threads;
         inputs[t].end = samlines + (num_lines * (t + 1)) / num_threads;
         inputs[t].fastq_view = fastq_view + (num_lines * t) / num_threads;
-        inputs[t].qfmt = qfmt;
+        // inputs[t].qfmt = qfmt;
         inputs[t].cdict = cdict;
         inputs[t].fdict = flowcell_dict;
     }

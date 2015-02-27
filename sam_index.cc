@@ -433,11 +433,11 @@ inline void convert16_aux(char const* raw, size_t * converted)
 bool parse_fragment_id_numeric(char const* qname, bool frag_first, size_t position, sam_index *idx)
 {
     size_t id;
-    int nfields_read = sscanf(qname, "%zu", &id);
-    if (nfields_read != 1)
-    {
-        return false;
-    }
+    int pos;
+    int nfields_read = sscanf(qname, "%zu%n", &id, &pos);
+    if (nfields_read != 1 
+        || (qname[pos] != '\0' && qname[pos] != '\t')) return false;
+
     if (frag_first)
     {
         idx->key.raw[0] = id;
@@ -505,12 +505,6 @@ bool parse_fragment_id_illumina(const char *qname,
 
 
 /*
-  Parses Casava 1.8 read id format.  This routine ignores
-  instrument-name, run ID, flowcell ID, and is therefore unsuitable for
-  running data that comes from different flowcells etc.
-
-  I will remedy this in the future.
-
   @<instrument-name>:<run ID>:<flowcell ID>:<lane-number>:<tile-number>:<x-pos>:<y-pos> \
   <read number>:<is filtered>:<control number>:<barcode sequence>
 
@@ -525,7 +519,6 @@ bool parse_fragment_id_illumina(const char *qname,
   followed by extra characters.
 
   So, another valid format could be:
-
 
   @<instrument-name>:<run ID>:<flowcell ID>:<lane-number>:<tile-number>:<x-pos>:<y-pos>
 
@@ -583,7 +576,7 @@ bool parse_fragment_id_zero(char const* /* qname */, sam_index *idx)
 
 
 
-
+/*
 SAM_QNAME_FORMAT qname_format(char const* sam_dataline)
 {
     SAM_QNAME_FORMAT qname_format;
@@ -616,11 +609,10 @@ SAM_QNAME_FORMAT qname_format(char const* sam_dataline)
 
     return qname_format;
 }
-
+*/
 
 // set the index fields of idx for this sam_line according to the chosen type and format
 void set_sam_index(char const* samline, SAM_INDEX_TYPE itype,
-                   SAM_QNAME_FORMAT qfmt, 
                    contig_dict const* dict, 
                    index_dict_t *flowcell_dict,
                    sam_index * idx)
@@ -669,26 +661,24 @@ void set_sam_index(char const* samline, SAM_INDEX_TYPE itype,
         break;
     }
     
-    // initialize all other fields
-    switch(qfmt)
+    /* initialize all other fields.  each of these functions returns
+       true if the format matches */
+    if (parse_fragment_id_illumina(samline, frag_first, pos, idx, flowcell_dict) ||
+        parse_fragment_id_casava_1_8(samline, frag_first, pos, idx, flowcell_dict) || 
+        parse_fragment_id_numeric(samline, frag_first, pos, idx)) ; /* success */
+    else
     {
-    case SAM_NUMERIC: parse_fragment_id_numeric(samline, frag_first, pos, idx); break;
-    case SAM_ILLUMINA: parse_fragment_id_illumina(samline, frag_first, pos, idx, flowcell_dict); break;
-    case SAM_CASAVA18: parse_fragment_id_casava_1_8(samline, frag_first, pos, idx, flowcell_dict); break;
-    case SAM_FORMAT_UNDEFINED: 
-    default:
         fprintf(stderr, "Error: Unknown QNAME format\n");
         exit(23);
-        break;
     }
-
+        
     idx->line_length = strlen(samline) + 1;
 }
 
 
 /* update this index's flowcell id in place.  this only needs to be
    done for qfmt's that involve a flowcell */
-void sam_update_flowcell_id(const unsigned int * remap, 
+void sam_update_flowcell_id(const unsigned int *remap, 
                             SAM_INDEX_TYPE itype,
                             sam_index *idx)
 {

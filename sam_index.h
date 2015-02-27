@@ -144,7 +144,8 @@ void init_sequence_projection(char const* gtf_file, contig_dict * dict);
 
 
 // set the index fields of idx for this sam_line according to the chosen type and format
-void set_sam_index(char const* samline, SAM_INDEX_TYPE itype, SAM_QNAME_FORMAT qfmt, 
+void set_sam_index(char const* samline, 
+                   SAM_INDEX_TYPE itype,
                    contig_dict const* dict, 
                    index_dict_t *flowcell_dict,
                    sam_index * idx);

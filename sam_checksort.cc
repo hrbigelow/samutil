@@ -104,11 +104,9 @@ int main_sam_checksort(int argc, char ** argv)
 
         samlines = FileUtils::find_complete_lines_nullify(chunk_buffer_in, & last_fragment);
         
-        SAM_QNAME_FORMAT qfmt = qname_format(samlines[0]);
-        
         sam_index * line_index_chunk = new sam_index[samlines.size()];
         samlines_to_index(num_threads, samlines.data(), samlines.size(), 
-                          index_type, qfmt, & contig_dictionary, line_index_chunk, & flowcell_dict);
+                          index_type, & contig_dictionary, line_index_chunk, & flowcell_dict);
         
         is_sorted = is_sorted &&
             std::is_sorted(line_index_chunk, line_index_chunk + samlines.size(), samidx_less_key);

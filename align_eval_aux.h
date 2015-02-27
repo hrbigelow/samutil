@@ -17,7 +17,7 @@ create_load_ranges(sam_index *line_index, size_t num_threads, size_t num_lines);
 //transform a set of <num_threads> loads of index, remapping the
 //flowcell ids according to work_remap
 void apply_remap(size_t num_threads, sam_index **line_index_loads, 
-                 SAM_INDEX_TYPE itype, SAM_QNAME_FORMAT qfmt, 
+                 SAM_INDEX_TYPE itype,
                  unsigned int **work_remap);
 
 // initialize line_index_chunk, and augment flowcell_dict
@@ -25,7 +25,6 @@ void samlines_to_index(size_t num_threads,
                        char **samlines,
                        size_t num_lines,
                        SAM_INDEX_TYPE itype,
-                       SAM_QNAME_FORMAT qfmt,
                        const contig_dict *cdict,
                        sam_index *line_index_chunk,
                        index_dict_t *flowcell_dict);
@@ -36,7 +35,6 @@ process_chunk(std::vector<char *> & samlines,
               char * chunk_buffer_out,
               size_t num_threads,
               SAM_INDEX_TYPE itype,
-              SAM_QNAME_FORMAT qfmt,
               const contig_dict *contig_dict,
               index_dict_t * index_dict, // this will accumulate each time process_chunk is called
               std::vector<sam_index> * line_index);

@@ -25,7 +25,7 @@ struct init_index_input_t
     sam_index *line_index;
     sam_index *end;
     SAM_INDEX_TYPE itype;
-    SAM_QNAME_FORMAT qfmt;
+    // SAM_QNAME_FORMAT qfmt;
     const contig_dict *cdict;
     index_dict_t *idict;
 };
@@ -34,9 +34,9 @@ void *init_index_worker(void *input)
 {
     init_index_input_t *ii = static_cast<init_index_input_t *>(input);
     while (ii->line_index != ii->end)
-    {
-        set_sam_index(*ii->samline++, ii->itype, ii->qfmt, ii->cdict, ii->idict, ii->line_index++);
-    }
+        set_sam_index(*ii->samline++, ii->itype,
+                      ii->cdict, ii->idict, ii->line_index++);
+
     pthread_exit((void*) 0);
 }
 
@@ -46,7 +46,6 @@ void init_index(size_t num_threads,
                 sam_index **line_index_loads, // contains num_threads + 1.  (last one is the sentinel
                 char **samlines,
                 SAM_INDEX_TYPE itype,
-                SAM_QNAME_FORMAT qfmt,
                 const contig_dict *cdict,
                 index_dict_t *work_dict)
 {
@@ -61,7 +60,7 @@ void init_index(size_t num_threads,
         inputs[t].line_index = line_index_loads[t];
         inputs[t].end = line_index_loads[t+1];
         inputs[t].itype = itype;
-        inputs[t].qfmt = qfmt;
+        // inputs[t].qfmt = qfmt;
         inputs[t].cdict = cdict;
         inputs[t].idict = &work_dict[t];
     }
@@ -143,23 +142,18 @@ void *apply_remap_worker(void *input)
 {
     apply_remap_input_t *ii = static_cast<apply_remap_input_t *>(input);
     while (ii->line_index != ii->end)
-    {
         sam_update_flowcell_id(ii->remap, ii->itype, ii->line_index++);
-    }
+
     pthread_exit((void*) 0);
 }
 
 //transform a set of <num_threads> loads of index, remapping the
 //flowcell ids according to work_remap
-void apply_remap(size_t num_threads, sam_index **line_index_loads, 
+void apply_remap(size_t num_threads,
+                 sam_index **line_index_loads, 
                  SAM_INDEX_TYPE itype, 
-                 SAM_QNAME_FORMAT qfmt,
                  unsigned int **work_remap)
 {
-    if (qfmt != SAM_ILLUMINA &&
-        qfmt != SAM_CASAVA18)
-        return;
-
     pthread_t * threads = new pthread_t[num_threads];
     apply_remap_input_t * inputs = new apply_remap_input_t[num_threads];
 
@@ -217,7 +211,6 @@ void samlines_to_index(size_t num_threads,
                        char **samlines,
                        size_t num_lines,
                        SAM_INDEX_TYPE itype,
-                       SAM_QNAME_FORMAT qfmt,
                        const contig_dict *cdict,
                        sam_index *line_index_chunk,
                        index_dict_t *flowcell_dict)
@@ -229,7 +222,7 @@ void samlines_to_index(size_t num_threads,
 
     // Let each thread traverse the input, updating its local copy
     // with new entries as it sees new flowcells.
-    init_index(num_threads, line_index_loads, samlines, itype, qfmt, cdict, work_dict);
+    init_index(num_threads, line_index_loads, samlines, itype, cdict, work_dict);
 
     /* Integrate each of the T flowcell id dictionaries into the
        working copy. */
@@ -242,7 +235,7 @@ void samlines_to_index(size_t num_threads,
     clean_work_dicts(work_dict, num_threads);
     
     // Apply the remap array to the same workload, updating the mappings.
-    apply_remap(num_threads, line_index_loads, itype, qfmt, work_remap);
+    apply_remap(num_threads, line_index_loads, itype, work_remap);
     
     // clean up
     delete [] work_dict;
@@ -260,21 +253,17 @@ process_chunk(std::vector<char *> & samlines,
               char * chunk_buffer_out,
               size_t num_threads,
               SAM_INDEX_TYPE itype,
-              SAM_QNAME_FORMAT qfmt,
               const contig_dict *cdict,
               index_dict_t * flowcell_dict, // this will accumulate each time process_chunk is called
               std::vector<sam_index> * line_index)
 {
     size_t S = samlines.size();
 
-    if (S == 0)
-    {
-        return std::pair<size_t, size_t>(0, 0);
-    }
+    if (S == 0) return std::pair<size_t, size_t>(0, 0);
 
     sam_index * line_index_chunk = new sam_index[S];
 
-    samlines_to_index(num_threads, samlines.data(), S, itype, qfmt, 
+    samlines_to_index(num_threads, samlines.data(), S, itype,
                       cdict, line_index_chunk, flowcell_dict);
 
     set_start_offsets(line_index_chunk, line_index_chunk + S, 0);
